@@ -123,11 +123,11 @@ sudo systemctl start board
 ### Updating
 
 ```
-cd /var/www/board
+cd /opt/board-vibe-coded
 git pull
 pnpm install
 pnpm build
-sudo systemctl restart board
+pm2 restart board-api
 ```
 
 ### Logs
