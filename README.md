@@ -25,11 +25,11 @@ Written for Ubuntu/Debian with nginx. Swap `board.example.com` for your subdomai
 
 ### First time
 
-Install Node, pnpm and htpasswd:
+Install Node and pnpm:
 
 ```
 curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
-sudo apt install -y nodejs apache2-utils
+sudo apt install -y nodejs
 sudo npm install -g pnpm
 ```
 
@@ -67,11 +67,13 @@ sudo systemctl enable --now board
 
 The API only listens on 127.0.0.1:4000, so nginx is the only way in.
 
-The app has no login, and anyone who can open it can also reset it. So put a password on it:
+The app gates itself with one shared password (there's no concept of separate users) — set it now:
 
 ```
-sudo htpasswd -c /etc/nginx/board.htpasswd me
+pnpm set-password
 ```
+
+It prompts twice (input hidden) and stores a hash in `apps/api/data/auth.json`. Re-run it any time to change the password; that also signs out every existing session. Log in once from the browser afterwards and it stays signed in for 10 years via a cookie, so this is a one-time step per device/browser, not per visit.
 
 Create `/etc/nginx/sites-available/board`:
 
@@ -79,9 +81,6 @@ Create `/etc/nginx/sites-available/board`:
 server {
     listen 80;
     server_name board.example.com;
-
-    auth_basic "board";
-    auth_basic_user_file /etc/nginx/board.htpasswd;
 
     root /var/www/board/apps/web/dist;
 
