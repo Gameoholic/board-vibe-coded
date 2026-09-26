@@ -1,0 +1,12 @@
+{
+  "name": "board",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "build": "pnpm --filter @board/contracts run build && pnpm --filter api run build && pnpm --filter web run build",
+    "dev": "pnpm --filter @board/contracts run build && pnpm -r --parallel run dev"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}

@@ -1,0 +1,3567 @@
+:root {
+  --surface: #ffffff;
+  --border: #e5e7eb;
+  --text: #0f172a;
+  --text-dim: #94a3b8;
+  --radius: 14px;
+}
+
+.page {
+  /* Definite height (not min-height) so the flex chain below — shell → main → board-viewport
+     height:100% — resolves to a real pixel height and the board stays a bounded scroll container.
+     The board scrolls internally, so the page itself never needs to grow past the viewport. */
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  /* Extra left padding clears the fixed nav rail (56px + gutter); the rest matches the old inset. */
+  padding: 56px 12px 12px 68px;
+}
+
+/* Widened from 1080px — on a wide viewport the centered shell left huge empty margins on
+   both sides that the board couldn't use at all. Cards fill this space via .board-card's
+   flex: 1 1 280px, so a wider shell means wider cards (or more of them per row), not just
+   a bigger blank gutter. */
+.shell {
+  width: 100%;
+  max-width: 1600px;
+  /* Column fill so the board stretches to the bottom instead of leaving an empty footer strip
+     below it: .page (flex row, align-items:stretch) sizes .shell to the viewport, the header
+     takes its natural height, and main flexes into everything left. */
+  display: flex;
+  flex-direction: column;
+}
+
+main {
+  flex: 1;
+  min-height: 0;
+  /* Offset parent for the canvas toolbar, which floats in the corner *inside* the board. */
+  position: relative;
+}
+
+/* Canvas controls floating in the top-right corner inside the board — no bar, just the group
+   buttons. It's a sibling of (not inside) .board-viewport so it stays pinned while you pan; a
+   z-index keeps it above the scrolling world. Each button opens its own inline popover (the
+   same popover-anchor pattern as a tab's own controls). */
+.canvas-toolbar {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.toolbar-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.toolbar-btn:hover {
+  color: var(--text);
+  background: #fff;
+}
+
+.toolbar-btn.open {
+  color: var(--text);
+  background: #fff;
+  border-color: #cbd5e1;
+}
+
+/* Zoom controls, bottom-right corner inside the board — sibling of .board-viewport (like
+   .canvas-toolbar) so they stay pinned while you pan. Reuse .toolbar-btn for the chrome. */
+.zoom-controls {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.zoom-controls .toolbar-btn {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* The % chip doubles as the reset-to-100% button; fixed width so 40%→100% doesn't jitter it. */
+.zoom-controls .zoom-level {
+  min-width: 46px;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.reset-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reset-panel p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.reset-panel .danger-btn {
+  align-self: stretch;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.date {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* Persistent "the clock is faked" indicator + one-click exit. Amber so it reads as a temporary
+   debug state, never mistaken for normal chrome. The whole chip is the exit button. */
+.debug-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid #f59e0b;
+  border-radius: 999px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.debug-badge:hover {
+  background: #fef3c7;
+}
+
+.debug-badge-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f59e0b;
+}
+
+.debug-badge-exit {
+  padding-left: 8px;
+  border-left: 1px solid #f5cf8b;
+  color: #b45309;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.72rem;
+}
+
+.date-num {
+  font-weight: 700;
+  font-size: 1.6rem;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.date-day {
+  font-weight: 500;
+  font-size: 0.95rem;
+  color: var(--text-dim);
+}
+
+/* The board is a free canvas, not a flow layout: cards carry their own x/y/size (per device,
+   see useLocalConfig) and float wherever they're dropped. The viewport is the camera window,
+   the scaler is sized to the *zoomed* world so the native scrollbars represent the zoomed
+   extent, and the world is the unscaled coordinate space the cards live in (CSS-scaled by the
+   camera). Pan = native scroll (auto-clamped to content); zoom = ctrl/⌘+wheel. See BoardCanvas. */
+.board-viewport {
+  user-select: none;
+  position: relative;
+  /* Trap the cards' stacking context inside the camera. Cards carry an ever-increasing z-index
+     (SectionCard zCounter, ~1000+) so the last-touched one floats above its neighbours — but that
+     ordering is only meaningful *among cards*. Without this isolate, at 100% zoom (where framer
+     applies no transform to .board-world, so it isn't a stacking context) those z:1000 cards leak
+     up to the body level and paint over the fixed HUD (z:40) and the body-portaled flying-points
+     layer (z:200) — the flyer would arc *behind* a tab. Isolating here keeps card z-indexes
+     self-contained, so the HUD and flyer always sit above the board. */
+  isolation: isolate;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fafafa;
+  /* No idle grab cursor — panning is middle-button only, so the grabbing cursor shows only while
+     actively panning (.grabbing below), not on plain hover. */
+  cursor: default;
+  overscroll-behavior: contain;
+  /* Let our pointer-based grab-pan own touch gestures instead of the browser's page scroll. */
+  touch-action: none;
+  /* Scroll still works (wheel / grab-pan) — just hide the bars; you move the board by dragging
+     it, so the bars are redundant and read as clutter on a whiteboard. */
+  scrollbar-width: none;
+}
+
+.board-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+.board-viewport.grabbing {
+  cursor: grabbing;
+}
+
+.board-viewport .board-card {
+  cursor: default;
+}
+
+.board-viewport.grabbing .board-card {
+  cursor: grabbing;
+}
+
+.board-scaler {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.board-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* Zoom scale + origin are applied by framer (motion.div in BoardCanvas), NOT CSS here — so the
+     scale lives in framer's projection tree and the Reorder.Item layout animations inside correct
+     for it. A plain CSS transform: scale() here is invisible to framer and makes every re-render
+     spring a phantom layout "correction" (all card text jumps for ~0.5s) whenever scale != 1. */
+}
+
+/* SectionCard.tsx's motion.section deliberately has NO framer `layout` prop: `layout` runs a
+   ResizeObserver and applies corrective transforms for size changes it didn't cause, which
+   fought the manual pointer-drag move/resize (SectionCard startMove/startResize) every way it
+   was tried. Position and size are driven by framer motion values (x/y transform, width,
+   min-height) so a drag mutates them at 60fps with no React render, then springs to the snapped
+   grid cell on release. Don't add `layout` back without re-solving that conflict first. */
+.board-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  /* height is a floor, never a cap (min-height via motion value): content taller than the set
+     size grows the card downward rather than clipping it — the popovers anchored inside must
+     never be cut off (a deliberate, long-standing scope decision). */
+}
+
+.resize-corner {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  touch-action: none;
+  z-index: 10;
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+/* Corner marks: two short lines forming an L, like a real resize handle */
+.resize-corner::before,
+.resize-corner::after {
+  content: "";
+  position: absolute;
+  background: #94a3b8;
+  border-radius: 2px;
+}
+
+.resize-corner:hover {
+  opacity: 1;
+}
+
+.resize-corner.corner-nw {
+  top: 4px;
+  left: 4px;
+  cursor: nw-resize;
+}
+.resize-corner.corner-nw::before { top: 0; left: 0; width: 10px; height: 2px; }
+.resize-corner.corner-nw::after  { top: 0; left: 0; width: 2px;  height: 10px; }
+
+.resize-corner.corner-ne {
+  top: 4px;
+  right: 4px;
+  cursor: ne-resize;
+}
+.resize-corner.corner-ne::before { top: 0; right: 0; width: 10px; height: 2px; }
+.resize-corner.corner-ne::after  { top: 0; right: 0; width: 2px;  height: 10px; }
+
+.resize-corner.corner-sw {
+  bottom: 4px;
+  left: 4px;
+  cursor: sw-resize;
+}
+.resize-corner.corner-sw::before { bottom: 0; left: 0; width: 10px; height: 2px; }
+.resize-corner.corner-sw::after  { bottom: 0; left: 0; width: 2px;  height: 10px; }
+
+.resize-corner.corner-se {
+  bottom: 4px;
+  right: 4px;
+  cursor: se-resize;
+}
+.resize-corner.corner-se::before { bottom: 0; right: 0; width: 10px; height: 2px; }
+.resize-corner.corner-se::after  { bottom: 0; right: 0; width: 2px;  height: 10px; }
+
+.board-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  gap: 10px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.section-title {
+  margin: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.section-title:hover {
+  filter: brightness(0.85);
+}
+
+.section-drag-handle {
+  cursor: grab;
+}
+
+.section-drag-handle:active {
+  cursor: grabbing;
+}
+
+.add-item-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: #f8fafc;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  /* Hidden until the pointer is anywhere in the button's row band. The anchor is a full-width,
+     button-height block, so hovering it (even to the right of the "+") counts as hover. */
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.add-item-anchor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Reveal on hover of the whole row, on keyboard focus, and while its popover is open. */
+.add-item-anchor:hover .add-item-fab,
+.add-item-fab:focus-visible,
+.add-item-anchor.add-open .add-item-fab {
+  opacity: 1;
+}
+
+.add-item-fab:hover {
+  background: #f1f5f9;
+  color: var(--text);
+}
+
+/* Group handle: full-height strip on the left of the task row so you can drag from anywhere
+   along the left edge (not just the small icon). The bracket icon sits at the leading edge;
+   the hit area extends to the task content's left boundary so there's no gap to aim for. */
+.group-handle {
+  position: absolute;
+  left: -28px;
+  top: 0;
+  bottom: 0;
+  width: 32px;
+  cursor: grab;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  opacity: 0;
+  transition: opacity 0.1s;
+  touch-action: none;
+  user-select: none;
+}
+.item-row:hover .group-handle {
+  opacity: 1;
+}
+.group-handle:active {
+  cursor: grabbing;
+}
+
+/* Visual feedback on the group block when a task is being dragged INTO it. */
+.group-block.group-drag-over {
+  background: rgba(100, 116, 139, 0.06);
+}
+.group-block.group-drag-over::before {
+  background: #94a3b8;
+}
+
+/* Visual feedback when a grouped task is being dragged OUT of its group. */
+.group-block.group-ejecting {
+  background: rgba(239, 68, 68, 0.04);
+}
+.group-block.group-ejecting::before {
+  background: #fca5a5;
+}
+
+/* Floating label that follows the cursor when a grouped task is dragged outside the group bounds,
+   indicating it will be ejected on release. Appended to <body> imperatively by GroupBlock. */
+.group-eject-hint {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.1);
+  opacity: 0;
+  transition: opacity 0.1s;
+  white-space: nowrap;
+}
+
+/* Range-drag selection feedback: rows covered by an in-progress group selection.
+   Soft outline + tint — matches the app's border-radius and color language. */
+.group-selecting {
+  background: rgba(100, 116, 139, 0.07);
+  outline: 1.5px solid rgba(100, 116, 139, 0.3);
+  outline-offset: -1px;
+}
+.group-selecting.group-selecting-invalid {
+  background: rgba(239, 68, 68, 0.06);
+  outline: 1.5px solid rgba(239, 68, 68, 0.35);
+  outline-offset: -1px;
+}
+
+/* ---- Group block (a labeled bundle of contiguous tasks, drawn as a left rail) ---- */
+/* Subgrid: group-block inherits the outer item-list's 4 column tracks so that grouped
+   task-items share the same column widths as ungrouped ones — checkboxes, [%], and
+   text all align across the whole section regardless of tier-dot count. */
+.group-block {
+  grid-column: 1 / -1;
+  position: relative;
+  display: grid;
+  grid-template-columns: subgrid;
+  margin: 6px 0;
+}
+
+/* Rail: thin vertical line a few pixels left of the checkbox column. */
+.group-block::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+
+.group-header {
+  grid-column: 1 / -1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0 4px 4px;
+}
+
+.group-label,
+.group-label-input {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-family: inherit;
+  flex: none;
+  max-width: 60%;
+}
+
+/* Gray, per the mockup — a group is quiet structure, not colored chrome (not the section accent). */
+.group-label {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: text;
+  color: var(--text-dim);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.group-label-input {
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  outline: none;
+  padding: 0 0 1px;
+  min-width: 80px;
+}
+
+.group-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Subgrids the group-block's columns (which subgrid the outer item-list), so task-items
+   inside a group share the exact same column tracks as ungrouped task-items. */
+.group-tasks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+.sort-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sort-btn:hover {
+  color: var(--text);
+  background: #f1f5f9;
+}
+
+.sort-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* A sort row = the selectable option (fills the row) plus a pin toggle that appears on hover. The
+   pin sits outside the option button so the two aren't nested buttons. */
+.sort-row {
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+}
+
+.sort-row:hover {
+  background: #f1f5f9;
+}
+
+.sort-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: none;
+  background: none;
+  flex: 1;
+  min-width: 0;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.sort-option-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sort-option svg {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+/* Pin toggle: hidden until the row is hovered, unless the sort is already pinned (then it stays
+   visible so you can see what's pinned and unpin it). */
+.pin-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 4px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+
+.sort-row:hover .pin-btn,
+.pin-btn.pinned {
+  opacity: 1;
+}
+
+.pin-btn:hover {
+  color: var(--text);
+  background: #e2e8f0;
+}
+
+.pin-btn.pinned {
+  color: var(--text-dim);
+}
+
+/* "Show N more" divider-button and the collapsible list it reveals. */
+.sort-more-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin-top: 2px;
+  padding: 7px 8px;
+  border: none;
+  border-top: 1px solid #eef2f6;
+  border-radius: 0 0 6px 6px;
+  background: none;
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  cursor: pointer;
+  text-align: left;
+}
+
+.sort-more-btn:hover {
+  color: var(--text);
+}
+
+.sort-more-btn svg {
+  transition: transform 0.16s ease;
+}
+
+.sort-more-btn.open svg {
+  transform: rotate(180deg);
+}
+
+.sort-more {
+  overflow: hidden;
+}
+
+/* Per-tab Display popover: a vertical list of view toggles (checkbox rows). */
+.display-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.display-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.display-option:hover {
+  background: #f1f5f9;
+}
+
+.display-option input {
+  margin: 0;
+  cursor: pointer;
+}
+
+.display-option svg {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.icon-btn {
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.icon-btn:hover {
+  color: var(--text);
+  background: #f1f5f9;
+}
+
+.popover-anchor {
+  position: relative;
+}
+
+/* Task edit popover anchor: zero-size, stuck to the right edge so the popover doesn't shift grid columns. */
+.row-edit-anchor {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 0;
+  height: 100%;
+}
+
+/* Canvas settings popover (top-bar gear) — Notion-style rows of label + control. */
+.settings-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 4px;
+}
+
+.setting-label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.setting-hint {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+/* Pill toggle */
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 20px;
+  border: none;
+  border-radius: 999px;
+  background: #e2e8f0;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.16s ease;
+}
+
+.switch.on {
+  background: #22c55e;
+}
+
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.25);
+  transition: transform 0.16s ease;
+}
+
+.switch.on .switch-knob {
+  transform: translateX(14px);
+}
+
+/* Segmented picker (grid size) */
+.seg {
+  display: inline-flex;
+  flex-shrink: 0;
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.seg-btn {
+  min-width: 28px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.seg-btn.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1);
+}
+
+.settings-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+}
+
+.settings-action {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: none;
+  border-radius: 8px;
+  padding: 8px;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.settings-action:hover {
+  background: #f1f5f9;
+}
+
+.settings-action.danger {
+  border-color: #fca5a5;
+  color: #dc2626;
+}
+
+.settings-action.danger:hover {
+  background: #fef2f2;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.checkbox-row.nested {
+  margin-left: 18px;
+  color: var(--text-dim);
+}
+
+.checkbox-row input {
+  cursor: pointer;
+}
+
+/* Grid, not flex: column 2 (points-prefix) auto-sizes to the widest bracket text among
+   this section's own rows — e.g. "[3%]" vs "[0.3%/1.5%/5%]" — so every task name in a
+   given tab starts at the same x, whiteboard-style, without a hardcoded width. This is
+   scoped per section since each SectionCard renders its own .item-list grid. */
+.item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  /* Column 1 holds either the single checkbox (checkbox-type rows) or a row of tier-dots
+     (tiered rows, 1 dot per tier — see .tier-dots). minmax(24px, max-content): 24px is a
+     floor wider than the checkbox itself (17px) on purpose — the checkbox has an explicit
+     non-auto width so it sits at the column's start rather than stretching to fill it,
+     leaving breathing room before the points-gap kicks in — and the column still grows
+     past that floor for a section whose tier-dot rows need more room (e.g. a 4-tier task).
+     minmax(0, max-content) on column 2, not bare max-content: a bare max-content track
+     ignores the container's available width entirely and never shrinks, so a long tier
+     list (e.g. "[0.8%/1.2%/2.4%/5%]") blows out the whole grid — and with it the card,
+     since it spills past its .board-grid cell — wider than the page. Wrapping it in
+     minmax(0, …) keeps the same auto-sizing-to-content behavior in the normal case but
+     lets it shrink under real space pressure instead of overflowing (paired with
+     .points-prefix's overflow-wrap: anywhere, so it wraps instead of overlapping the name
+     column once it actually is squeezed). */
+  grid-template-columns: minmax(24px, max-content) minmax(0, max-content) 1fr auto;
+  column-gap: 10px;
+  row-gap: 2px;
+  min-height: 20px;
+}
+
+.item-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: center;
+  padding: 7px 4px;
+  border-radius: 8px;
+}
+
+.item-row:hover {
+  background: #f8fafc;
+}
+
+.task-item input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  justify-self: start;
+  box-sizing: border-box;
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  border: 1.5px solid var(--task-color, var(--border));
+  background: var(--surface);
+  cursor: pointer;
+  position: relative;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.task-item input[type="checkbox"]:checked {
+  background: var(--task-color, var(--border));
+}
+
+.task-item input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.task-inline-input {
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-bottom: 1.5px solid #94a3b8;
+  outline: none;
+  padding: 0;
+  width: 100%;
+  min-width: 0;
+}
+
+.task-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.task-text {
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* Estimated-duration clock beside the name (Display → Time estimate). Inline so it rides with the
+   name and takes no subgrid column of its own. */
+.task-est {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 7px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  vertical-align: middle;
+}
+
+.task-est svg {
+  flex-shrink: 0;
+}
+
+/* Inline "i" affordance for a task's optional description — sits after the name, reveals the note in
+   a bubble on hover/focus (focus so a tap works on touch). Mirrors the tier-dot tooltip pattern. */
+.task-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 6px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: none;
+  color: var(--text-dim);
+  font-size: 0.64rem;
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: help;
+  position: relative;
+}
+
+.task-info-bubble {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 220px;
+  background: var(--text);
+  color: var(--surface);
+  font-size: 0.75rem;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  white-space: pre-wrap;
+  padding: 6px 9px;
+  border-radius: 6px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s;
+  z-index: 10;
+}
+
+.task-info:hover .task-info-bubble,
+.task-info:focus .task-info-bubble {
+  opacity: 1;
+}
+
+/* ---- Task context menu & edit panel ---- */
+
+.task-ctx-menu {
+  z-index: 200;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(15,23,42,0.12);
+  padding: 4px;
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+}
+
+.task-ctx-menu button {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.task-ctx-menu button:hover {
+  background: #f1f5f9;
+}
+
+.task-edit-panel {
+  z-index: 200;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(15,23,42,0.14);
+  padding: 12px;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-edit-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.task-edit-input {
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 9px;
+  background: #f8fafc;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.task-edit-input:focus {
+  outline: none;
+  border-color: #94a3b8;
+  background: #fff;
+}
+
+.task-edit-tier-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.83rem;
+  color: var(--text-dim);
+}
+
+.task-edit-tier-row input {
+  flex: 1;
+  font-family: inherit;
+  font-size: 0.83rem;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 7px;
+  background: #f8fafc;
+}
+
+.task-edit-tier-row input:focus {
+  outline: none;
+  border-color: #94a3b8;
+  background: #fff;
+}
+
+.task-edit-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+.task-edit-actions button:not(.ghost-btn) {
+  border: none;
+  background: var(--text);
+  color: #fff;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 0.85rem;
+  border-radius: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.task-edit-actions button:not(.ghost-btn):hover {
+  opacity: 0.85;
+}
+
+.task-estimate {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.task-item.done .task-text,
+.task-item.done .task-estimate,
+.task-item.done .points-prefix {
+  color: var(--text-dim);
+}
+
+.task-item.done input[type="checkbox"],
+.task-item.done .tier-dot {
+  opacity: 0.5;
+}
+
+.task-item.done::after {
+  content: "";
+  position: absolute;
+  /* Overlap the 2px row-gap so a run of done rows reads as one striped field. */
+  inset: -1px 0;
+  border-radius: 8px;
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(100, 116, 139, 0.22),
+    rgba(100, 116, 139, 0.22) 7px,
+    rgba(100, 116, 139, 0.08) 7px,
+    rgba(100, 116, 139, 0.08) 14px
+  );
+  /* Anchor the gradient to the viewport, not each row's own box, so consecutive
+     done rows share one continuous phase and their stripes line up. */
+  background-attachment: fixed;
+  pointer-events: none;
+}
+
+.drag-handle {
+  position: absolute;
+  left: -16px;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: grab;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 2px;
+  opacity: 0;
+  transition: opacity 0.1s;
+  touch-action: none;
+  user-select: none;
+  z-index: 1;
+}
+
+.item-row:hover .drag-handle,
+.group-block:hover .group-header .drag-handle {
+  opacity: 1;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Tab-level handle sits inline in the header's flex row, not floating in a
+   task row's left gutter — override the task-row-specific absolute positioning above. */
+.section-drag-handle {
+  position: static;
+  transform: none;
+  opacity: 0.45;
+}
+
+.section-drag-handle:hover {
+  opacity: 1;
+}
+
+.drag-handle.disabled {
+  cursor: default;
+  pointer-events: none;
+}
+
+.item-row:hover .drag-handle.disabled,
+.group-block:hover .group-header .drag-handle.disabled {
+  opacity: 0;
+}
+
+.remove-wrap {
+  position: relative;
+}
+
+.item-row .remove,
+.group-header .remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.item-row:hover .remove,
+.group-block:hover .group-header .remove {
+  opacity: 1;
+}
+
+.item-row .remove:hover,
+.group-header .remove:hover {
+  color: #ef4444;
+  background: #fef2f2;
+}
+
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: transparent;
+}
+
+.confirm-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 31;
+  width: 190px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+  padding: 12px;
+}
+
+.confirm-popover p {
+  margin: 0 0 10px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.confirm-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.danger-btn {
+  border: none;
+  background: #ef4444;
+  color: #fff;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 0.78rem;
+  border-radius: 7px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.danger-btn:hover {
+  background: #dc2626;
+}
+
+.tier-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Each tier is a full points builder (Duration + Effort), so tiers are separated by a rule and
+   gap rather than sitting on one line like the old bare-% inputs. */
+.tier-builder-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.tier-builder-row:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.tier-builder-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tier-row-inputs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tier-row-label {
+  flex: 1;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.tier-points-input {
+  width: 64px;
+  flex: none !important;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.tier-row-inputs input:focus {
+  outline: none;
+  border-color: #94a3b8;
+  background: var(--surface);
+}
+
+.tier-row-inputs .icon-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.add-tier-btn {
+  align-self: flex-start;
+  padding: 4px 0;
+  margin-top: 4px;
+}
+
+.points-prefix {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text);
+  /* Its grid column can shrink below the text's natural width on a narrow card (it's
+     minmax(0, max-content), not bare max-content — see .item-list). A tiered task's
+     bracket is built with a <wbr/> after each "X%" segment (TaskItem.tsx) so the only
+     break points are between whole numbers — plain overflow-wrap: anywhere was breaking
+     numbers like "2.4%" into "2" / ".4%" when squeezed, which read as broken rather than
+     just tight. Checkbox tasks only ever have one segment, so this never applies to them. */
+}
+
+/* Hidden while a flying-points copy of this bracket is in the air. The flyer is a stand-in for
+   this exact element, so the original has to stop being visible the moment it launches —
+   otherwise you see both at once, which is what made the animation look like a label pasted on
+   top of the row instead of the bracket itself leaving. visibility (not display, not width)
+   keeps the row's layout and the item-list's max-content points column completely unchanged
+   while it's away, so nothing reflows when it goes or comes back. */
+.points-prefix.in-flight {
+  visibility: hidden;
+}
+
+/* A row's real children (checkbox/tier-dots, points-prefix, task-text, remove) auto-place into
+   columns 1-4 in DOM order. When the tab's Timer toggle is on, the row gains a full-width second
+   grid row (.task-footer) below that — hence the extra `auto` track and row-gap. */
+.task-item.has-footer {
+  grid-template-rows: auto auto;
+  row-gap: 6px;
+}
+
+.tier-dots {
+  display: flex;
+  align-items: center;
+  /* nowrap on purpose: a wrapping flex container's max-content contribution to its grid
+     column isn't reliably "all items in one line" across browsers, so with `wrap` set the
+     column undersized itself and dots wrapped even when there was room. Staying nowrap
+     means max-content is unambiguous, so column 1 sizes to fit the widest row's dots on
+     one line, and stays that way for every row in the section. */
+  flex-wrap: nowrap;
+  gap: 5px;
+}
+
+/* Deliberately identical to .task-item input[type="checkbox"] above, not a smaller/
+   circular variant — the owner asked for these to look exactly like the other tasks'
+   checkboxes, just one per tier. */
+.tier-dot {
+  box-sizing: border-box;
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  border: 1.5px solid var(--task-color, var(--border));
+  background: var(--surface);
+  padding: 0;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.tier-dot[data-label]::before {
+  content: attr(data-label);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--surface);
+  font-size: 0.72rem;
+  font-weight: 500;
+  white-space: nowrap;
+  padding: 3px 7px;
+  border-radius: 6px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s;
+  z-index: 10;
+}
+
+.tier-dot[data-label]:hover::before {
+  opacity: 1;
+}
+
+.tier-dot.filled {
+  background: var(--task-color, var(--border));
+}
+
+.tier-dot.filled::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* Scheduled-box lock: a box whose "do it at this hour" time hasn't arrived yet. The box (dot or the
+   wrapped single checkbox) dims and shows a small lock badge; the native `title` carries the "Unlocks
+   …" tooltip. Never blocks scoring — it's a display/interaction gate only (see isBoxLocked). */
+.tier-dot.locked {
+  cursor: not-allowed;
+  border-style: dashed;
+  opacity: 0.55;
+}
+
+/* Wrapper that keeps a single checkbox as one column-1 grid child (see TaskItem) — used both for a
+   locked box and for a scheduled-but-open one that just needs the "For <time>" hover. */
+.checkbox-cell {
+  position: relative;
+  display: inline-flex;
+  justify-self: start;
+}
+.checkbox-cell.locked {
+  cursor: not-allowed;
+}
+.checkbox-cell.locked input[type="checkbox"] {
+  border-style: dashed;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.box-lock {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+/* Repeatable ("N") task: a single infinite-tally box showing its completion count, with an "N" badge
+   marking the type. The box mirrors the checkbox (see .task-item input[type=checkbox]) but carries a
+   number instead of a checkmark; it fills with the tab color once the count passes 0. */
+.counter-cell {
+  gap: 5px;
+  align-items: center;
+}
+.counter-box {
+  box-sizing: border-box;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 3px;
+  border-radius: 5px;
+  border: 1.5px solid var(--task-color, var(--border));
+  background: var(--surface);
+  color: var(--task-color, var(--text));
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+.counter-box.filled {
+  background: var(--task-color, var(--border));
+  color: #fff;
+}
+/* Reached its optional completion cap: full, and left-click no longer adds (right-click still
+   removes one). The ring marks it "done" without changing the tally readout. */
+.counter-box.maxed {
+  cursor: default;
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--task-color, var(--border));
+}
+.counter-badge {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+/* Reusable tooltip (Tooltip.tsx): a dark bubble in the app's style — the same look as the tier-dot
+   label bubble — shown on hover/focus. CSS-only, no JS. Wrap the trigger; the bubble is the last
+   child. Used for the scheduled-box lock and available anywhere a small hint is needed. */
+.tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+  outline: none;
+}
+.tooltip-bubble {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--surface);
+  font-size: 0.72rem;
+  font-weight: 500;
+  white-space: nowrap;
+  padding: 3px 7px;
+  border-radius: 6px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s;
+  z-index: 20;
+}
+.tooltip-top {
+  bottom: calc(100% + 6px);
+}
+.tooltip-bottom {
+  top: calc(100% + 6px);
+}
+.tooltip-wrap:hover .tooltip-bubble,
+.tooltip-wrap:focus-visible .tooltip-bubble,
+.tooltip-wrap:focus-within .tooltip-bubble {
+  opacity: 1;
+}
+
+/* Add/edit-task schedule editor: one time + weekday picker per box. */
+.schedule-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.schedule-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.schedule-box-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  min-width: 22px;
+}
+.schedule-time,
+.schedule-day {
+  flex: 1;
+  min-width: 0;
+}
+
+.task-footer {
+  grid-column: 1 / -1;
+  display: flex;
+  padding-left: 2px;
+}
+
+.timer-anchor {
+  margin-left: auto;
+}
+
+.timer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 4px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.timer-btn:hover {
+  border-color: #94a3b8;
+}
+
+.timer-btn.running {
+  color: #ef4444;
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+
+.timer-popover {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.timer-display {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.timer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.timer-actions .ghost-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.timer-submit {
+  width: 100%;
+  font-weight: 600;
+}
+
+.timer-manual-input {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+  font-family: inherit;
+  font-size: 0.82rem;
+  color: var(--text);
+  box-sizing: border-box;
+}
+
+.timer-manual-input:focus {
+  outline: none;
+  border-color: #94a3b8;
+  background: var(--surface);
+}
+
+
+.empty {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  padding: 4px 4px;
+}
+
+/* ---- Popover (inline, anchored — no backdrop) ---- */
+
+.popover {
+  position: absolute;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.06),
+    0 12px 28px rgba(15, 23, 42, 0.14);
+  padding: 14px;
+  z-index: 50;
+  transform-origin: top;
+}
+
+.popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.popover-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
+.popover-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
+.field-error {
+  font-size: 0.75rem;
+  color: #ef4444;
+}
+
+.field input[type="text"],
+.field input[type="number"],
+.field select,
+.field-textarea {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.field-textarea {
+  resize: vertical;
+  min-height: 2.4em;
+  line-height: 1.4;
+}
+
+.field input:focus,
+.field select:focus,
+.field-textarea:focus {
+  outline: none;
+  border-color: #94a3b8;
+  background: var(--surface);
+}
+
+.popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* The app's primary (filled, dark) button. `.btn-primary` is the reusable home; the popover submit
+   button is styled by the same rule so every primary action looks identical by construction. Any
+   affirmative button anywhere in the app should be `.btn-primary` (or a form's submit) — never a bare
+   <button>, which has no styling since there's no global button reset. See CONVENTIONS.md. */
+.btn-primary,
+.popover-actions button[type="submit"] {
+  border: none;
+  background: var(--text);
+  color: #fff;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 0.85rem;
+  border-radius: 8px;
+  padding: 9px 16px;
+  cursor: pointer;
+}
+
+.btn-primary:hover,
+.popover-actions button[type="submit"]:hover {
+  opacity: 0.85;
+}
+
+.btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Status text at the left of an actions row (e.g. the debug clock) — margin-right:auto pushes the
+   buttons to the right of the flex-end row. */
+.settings-status {
+  margin-right: auto;
+  align-self: center;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.ghost-btn {
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.ghost-btn:hover {
+  color: var(--text);
+}
+
+/* ---- Calculator reference panel ---- */
+
+.calc-ref-trigger {
+  position: relative;
+  margin-left: auto;
+}
+
+.calc-ref-btn {
+  font-size: 0.75rem;
+  font-weight: 700;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  cursor: default;
+}
+
+.calc-ref-tooltip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 100;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  white-space: nowrap;
+  gap: 16px;
+  flex-direction: row;
+}
+
+.calc-ref-trigger:hover .calc-ref-tooltip {
+  display: flex;
+}
+
+.calc-ref-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.calc-ref-heading {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+/* ---- Calculator pills ---- */
+
+.calc-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.calc-pill {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.calc-pill:hover {
+  border-color: #94a3b8;
+  color: var(--text);
+}
+
+.calc-pill.active {
+  background: var(--text);
+  border-color: var(--text);
+  color: #fff;
+}
+
+.calc-custom-wrap {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  height: 26px;
+}
+
+.calc-custom-wrap:focus-within {
+  border-color: var(--border);
+  outline: none;
+  box-shadow: none;
+}
+
+.calc-custom-mins {
+  width: 48px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.78rem;
+  padding: 0 4px;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.calc-custom-mins::-webkit-outer-spin-button,
+.calc-custom-mins::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+
+.calc-custom-unit {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  padding: 0 5px;
+  line-height: 1;
+  align-self: stretch;
+  border: none;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.calc-custom-unit:hover {
+  color: var(--text);
+}
+
+/* ---- Color picker ---- */
+
+.color-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.color-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.color-swatch.active {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.color-swatch.custom {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 2px dashed var(--border);
+}
+
+.color-swatch.custom input[type="color"] {
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+
+/* ---- Points counter ---- */
+/* "Bracket" style, picked by the owner after comparing 8 live variants. It's viewport-
+   anchored (position: fixed, via .hud-anchor) so it's always visible — but a fixed HUD
+   reads as "a decal on the glass" unless it has depth. .hud-depth (useDiegeticDepth.ts)
+   gives it scroll "inertia" (each wheel flick nudges it against the scroll direction, then
+   it springs back) so it reads as an object sitting in the scene instead. Anchor and depth
+   are separate layers on purpose: the anchor owns the screen position, the depth layer owns
+   the animated transform, so they can't clobber each other. There was also a pointer-driven
+   3D tilt here (hence a `perspective` on the anchor and `transform-style: preserve-3d`
+   here, both since removed as dead) — the owner disliked the widget tracking the mouse.
+
+   Where it sits is computed, not declared: useFreeSpot.ts measures the tabs (and any open
+   popover) each time the layout or scroll changes and translates the anchor into whichever
+   gap is nearest the middle of the screen, so it never covers a tab. That replaced a pair
+   of hand-derived offsets keyed to .shell's max-width, which silently went stale the first
+   time that width changed — there's nothing left here to keep in sync. The transition is
+   what keeps a re-placement from teleporting; the anchor is left/top 0 and moved purely by
+   transform, per the project convention for moving something between screen positions. */
+
+.hud-anchor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  transform: translate3d(0, 0, 0);
+  transition: transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 40;
+  pointer-events: none;
+}
+
+.hud-depth {
+  will-change: transform;
+}
+
+.points-counter {
+  position: relative;
+  width: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 18px;
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 16px;
+  pointer-events: none;
+}
+
+.points-counter .corner {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-color: #ef4444;
+  border-style: solid;
+}
+
+/* Each corner scales from its own outer angle, so the top-tier landing flare (PointsCounter.tsx)
+   pushes all four away from the box instead of dragging them toward its centre. */
+
+.points-counter .corner-tl {
+  top: 0;
+  left: 0;
+  border-width: 2px 0 0 2px;
+  transform-origin: top left;
+}
+
+.points-counter .corner-tr {
+  top: 0;
+  right: 0;
+  border-width: 2px 2px 0 0;
+  transform-origin: top right;
+}
+
+.points-counter .corner-bl {
+  bottom: 0;
+  left: 0;
+  border-width: 0 0 2px 2px;
+  transform-origin: bottom left;
+}
+
+.points-counter .corner-br {
+  bottom: 0;
+  right: 0;
+  border-width: 0 2px 2px 0;
+  transform-origin: bottom right;
+}
+
+.points-counter-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.points-counter-value {
+  position: relative;
+  display: block;
+  width: 100%;
+  text-align: center;
+  font-size: 2.1rem;
+  font-weight: 800;
+  color: #ef4444;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.particle-field {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.particle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: #ef4444;
+}
+
+/* Landing shockwave, for the top tiers only (flyerTiers.ts). Centred on the box rather than on the
+   value so the ring reads as the whole widget absorbing the hit. */
+.shockwave {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 60px;
+  height: 60px;
+  margin-left: -30px;
+  margin-top: -30px;
+  border: 2px solid #ef4444;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* ---- Flying points ---- */
+
+.flyer-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 200;
+}
+
+/* Deliberately almost empty: the flyer carries .points-prefix too (see FlyingPoints.tsx), so
+   its typography IS the row's typography rather than a set of values kept in sync by hand.
+   This used to set its own 1.15rem/800/red/text-shadow and offset itself by a -8px/-10px fudge
+   from the source's centre — a visibly different object appearing next to the real bracket,
+   which is exactly why the animation read as "a badge pasted on top". Don't re-add font or
+   colour rules here; the flight animates from the inherited values instead. */
+.flyer {
+  position: fixed;
+  pointer-events: none;
+}
+
+/* Wind-up decorations for the higher tiers (flyerTiers.ts). These are siblings of the flyer rather
+   than children of it, deliberately: the flyer has to stay nothing but a copy of the row's bracket,
+   so anything that isn't the bracket lives next to it and is pinned to the same origin point. */
+
+.flyer-ring {
+  position: fixed;
+  width: 44px;
+  height: 44px;
+  margin-left: -22px;
+  margin-top: -22px;
+  border: 2px solid #ef4444;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.flyer-intake {
+  position: fixed;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  margin-top: -2.5px;
+  border-radius: 50%;
+  background: #ef4444;
+  pointer-events: none;
+}
+
+/* ---- Streaks tab ---- */
+
+/* Grid + subgrid (same approach as .item-list) so the flame column takes one shared width across
+   every row — names and the right-side icons line up regardless of how many digits a count has. */
+.streak-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr auto auto;
+  column-gap: 10px;
+  row-gap: 2px;
+  min-height: 20px;
+}
+
+.streak-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: center;
+  padding: 7px 4px;
+  border-radius: 8px;
+}
+
+.streak-item:hover {
+  background: #f8fafc;
+}
+
+/* Flame + count badge. Lit = current period done; grace = streak alive but this period still open;
+   cold = no streak. Colour comes from the streak's own colour via --streak-color. */
+.streak-flame {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 0.95rem;
+  flex-shrink: 0;
+}
+
+/* Fixed box + block display so the flame sits at the same x/y on every row regardless of colour
+   or state — inline SVGs otherwise pick up baseline whitespace that wobbles row to row. */
+.streak-flame svg {
+  display: block;
+  flex: none;
+}
+
+.streak-flame.lit {
+  color: var(--streak-color, #ef4444);
+}
+
+.streak-flame.grace {
+  color: var(--streak-color, #ef4444);
+  opacity: 0.5;
+}
+
+.streak-flame.cold {
+  color: var(--text-dim);
+  opacity: 0.6;
+}
+
+.streak-count {
+  min-width: 14px;
+  text-align: center;
+}
+
+.streak-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.streak-name {
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* Personal-best badge — a muted pill sitting right of the name, before the row controls. */
+.streak-best {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.streak-best-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.streak-edit-anchor {
+  flex-shrink: 0;
+}
+
+.streak-item .icon-btn,
+.streak-item .remove {
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.streak-item:hover .icon-btn,
+.streak-item:hover .remove {
+  opacity: 1;
+}
+
+.streak-item .remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+}
+
+.streak-item .remove:hover {
+  color: #ef4444;
+  background: #fef2f2;
+}
+
+/* ---- Notion-style condition builder (a streak's "counts when you complete") ----
+   Condition rows joined by one shared AND/OR connector: the first join is an interactive toggle,
+   the rest mirror it as static text. The connector is the streak's `mode` field surfaced inline —
+   there's no separate all/any control. */
+.cond-builder {
+  display: flex;
+  flex-direction: column;
+}
+
+.cond-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.cond-connector-wrap {
+  display: flex;
+  padding: 5px 0 5px 12px;
+}
+
+.cond-connector {
+  font-family: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-dim);
+}
+
+.cond-connector.static {
+  padding: 2px 3px;
+}
+
+button.cond-connector {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  padding: 2px 10px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+button.cond-connector:hover {
+  border-color: #94a3b8;
+  color: var(--text);
+  background: #f8fafc;
+}
+
+.cond-connector-hint {
+  font-size: 0.72rem;
+  opacity: 0.55;
+}
+
+.cond-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.cond-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--cond-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cond-color) 18%, transparent);
+}
+
+.cond-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.88rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* How many completions this condition needs (count tasks): "×2" for a fixed amount, "all" to track
+   every box live. Absent for single-box tasks, where "once" is implicit. */
+.cond-req {
+  flex: none;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--cond-color);
+  background: color-mix(in srgb, var(--cond-color) 12%, transparent);
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+
+.cond-remove {
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  padding: 2px 5px;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+
+.cond-row:hover .cond-remove,
+.cond-remove:focus-visible {
+  opacity: 1;
+}
+
+.cond-remove:hover {
+  color: #ef4444;
+  background: #fef2f2;
+}
+
+/* Pick-whip handle: press and drag a line onto any task row to link it (After Effects style). */
+.whip-handle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: none;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  cursor: grab;
+  touch-action: none;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+.whip-handle:hover {
+  border-color: #94a3b8;
+  color: var(--text);
+  background: #f8fafc;
+}
+
+.whip-handle.dragging {
+  cursor: grabbing;
+  border-style: solid;
+  border-color: #94a3b8;
+  color: var(--text);
+}
+
+/* Neutral: inherits the handle's (dim) text color, not the tab accent. */
+.whip-icon {
+  flex: none;
+}
+
+/* The full-viewport SVG the whip line is drawn into (portaled to <body>, above everything). */
+.whip-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 4000;
+}
+
+body.whip-dragging {
+  cursor: crosshair;
+  user-select: none;
+}
+
+/* Drop-target feedback painted directly on the hovered task row during a whip drag. */
+.task-item.whip-target {
+  outline: 2px solid var(--whip-color, #94a3b8);
+  outline-offset: 1px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--whip-color, #94a3b8) 9%, transparent);
+}
+
+.task-item.whip-target.whip-target-dupe {
+  outline-color: #f59e0b;
+  background: color-mix(in srgb, #f59e0b 10%, transparent);
+}
+
+/* Fill preview on tier-dots and plain checkboxes during a whip drag. */
+.tier-dot.whip-box-fill,
+.task-item input[type="checkbox"].whip-box-fill {
+  background: color-mix(in srgb, var(--whip-color, #94a3b8) 55%, var(--surface)) !important;
+  border-color: var(--whip-color, #94a3b8) !important;
+}
+
+/* ---- App navigation rail (view switcher: Board / Shop / Settings) ---- */
+/* A slim fixed rail on the left edge — the app's "places". Fixed (not in the flex chain) so it stays
+   put while the board pans; .page reserves its width via padding-left. Icon-only, tooltip on hover. */
+.app-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 56px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+
+.nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s, color 0.15s;
+}
+
+.nav-btn:hover:not(.disabled) {
+  color: var(--text);
+  background: #f1f5f9;
+}
+
+.nav-btn.active {
+  color: var(--text);
+  background: #f1f5f9;
+  border-color: var(--border);
+}
+
+.nav-btn.disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---- Field hint (used by settings + streak "count from") ---- */
+.field-hint {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  line-height: 1.35;
+  margin-top: 2px;
+}
+
+/* ---- Settings view ---- */
+.settings-view {
+  max-width: 520px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding-bottom: 40px;
+}
+
+.settings-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.settings-group.danger {
+  border-color: #fecaca;
+}
+
+.settings-heading {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.settings-note {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  line-height: 1.45;
+  margin: 0;
+}
+
+/* Native date/time pickers keep the browser's own font unless the `font` shorthand (not just
+   font-family) is reset — so they're grouped here rather than with the text inputs above. */
+.field input[type="time"],
+.field input[type="datetime-local"] {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  width: fit-content;
+}
+
+/* A label + toggle-switch on one row (settings on/off knobs). */
+.field-toggle {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-switch {
+  appearance: none;
+  width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--border);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  flex: none;
+}
+.settings-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s ease;
+}
+.settings-switch:checked {
+  background: #22c55e;
+}
+.settings-switch:checked::after {
+  transform: translateX(18px);
+}
+
+/* Backfill list: per-streak Start / Best number inputs, kept narrow and side by side. */
+.backfill-inputs {
+  display: flex;
+  gap: 12px;
+}
+
+.backfill-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.backfill-cell-label {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+}
+
+.backfill-input {
+  width: 96px;
+  flex: none;
+}
+
+/* Wind-down display-trigger editor: removable chips + an add row. */
+.trigger-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.trigger-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--border);
+  font-size: 0.8rem;
+  color: var(--text);
+}
+.trigger-chip button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0;
+}
+.trigger-chip button:hover {
+  color: #ef4444;
+}
+.trigger-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.trigger-add .backfill-input {
+  width: 72px;
+}
+
+/* ---- Period roll prompt (a large centered overlay covering the board when a day/week rolls) ---- */
+/* A soft scrim over the board area (not the whole screen — nav/header stay), with a big centred card,
+   matching the recap's light-scrim treatment rather than a heavy dark modal. */
+.period-prompt-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.18);
+  border-radius: var(--radius);
+}
+
+.period-prompt-card {
+  width: 70%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 40px 36px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+}
+
+.period-prompt-kicker {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.period-prompt-q {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.period-prompt-sub {
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.period-prompt-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+/* ---- Period recap card (shown after confirming a roll) ---- */
+/* A soft scrim, deliberately light rather than the heavy dark modal backdrop the app avoids. */
+.recap-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.18);
+}
+
+.recap-card {
+  width: 100%;
+  max-width: 380px;
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
+}
+
+.recap-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.recap-kicker {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.recap-date {
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.recap-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recap-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.recap-name {
+  font-size: 0.92rem;
+}
+
+.recap-mult {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
+/* Settings → Points: editable effort presets (label × multiplier). */
+.effort-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.effort-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.effort-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.effort-x {
+  color: var(--text-dim);
+}
+
+.effort-mult {
+  width: 72px;
+  flex: none;
+}
+
+/* Points-formula rebalance confirm — same soft-scrim card family as the recap, with a capped-height
+   scrollable list so a long change set scrolls inside rather than growing the card. */
+.rebalance-card {
+  width: 100%;
+  max-width: 440px;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.2);
+}
+
+.rebalance-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 42vh;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.rebalance-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.88rem;
+}
+
+.rebalance-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rebalance-tier {
+  color: var(--text-dim);
+}
+
+.rebalance-change {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.rebalance-arrow {
+  color: var(--text-dim);
+  font-weight: 400;
+}
+
+.rebalance-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.recap-empty {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.recap-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.recap-total {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+
+/* ---- Wind-down nudge (escalating screen-off overlay; see WindDownOverlay.tsx) ---- */
+/* Fixed above every layer (HUD z:40, flyer z:200) — the panel grows from a small centred card into a
+   full-viewport takeover via inline width/height, dimming the board toward black behind it. Only the
+   panel is interactive; the dimmed board ignores clicks so a stray tap can't dismiss it. */
+.wind-down {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.wind-down-backdrop {
+  position: absolute;
+  inset: 0;
+  transition: background 0.8s ease;
+}
+.wind-down-panel {
+  position: relative;
+  pointer-events: auto;
+  overflow: hidden;
+  max-width: 100vw;
+  max-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #f8fafc;
+  background: linear-gradient(160deg, #1c2130 0%, #0b0d13 100%);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(248, 113, 113, 0.35);
+  /* Growth comes from the inline width/height/border-radius/font-size changing each tick — ease each
+     step so the swell reads as continuous, not steppy. */
+  transition: width 1.1s ease, height 1.1s ease, border-radius 1.1s ease, font-size 1.1s ease;
+}
+.wind-down-panel[data-phase="takeover"] {
+  box-shadow: inset 0 0 140px rgba(239, 68, 68, 0.3);
+}
+.wind-down-glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 60% at 50% 0%, rgba(239, 68, 68, 0.28), transparent 70%);
+  animation: wind-down-breathe 3s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes wind-down-breathe {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.85; }
+}
+/* Echo-trail ghost copies of the panel — invisible until the exit animation flies them to the corner.
+   Centred over the panel (absolute + margin:auto with explicit width/height from the inline style). */
+.wind-down-ghost {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  background: linear-gradient(160deg, #1c2130, #0b0d13);
+  box-shadow: inset 0 0 0 1px rgba(248, 113, 113, 0.35);
+  opacity: 0;
+  pointer-events: none;
+}
+.wind-down-body {
+  position: relative;
+  z-index: 1; /* sit above the glow + wax layers */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7em;
+  text-align: center;
+  padding: 1.4em;
+}
+.wind-down-clock {
+  font-size: 0.8em;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: #fca5a5;
+}
+.wind-down-headline {
+  font-size: 1.6em;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  margin: 0;
+  max-width: 16em;
+}
+.wind-down-countdown {
+  font-size: 0.9em;
+  color: #cbd5e1;
+  margin: 0;
+}
+/* Actions stack vertically and centre: big neutral Acknowledge on top, small red Dismiss below. */
+.wind-down-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7em;
+  margin-top: 0.5em;
+}
+.wind-down-primary,
+.wind-down-dismiss,
+.wind-down-cancel {
+  font: inherit;
+  font-weight: 600;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+/* Acknowledge — the prominent, larger, NON-red primary action. */
+.wind-down-primary {
+  font-size: 1.05em;
+  padding: 0.7em 1.8em;
+  background: #f8fafc;
+  color: #0b0d13;
+}
+.wind-down-primary:hover {
+  background: #fff;
+}
+/* Dismiss for today — smaller and red, sitting below Acknowledge. */
+.wind-down-dismiss {
+  font-size: 0.78em;
+  padding: 0.45em 1em;
+  background: transparent;
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.5);
+}
+.wind-down-dismiss:hover {
+  background: #ef4444;
+  color: #fff;
+  border-color: #ef4444;
+}
+/* Inline confirm shown in place of the Dismiss button. */
+.wind-down-confirm {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5em;
+}
+.wind-down-confirm-q {
+  font-size: 0.8em;
+  color: #cbd5e1;
+}
+.wind-down-confirm-row {
+  display: flex;
+  gap: 0.5em;
+}
+.wind-down-cancel {
+  font-size: 0.78em;
+  padding: 0.45em 1em;
+  background: transparent;
+  color: #cbd5e1;
+  border-color: rgba(203, 213, 225, 0.35);
+}
+.wind-down-cancel:hover {
+  color: #fff;
+  border-color: rgba(203, 213, 225, 0.6);
+}
+@media (prefers-reduced-motion: reduce) {
+  .wind-down-panel {
+    transition: none;
+  }
+}
+
+/* ---- Wind-down minimized state: a floating physical clock (see WindDownOverlay) ---- */
+/* Free-spot placed like the points HUD (its transform is written to the anchor); the inner .wd-clock
+   owns the spring entrance/exit + the past-target red glow, so the two never fight over transform. */
+.wd-clock-anchor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 500;
+  will-change: transform;
+}
+.wd-clock {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px 8px 8px;
+  border-radius: 16px;
+  background: linear-gradient(160deg, #1c2130, #0b0d13);
+  color: #f8fafc;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(148, 163, 184, 0.25);
+}
+.wd-clock.past {
+  animation: wd-clock-pulse 2.2s ease-in-out infinite;
+}
+/* Pulse the red glow (box-shadow), never transform — the transform belongs to framer's spring. */
+@keyframes wd-clock-pulse {
+  0%, 100% {
+    box-shadow: 0 12px 30px rgba(239, 68, 68, 0.35), inset 0 0 0 1px rgba(248, 113, 113, 0.55);
+  }
+  50% {
+    box-shadow: 0 16px 44px rgba(239, 68, 68, 0.72), inset 0 0 0 1px rgba(248, 113, 113, 0.95);
+  }
+}
+.wd-clock-open {
+  display: flex;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+.wd-clock-info {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.12;
+}
+.wd-clock-time {
+  font-size: 0.98rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.wd-clock-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+.wd-clock.past .wd-clock-label {
+  color: #fca5a5;
+}
+.wd-clock-dismiss {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  border: none;
+  background: #ef4444;
+  color: #fff;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.wd-clock:hover .wd-clock-dismiss,
+.wd-clock:focus-within .wd-clock-dismiss {
+  opacity: 1;
+}
+/* Burning candle — wax burns down with progress; flame flickers, or smoke rises once past target. */
+.wd-candle-base {
+  fill: rgba(148, 163, 184, 0.35);
+}
+.wd-candle-body {
+  fill: #eef2f7;
+}
+.wd-candle-wick {
+  stroke: #334155;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.wd-candle-flame {
+  fill: #fbbf24;
+  filter: drop-shadow(0 0 4px rgba(251, 191, 36, 0.85));
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: wd-flame-flicker 0.45s ease-in-out infinite alternate;
+}
+@keyframes wd-flame-flicker {
+  from { transform: scaleY(0.94) rotate(-2deg); }
+  to { transform: scaleY(1.08) rotate(2deg); }
+}
+.wd-candle-smoke {
+  stroke: rgba(203, 213, 225, 0.5);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wd-clock.past {
+    animation: none;
+  }
+  .wd-candle-flame {
+    animation: none;
+  }
+}
+
+/* ---- Shop mode ---- */
+/* The shop is a mode of the board's place (App: main.shop-open), not a separate view. The board stays
+   mounted beneath: its tabs fade away via `filter` only — deliberately not `transform`/`opacity`,
+   which framer owns for each card's position and enter/exit, and not `scale`, so a hidden tab's box
+   still measures true for the return burst (Poof "in"). Visibility flips after the fade so hidden tabs
+   can't be focused or clicked. The rule below is the *return* transition: it waits 0.4s so the shop
+   fades out first and the tab reappears as Poof's gathering dots land (paired with Poof's IN_DELAY).
+   Everything here targets the *board* canvas only ([data-canvas="board"], main's direct children):
+   the shop is a second canvas built from the same classes, and must not hide itself. */
+[data-canvas="board"] .board-card {
+  transition: filter 0.3s ease-out 0.4s, visibility 0s linear 0.4s;
+}
+
+main.shop-open [data-canvas="board"] .board-card {
+  filter: blur(2px) opacity(0);
+  visibility: hidden;
+  transition: filter 0.3s ease-out, visibility 0s linear 0.3s;
+}
+
+main.shop-open > .board-viewport {
+  pointer-events: none;
+}
+
+main > .canvas-toolbar,
+main > .zoom-controls {
+  transition: opacity 0.2s;
+}
+
+main.shop-open > .canvas-toolbar,
+main.shop-open > .zoom-controls {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The counter's move into the shop dock waits a beat, so it reads as following the poof. */
+.hud-anchor.docked {
+  transition-delay: 0.15s;
+}
+
+/* A purchase's red −cost, dropping out of the counter (PointsCounter.spend). `translate` centres it
+   independently of the transform framer animates. */
+.spend-float {
+  position: absolute;
+  left: 50%;
+  top: 72%;
+  translate: -50% 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #ef4444;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* The tabs' exit burst (Poof.tsx) — fixed screen-space pieces above the board's isolated stacking
+   context, drawn like the HUD's own landing burst: a thin ring (here card-shaped) and small solid dots. */
+.poof-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.poof-ring {
+  position: absolute;
+  border: 1.5px solid;
+  border-radius: var(--radius);
+}
+
+.poof-dot {
+  position: absolute;
+  border-radius: 50%;
+}
+
+/* The shop's canvas, laid exactly over the board's frame (so the place never moves — only its tabs
+   swap). It's the offset parent for the shop canvas's own toolbar/zoom controls, which therefore sit in
+   the same corners as the board's. */
+.shop-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+}
+
+/* Where the docked points counter parks: top-centre of the frame, over the canvas (see useFreeSpot's
+   dock). Sized like the counter's plate; purely a measuring target. */
+.hud-dock {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  translate: -50% 0;
+  width: 160px;
+  height: 86px;
+  pointer-events: none;
+}
+
+/* First-run: centred in the empty shop canvas, a card-like panel to name the first tab. */
+.shop-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+  z-index: 21;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+/* Closed notice — a toast at the frame's bottom-centre so it never covers a tab's first rows. */
+.shop-closed-banner {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  translate: -50% 0;
+  z-index: 21;
+  width: max-content;
+  max-width: min(520px, 90%);
+  padding: 10px 16px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  color: #b91c1c;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+/* ---- Reward rows (RewardItem, on the .item-row base) ---- */
+/* Cells in the list's four tracks: [emoji] [price pill] [name + note] [remove]. */
+.reward-emoji {
+  justify-self: start;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.reward-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.reward-name {
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.reward-note {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+
+.reward-redeemed {
+  margin-left: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #16a34a;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The price tag is the buy button, in the tab's colour (a task's checkbox counterpart). */
+.shop-buy {
+  justify-self: start;
+  border: none;
+  background: var(--task-color, var(--text));
+  color: #fff;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.shop-buy:hover:not(:disabled) {
+  filter: brightness(0.92);
+}
+
+.shop-buy:disabled {
+  background: #e2e8f0;
+  color: var(--text-dim);
+  cursor: not-allowed;
+}
+
+.reward-form-name {
+  display: flex;
+  gap: 8px;
+}
+
+.reward-form-name input {
+  flex: 1;
+  min-width: 0;
+}
+
+.field input.reward-form-emoji {
+  flex: none;
+  width: 44px;
+  padding: 6px 4px;
+  text-align: center;
+  font-size: 1.1rem;
+}
+
+.reward-form-cost {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.reward-form-cost input {
+  width: 110px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-canvas="board"] .board-card,
+  main.shop-open [data-canvas="board"] .board-card {
+    transition: none;
+  }
+  .poof-layer {
+    display: none;
+  }
+}

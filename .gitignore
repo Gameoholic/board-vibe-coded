@@ -1,0 +1,22 @@
+node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
+*.log
+npm-debug.log*
+pnpm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.tsbuildinfo
+coverage/
+
+# the board's database (and any copies of it) — personal data, never in git
+apps/api/data/
+
+.claude/settings.local.json
+.claude/worktrees/
