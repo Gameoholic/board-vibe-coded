@@ -1,44 +1,19 @@
 import type { BoardStore } from "./projection.js";
 
-// Placeholder content standing in for the owner's real board, transcribed from the whiteboard photo.
-// Not a permanent fixture (see CLAUDE.md) — only seeded into a fresh, empty event log. Points are
-// integer thousandths of a percent (2.5% → 2500).
+// Placeholder content for a fresh board — arbitrary, obviously-a-placeholder entries so a new tab
+// isn't blank, not a stand-in for anyone's real board. Only seeded into a fresh, empty event log
+// (see CLAUDE.md — never the owner's actual tasks). Points are integer thousandths of a percent
+// (1% → 1000).
 
-const DAILY = [
-  ["Reset board", 80],
-  ["Brush teeth", 80],
-  ["Weigh in", 40],
-  ["Workout", 830],
-  ["Obsidian", 420],
-  ["Floss", 80],
-] as const;
+const DAILY = [["First daily task", 1000]] as const;
 
-const WEEKLY = [
-  ["Workout A", 2500],
-  ["Workout B", 3750],
-  ["Workout C", 2500],
-  ["Stretches", 830],
-  ["Visit Grandparents", 5000],
-  ["Shopping", 3750],
-  ["Shave", 630],
-  ["Social", 5000],
-] as const;
+const WEEKLY = [["First weekly task", 1000]] as const;
 
 const REGISTRY: ReadonlyArray<readonly [string, ReadonlyArray<readonly [string, number]>]> = [
-  ["Immersion", [["1hr", 2500], ["2hr", 5000], ["3hr", 7500]]],
-  ["Japanese VC", [["15min", 630]]],
-  ["Geki", [["1hr", 2500], ["2hr", 5000], ["3hr", 7500]]],
-  ["Piano", [["15min", 630], ["30min", 1250], ["1hr", 2500]]],
-  ["Art", [["30min", 1250], ["1hr", 2500], ["2hr", 5000]]],
-  ["NASA", [["Tier 1", 1250], ["Tier 2", 2500], ["Tier 3", 5000], ["Tier 4", 10000]]],
-  ["Max dead hang", [["Attempt", 210]]],
-  ["Japan Planning", [["Tier 1", 1250], ["Tier 2", 2500], ["Tier 3", 5000]]],
+  ["First registry task", [["Tier 1", 1000]]],
 ];
 
-const TASKS = [
-  ["Clean PC", 1500],
-  ["Sticker paper for wardrobe", 1000],
-] as const;
+const TASKS = [["First task", 1000]] as const;
 
 // Non-destructive migration for boards created before streaks existed: add the Streaks tab if it's
 // missing, without touching anything else. (A fresh board gets it via seedIfEmpty, examples and all.)
@@ -107,9 +82,8 @@ export function seedIfEmpty(store: BoardStore): void {
   for (const [text, points] of DAILY) {
     dailyByText.set(text, store.createTask({ sectionId: daily.id, type: "checkbox", text, points }).id);
   }
-  const weeklyByText = new Map<string, string>();
   for (const [text, points] of WEEKLY) {
-    weeklyByText.set(text, store.createTask({ sectionId: weekly.id, type: "checkbox", text, points }).id);
+    store.createTask({ sectionId: weekly.id, type: "checkbox", text, points });
   }
   for (const [text, tiers] of REGISTRY) {
     store.createTask({
@@ -123,28 +97,14 @@ export function seedIfEmpty(store: BoardStore): void {
     store.createTask({ sectionId: tasks.id, type: "checkbox", text, points });
   }
 
-  // Two example streaks so the tab isn't empty: a daily one on Workout, and a weekly "all three
-  // workouts" streak. Placeholder, like the tasks above — editable/removable through the UI.
+  // One example streak so the tab isn't empty. Placeholder, like the tasks above — editable/removable
+  // through the UI.
   store.createStreak({
     sectionId: streaks.id,
-    name: "Daily workout",
+    name: "First streak",
     type: "daily",
     mode: "all",
     since: "created",
-    matcher: { kind: "tasks", conditions: [{ taskId: dailyByText.get("Workout")!, required: 1 }] },
-  });
-  store.createStreak({
-    sectionId: streaks.id,
-    name: "Full week of lifts",
-    type: "weekly",
-    mode: "all",
-    since: "created",
-    matcher: {
-      kind: "tasks",
-      conditions: ["Workout A", "Workout B", "Workout C"].map((t) => ({
-        taskId: weeklyByText.get(t)!,
-        required: 1 as const,
-      })),
-    },
+    matcher: { kind: "tasks", conditions: [{ taskId: dailyByText.get("First daily task")!, required: 1 }] },
   });
 }
