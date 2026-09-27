@@ -139,7 +139,7 @@ export class BoardStore {
 
   listStreaks(sectionId?: string): StreakView[] {
     const rows = sectionId ? this.streaks.filter((s) => s.sectionId === sectionId) : this.streaks;
-    return rows.map((s) => this.readStreak(s));
+    return rows.map((s) => this.readStreak(s)).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   }
 
   getStreak(id: string): StreakView {
@@ -174,6 +174,9 @@ export class BoardStore {
 
   // The count/active are derived here — never stored — so a rebuild and live state can't disagree.
   private readStreak(streak: Streak): StreakView {
+    // Position in its section, server-derived from the section's item order (never evented), like
+    // readTask/readReward.
+    const order = this.orderIndex(streak.sectionId, streak.id);
     // A counter lives in current state: the sum of its linked tasks' currently-ticked boxes, so it
     // rises on a tick and falls on an untick. Daily/weekly instead fold completion history.
     if (streak.type === "counter") {
@@ -185,7 +188,7 @@ export class BoardStore {
         settings: this.settings,
         now: clockNow(),
       });
-      return { ...streak, count, active, best };
+      return { ...streak, count, active, best, order };
     }
     // Box count per task (for `required: "all"`) and live filled level (for the current open period,
     // so an uncheck today drops the streak instead of the raw log keeping it).
@@ -197,7 +200,7 @@ export class BoardStore {
       settled,
       currentLevels,
     });
-    return { ...streak, count, active, best };
+    return { ...streak, count, active, best, order };
   }
 
   getSettings(): Settings {
@@ -230,11 +233,16 @@ export class BoardStore {
     return group;
   }
 
-  // The items a section lists — a board tab's tasks or a shop tab's rewards (live references, so the
-  // group fold can tag them). Order and groups are list structure, identical for both kinds, so the
-  // commands and the fold are written once over this rather than once per item kind.
+  // The items a section lists — a board tab's tasks or streaks, or a shop tab's rewards (live
+  // references, so the group fold can tag them). Order and groups are list structure, identical for
+  // every kind, so the commands and the fold are written once over this rather than once per item kind.
   private sectionItems(sectionId: string): ListItem[] {
-    if (this.sections.some((s) => s.id === sectionId)) return this.tasks.filter((t) => t.sectionId === sectionId);
+    const section = this.sections.find((s) => s.id === sectionId);
+    if (section) {
+      return section.kind === "streaks"
+        ? this.streaks.filter((s) => s.sectionId === sectionId)
+        : this.tasks.filter((t) => t.sectionId === sectionId);
+    }
     if (this.shopSections.some((s) => s.id === sectionId)) {
       return this.rewards.filter((r) => r.shopSectionId === sectionId);
     }
@@ -243,7 +251,7 @@ export class BoardStore {
 
   // Every groupable item, of every kind — what the group fold tags and untags.
   private allItems(): ListItem[] {
-    return [...this.tasks, ...this.rewards];
+    return [...this.tasks, ...this.streaks, ...this.rewards];
   }
 
   // Drop a group once its last member is gone, so no empty rail lingers.
@@ -621,7 +629,7 @@ export class BoardStore {
     this.commit({ type: "SettingsChanged", settings: DEFAULT_SETTINGS });
   }
 
-  // Every builder-sourced value (a checkbox task, or a tiered task's tier) that carries a time estimate,
+  // Every builder-sourced value (a checkbox or one-time task, or a tiered task's tier) that carries a time estimate,
   // with the points it would earn under `formula`. Manual and estimate-less values are excluded — those
   // are what "won't update". pointsSource is resolved (stored flag, else derived vs the historic formula).
   private builderValues(
@@ -629,7 +637,7 @@ export class BoardStore {
   ): Array<{ task: Task; tierIndex?: number; text: string; tierLabel?: string; oldPoints: number; newPoints: number }> {
     const out: Array<{ task: Task; tierIndex?: number; text: string; tierLabel?: string; oldPoints: number; newPoints: number }> = [];
     for (const t of this.tasks) {
-      if (t.type === "checkbox") {
+      if (t.type === "checkbox" || t.type === "once") {
         const source = resolvePointsSource(t.pointsSource, t.estimateMinutes, t.points, t.estimateEffortIndex);
         if (source !== "builder" || t.estimateMinutes == null) continue;
         const newPoints = pointsFromMinutes(t.estimateMinutes, effortMultOf(formula, t.estimateEffortIndex), formula);
@@ -785,7 +793,7 @@ export class BoardStore {
     // Per-section item id order (tasks and rewards alike). Re-emitting the creates in this order
     // restores each sequence with no separate reorder event.
     const orderBySection = new Map([...this.itemOrder].map(([s, ids]) => [s, [...ids]]));
-    const streaks = this.streaks.map((s) => ({ ...s }));
+    const streakById = new Map(this.streaks.map((s) => [s.id, { ...s }]));
     // The shop's definitions (its tabs and rewards) are kept like the board's; purchases are progress,
     // so they go with everything else — `spent` restarts at zero alongside the points.
     const shopSections = this.shopSections.map((s) => ({ ...s }));
@@ -828,19 +836,23 @@ export class BoardStore {
         });
       }
     }
-    for (const s of streaks) {
-      this.commit({
-        type: "StreakCreated",
-        streakId: s.id,
-        sectionId: s.sectionId,
-        name: s.name,
-        streakType: s.type,
-        mode: s.mode,
-        since: s.since,
-        legacy: s.legacy,
-        legacyBest: s.legacyBest,
-        matcher: s.matcher,
-      });
+    for (const s of sections) {
+      for (const id of orderBySection.get(s.id) ?? []) {
+        const st = streakById.get(id);
+        if (!st) continue;
+        this.commit({
+          type: "StreakCreated",
+          streakId: st.id,
+          sectionId: st.sectionId,
+          name: st.name,
+          streakType: st.type,
+          mode: st.mode,
+          since: st.since,
+          legacy: st.legacy,
+          legacyBest: st.legacyBest,
+          matcher: st.matcher,
+        });
+      }
     }
     const rewardById = new Map(rewards.map((r) => [r.id, r]));
     for (const s of shopSections) {
@@ -1082,6 +1094,7 @@ export class BoardStore {
           createdAt: occurredAt,
           updatedAt: occurredAt,
         });
+        this.orderList(event.sectionId).push(event.streakId);
         return;
       case "StreakEdited": {
         const streak = this.streaks.find((s) => s.id === event.streakId);
@@ -1099,11 +1112,21 @@ export class BoardStore {
         return;
       }
       case "StreaksReordered":
-        this.streaks = orderBy(this.streaks, (s) => s.id, event.orderedIds);
+        // Same pattern as TasksReordered: orderedIds becomes the section's new item order, tracked in
+        // the shared itemOrder map rather than the streaks array itself (so streaks are list structure
+        // like tasks/rewards — reorderable and groupable through the same generic commands).
+        this.itemOrder.set(
+          event.sectionId,
+          orderBy(this.orderList(event.sectionId), (id) => id, event.orderedIds),
+        );
         return;
-      case "StreakDeleted":
+      case "StreakDeleted": {
+        const streak = this.streaks.find((s) => s.id === event.streakId);
+        if (streak) this.removeFromOrder(streak.sectionId, event.streakId);
         this.streaks = this.streaks.filter((s) => s.id !== event.streakId);
+        this.dropGroupIfEmpty(streak?.groupId);
         return;
+      }
       case "SettingsChanged":
         this.settings = event.settings;
         this.settingsSeeded = true;

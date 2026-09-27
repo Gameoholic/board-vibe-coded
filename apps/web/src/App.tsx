@@ -413,11 +413,33 @@ function App() {
     groupsApi.relabel(id, label);
   }
 
-  // Deleting a group ungroups its tasks — clear their groupId locally, drop the group.
+  // Deleting a group ungroups its members — clear their groupId locally, drop the group. Applying
+  // withoutGroup to both lists is harmless on whichever one doesn't own this group's members.
   function removeGroup(id: string) {
     setTasks((prev) => withoutGroup(prev, id));
+    setStreaks((prev) => withoutGroup(prev, id));
     setGroups((prev) => prev.filter((g) => g.id !== id));
     groupsApi.remove(id);
+  }
+
+  // Streak groups — the same shared list plumbing (listOps) as task groups, over this board's
+  // streaks (see SectionCard/StreakItem, now built on the same ItemList/ItemRow base as tasks).
+  async function addStreakGroup(sectionId: string, streakIds: string[]) {
+    const group = await groupsApi.create(sectionId, streakIds);
+    setGroups((prev) => [...prev, group]);
+    setStreaks((prev) => withMembership(prev, streakIds, group.id));
+  }
+
+  function ejectStreakFromGroup(streakId: string, groupId: string, newOrder: string[]) {
+    setStreaks((prev) => withMembership(prev, [streakId], undefined));
+    const sectionId = streaks.find((s) => s.id === streakId)?.sectionId;
+    if (sectionId) reorderStreakItems(sectionId, newOrder);
+    groupsApi.removeMembers(groupId, [streakId]);
+  }
+
+  function extendStreakGroup(groupId: string, additionalStreakIds: string[]) {
+    setStreaks((prev) => withMembership(prev, additionalStreakIds, groupId));
+    groupsApi.addMembers(groupId, additionalStreakIds);
   }
 
   async function addStreak(sectionId: string, payload: StreakPayload) {
@@ -467,15 +489,14 @@ function App() {
       });
   }
 
-  function reorderStreaks(sectionId: string, ordered: StreakView[]) {
-    setStreaks((prev) => {
-      const others = prev.filter((s) => s.sectionId !== sectionId);
-      return [...others, ...ordered];
-    });
+  // Reorder a streaks tab's streaks — the streak counterpart of reorderItems (full new order; group
+  // members kept contiguous by ItemList's block).
+  function reorderStreakItems(sectionId: string, orderedIds: string[]) {
+    setStreaks((prev) => withOrder(prev, orderedIds));
     fetch("/api/streaks/reorder", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sectionId, orderedIds: ordered.map((s) => s.id) }),
+      body: JSON.stringify({ sectionId, orderedIds }),
     });
   }
 
@@ -613,7 +634,10 @@ function App() {
                     onAddStreak={(payload) => addStreak(section.id, payload)}
                     onEditStreak={editStreak}
                     onRemoveStreak={removeStreak}
-                    onReorderStreaks={(ordered) => reorderStreaks(section.id, ordered)}
+                    onReorderStreakItems={(orderedIds) => reorderStreakItems(section.id, orderedIds)}
+                    onAddStreakGroup={(streakIds) => addStreakGroup(section.id, streakIds)}
+                    onExtendStreakGroup={extendStreakGroup}
+                    onEjectStreakFromGroup={ejectStreakFromGroup}
                     onRecolor={recolorSection}
                     prefs={config.tabPrefs[section.id]}
                     onPrefsChange={(patch) => setTabPref(section.id, patch)}

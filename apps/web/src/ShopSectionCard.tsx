@@ -17,7 +17,7 @@ import type { RewardInput } from "./useShop";
 // form, and the tab settings (unlike the board's fixed tabs, shop tabs are renamed and deleted here).
 
 const REWARD_SORT_OPTIONS: SortOption[] = [
-  { mode: "manual", label: "Recommended", icon: SparkleIcon },
+  { mode: "manual", label: "Manual", icon: SparkleIcon },
   { mode: "affordable", label: "Can afford first", icon: CircleCheckIcon },
   { mode: "cost-asc", label: "Cost: low to high", icon: ArrowUpIcon },
   { mode: "cost-desc", label: "Cost: high to low", icon: ArrowDownIcon },

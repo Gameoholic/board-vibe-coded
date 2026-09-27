@@ -22,7 +22,7 @@ import { PointsSource } from "./pointsFormula.js";
 // we accept it here and normalise it to "checkbox" on read (like the streak `period → type` alias) —
 // no backfill, the projection sees only current-vocabulary types.
 const StoredTaskType = z
-  .enum(["checkbox", "tiered", "count", "repeatable"])
+  .enum(["checkbox", "tiered", "count", "repeatable", "once"])
   .transform((t) => (t === "count" ? ("checkbox" as const) : t));
 
 // Section allowed-types as stored: fold the retired "count" into "checkbox", then dedupe (a pre-merge

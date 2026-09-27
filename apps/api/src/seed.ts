@@ -22,6 +22,20 @@ export function ensureStreaksTab(store: BoardStore): void {
   store.seedSection("Streaks", "#ef4444", [{ type: "checkbox" }], "streaks");
 }
 
+// Non-destructive migration: the Tasks tab is one-time tasks by design (check it, it's gone — never
+// reset by a period roll), so it offers only the "once" type, not "checkbox" (which carries a box
+// count and scheduled times that don't apply to a task done exactly once). Older boards seeded it
+// with "checkbox"; bring the allowed type in line so new tasks there use "once". Existing tasks are
+// untouched — allowedTypes only gates creation (like ensureRegistryTypes) — a task's type is fixed at
+// creation, so a pre-existing Tasks-tab item stays a plain checkbox until recreated.
+export function ensureTasksTabOnceType(store: BoardStore): void {
+  const tasksTab = store.listSections().find((s) => s.kind === "tasks" && s.name === "Tasks");
+  if (!tasksTab) return;
+  const isOnceOnly = tasksTab.allowedTypes.length === 1 && tasksTab.allowedTypes[0].type === "once";
+  if (isOnceOnly) return;
+  store.setSectionAllowedTypes(tasksTab.id, [{ type: "once" }]);
+}
+
 // Non-destructive migration: the Registry tab offers tiered + repeatable tasks. Older boards had it
 // tiered-only (or, older still, with a stray `checkbox`); bring them in line so the add-task type
 // picker offers both. Existing tasks are untouched — allowedTypes only gates creation. Seed/migration
@@ -63,6 +77,7 @@ export function initializeInfra(store: BoardStore): void {
 export function initializeBoard(store: BoardStore): void {
   seedIfEmpty(store);
   ensureStreaksTab(store);
+  ensureTasksTabOnceType(store);
   ensureRegistryTypes(store);
   ensureSectionPeriods(store);
   initializeInfra(store);
@@ -74,7 +89,7 @@ export function seedIfEmpty(store: BoardStore): void {
   const daily = store.seedSection("Daily", "#22c55e", [{ type: "checkbox" }], "tasks", "day");
   const weekly = store.seedSection("Weekly", "#3b82f6", [{ type: "checkbox" }], "tasks", "week");
   const registry = store.seedSection("Registry", "#f59e0b", [{ type: "tiered" }, { type: "repeatable" }], "tasks", "day");
-  const tasks = store.seedSection("Tasks", "#1e293b", [{ type: "checkbox" }]);
+  const tasks = store.seedSection("Tasks", "#1e293b", [{ type: "once" }]);
   // The streaks tab holds streaks, not tasks; allowedTypes is unused for it but the schema wants one.
   const streaks = store.seedSection("Streaks", "#ef4444", [{ type: "checkbox" }], "streaks");
 
@@ -94,7 +109,7 @@ export function seedIfEmpty(store: BoardStore): void {
     });
   }
   for (const [text, points] of TASKS) {
-    store.createTask({ sectionId: tasks.id, type: "checkbox", text, points });
+    store.createTask({ sectionId: tasks.id, type: "once", text, points });
   }
 
   // One example streak so the tab isn't empty. Placeholder, like the tasks above — editable/removable

@@ -17,6 +17,7 @@ coverage/
 
 # the board's database (and any copies of it) — personal data, never in git
 apps/api/data/
+/backups/
 
 .claude/settings.local.json
 .claude/worktrees/

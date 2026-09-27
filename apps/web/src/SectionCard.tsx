@@ -1,5 +1,4 @@
 import { behaviorOf, parsePercent } from "@board/contracts";
-import { AnimatePresence, Reorder } from "framer-motion";
 import { useCallback, useMemo, useState } from "react";
 import CanvasCard, { CardAdd, CardTitle, type CardFrame } from "./CanvasCard";
 import ColorPicker from "./ColorPicker";
@@ -43,7 +42,7 @@ type StreakSortMode = "manual" | "count-desc" | "count-asc";
 type AnySortMode = SortMode | StreakSortMode;
 
 const SORT_OPTIONS: SortOption[] = [
-  { mode: "manual", label: "Recommended", icon: SparkleIcon },
+  { mode: "manual", label: "Manual", icon: SparkleIcon },
   { mode: "quick", label: "Get done quick", icon: ZapIcon },
   { mode: "points-desc", label: "Points: high to low", icon: ArrowDownIcon },
   { mode: "points-asc", label: "Points: low to high", icon: ArrowUpIcon },
@@ -56,7 +55,7 @@ const SORT_OPTIONS: SortOption[] = [
 ];
 
 const STREAK_SORT_OPTIONS: SortOption[] = [
-  { mode: "manual", label: "Recommended", icon: SparkleIcon },
+  { mode: "manual", label: "Manual", icon: SparkleIcon },
   { mode: "count-desc", label: "Streak: high to low", icon: ArrowDownIcon },
   { mode: "count-asc", label: "Streak: low to high", icon: ArrowUpIcon },
 ];
@@ -102,7 +101,13 @@ interface SectionCardProps {
   onAddStreak: (payload: StreakPayload) => void;
   onEditStreak: (id: string, payload: StreakPayload) => void;
   onRemoveStreak: (id: string) => void;
-  onReorderStreaks: (ordered: StreakView[]) => void;
+  // Streaks are list structure too (see Groups) — reorder/group over the section's streaks, mirroring
+  // onReorderItems/onAddGroup/onExtendGroup/onEjectFromGroup above. onEditGroup/onRemoveGroup are
+  // shared as-is (they only ever touch the groups list itself, never a specific item kind).
+  onReorderStreakItems: (orderedIds: string[]) => void;
+  onAddStreakGroup: (streakIds: string[]) => void;
+  onExtendStreakGroup: (groupId: string, additionalStreakIds: string[]) => void;
+  onEjectStreakFromGroup: (streakId: string, groupId: string, newOrder: string[]) => void;
   onRecolor: (id: string, color: string) => void;
   // Per-tab view prefs (sort + display toggles), persisted per device in localStorage. Undefined
   // until the tab is first touched, then filled from the defaults on read (see tabView).
@@ -134,7 +139,10 @@ function SectionCard({
   onAddStreak,
   onEditStreak,
   onRemoveStreak,
-  onReorderStreaks,
+  onReorderStreakItems,
+  onAddStreakGroup,
+  onExtendStreakGroup,
+  onEjectStreakFromGroup,
   onRecolor,
   prefs,
   onPrefsChange,
@@ -245,28 +253,31 @@ function SectionCard({
       }
     >
       {isStreaks ? (
-        <Reorder.Group
-          as="ul"
-          axis="y"
-          values={displayedStreaks}
-          onReorder={onReorderStreaks}
-          className="streak-list"
-        >
-          <AnimatePresence initial={false}>
-            {streaks.length === 0 && <li className="empty">No streaks yet</li>}
-            {displayedStreaks.map((streak) => (
-              <StreakItem
-                key={streak.id}
-                streak={streak}
-                allTasks={allTasks}
-                sectionColor={section.color}
-                draggable={sortMode === "manual"}
-                onEdit={(payload) => onEditStreak(streak.id, payload)}
-                onRemove={onRemoveStreak}
-              />
-            ))}
-          </AnimatePresence>
-        </Reorder.Group>
+        <ItemList
+          items={streaks}
+          manual={sortMode === "manual"}
+          sorted={displayedStreaks}
+          groups={groups}
+          noun="streaks"
+          emptyLabel="No streaks yet"
+          renderItem={(streak, row) => (
+            <StreakItem
+              key={streak.id}
+              streak={streak}
+              allTasks={allTasks}
+              sectionColor={section.color}
+              row={row}
+              onEdit={(payload) => onEditStreak(streak.id, payload)}
+              onRemove={onRemoveStreak}
+            />
+          )}
+          onReorder={onReorderStreakItems}
+          onAddGroup={onAddStreakGroup}
+          onExtendGroup={onExtendStreakGroup}
+          onEjectFromGroup={onEjectStreakFromGroup}
+          onEditGroup={onEditGroup}
+          onRemoveGroup={onRemoveGroup}
+        />
       ) : (
         <ItemList
           items={tasks}
@@ -320,7 +331,7 @@ interface TierRow {
 
 const EMPTY_EST: BuilderEstimate = { minutes: null, effortIndex: 0, source: "manual" };
 
-const TYPE_LABELS: Record<TaskType, string> = { checkbox: "Checkbox", tiered: "Tiered", repeatable: "Repeatable" };
+const TYPE_LABELS: Record<TaskType, string> = { checkbox: "Checkbox", tiered: "Tiered", repeatable: "Repeatable", once: "One-time" };
 
 // One tier's builder: the same PointsBuilder (Points% + Duration + Effort) the checkbox form uses,
 // plus a remove control. Its own component so onPointsChange is a stable per-row callback (the
@@ -376,9 +387,9 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
   // cadence (daily/weekly) is inferred from the section's recurrence, not chosen here.
   const [scheduleRows, setScheduleRows] = useState<ScheduleRow[]>([]);
   const scheduleCadence: Cadence = section.period === "week" ? "weekly" : "daily";
-  // Checkbox and repeatable score a single per-completion `points`, so they use the duration→points
-  // calc; tiered doesn't (each tier has its own builder).
-  const usesPointsCalc = type === "checkbox" || type === "repeatable";
+  // Checkbox, repeatable and one-time tasks score a single per-completion `points`, so they use the
+  // duration→points calc; tiered doesn't (each tier has its own builder).
+  const usesPointsCalc = type === "checkbox" || type === "repeatable" || type === "once";
 
   function reset() {
     setType(section.allowedTypes[0].type);
@@ -446,6 +457,10 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
         const max = Number(maxTimes);
         const withMax = maxTimes.trim() && Number.isInteger(max) && max >= 1 ? { count: max } : {};
         onCreate({ type: "repeatable", text: trimmed, points: pointsValue, ...withMax, ...withEstimate, pointsSource: checkboxEst.source, ...withDesc });
+      } else if (type === "once") {
+        // A one-time task is a single checkbox with no box count and no scheduled times — check it and
+        // it's gone, so neither knob applies.
+        onCreate({ type: "once", text: trimmed, points: pointsValue, ...withEstimate, pointsSource: checkboxEst.source, ...withDesc });
       } else {
         // A count of 1 is a plain checkbox — omit it so the task stays a bare checkbox rather than
         // storing a redundant 1-box amount.

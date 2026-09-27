@@ -103,7 +103,13 @@ const repeatable: TaskBehavior = {
   supportsTimer: false,
 };
 
-const TASK_BEHAVIORS: Record<TaskType, TaskBehavior> = { checkbox, tiered, repeatable };
+// A single "do it once" checkbox — the Tasks tab's kind: check it and it's gone, never repeated
+// within a period. Behaviorally identical to a 1-box checkbox (same native toggle, same scoring);
+// the only difference is `supportsQuantity: false`, so the add/edit forms never offer a box count or
+// scheduled times for it — neither is meaningful for a task that only ever happens once.
+const once: TaskBehavior = { ...checkbox, supportsQuantity: false };
+
+const TASK_BEHAVIORS: Record<TaskType, TaskBehavior> = { checkbox, tiered, repeatable, once };
 
 export function behaviorOf(task: Task): TaskBehavior {
   return TASK_BEHAVIORS[task.type];

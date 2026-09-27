@@ -20,10 +20,13 @@ const QTY_MAX = 100;
 // A task's type. "checkbox" is the general case — a row of `count` boxes (default 1, i.e. a plain
 // checkbox), each worth `points`; "tiered" is a pick-one ladder; "repeatable" is a single box that
 // can be completed infinitely, storing its completion count in `progress` (unbounded) and worth
-// `points` per completion — the whiteboard tally. The retired "count" type folded into "checkbox"
+// `points` per completion — the whiteboard tally. "once" is a single-completion checkbox for tasks
+// that are done exactly once and then gone (the Tasks tab) — behaviorally a 1-box checkbox, but its
+// own type so it never carries a box count or scheduled times, and the add/edit forms never offer
+// those controls for it (see taskKinds.ts). The retired "count" type folded into "checkbox"
 // (which grew the optional box count) — legacy events carrying it are normalised to "checkbox" on
 // read (see events.ts), so no migration was needed.
-export const TaskType = z.enum(["checkbox", "tiered", "repeatable"]);
+export const TaskType = z.enum(["checkbox", "tiered", "repeatable", "once"]);
 export type TaskType = z.infer<typeof TaskType>;
 
 export const AllowedType = z.object({ type: TaskType });
@@ -228,6 +231,10 @@ export const Streak = z.object({
   // beats. Daily/weekly only (a counter has no run). Absent on old events → 0, no migration.
   legacyBest: z.number().int().min(0).default(0),
   matcher: StreakMatcher,
+  // List structure, exactly as on a task or reward: the group it's in (if any) and its position in
+  // its section (server-derived from the section's item order, never evented). See Group.
+  groupId: z.string().optional(),
+  order: z.number().int().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

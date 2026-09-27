@@ -41,12 +41,20 @@ export const CreateTaskBody = z
     schedule: TaskSchedule.optional(),
   })
   .refine((b) => b.type === "tiered" || b.points !== undefined, {
-    message: "checkbox and repeatable tasks require points",
+    message: "non-tiered tasks require points",
     path: ["points"],
   })
   .refine((b) => b.type !== "tiered" || (b.tiers?.length ?? 0) > 0, {
     message: "tiered tasks require tiers",
     path: ["tiers"],
+  })
+  .refine((b) => b.type !== "once" || b.count === undefined, {
+    message: "one-time tasks don't support a box count",
+    path: ["count"],
+  })
+  .refine((b) => b.type !== "once" || b.schedule === undefined, {
+    message: "one-time tasks don't support scheduled times",
+    path: ["schedule"],
   });
 export type CreateTaskBody = z.infer<typeof CreateTaskBody>;
 

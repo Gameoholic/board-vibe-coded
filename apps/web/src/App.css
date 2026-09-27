@@ -2269,34 +2269,11 @@ main {
   pointer-events: none;
 }
 
-/* ---- Streaks tab ---- */
-
-/* Grid + subgrid (same approach as .item-list) so the flame column takes one shared width across
-   every row — names and the right-side icons line up regardless of how many digits a count has. */
-.streak-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: max-content 1fr auto auto;
-  column-gap: 10px;
-  row-gap: 2px;
-  min-height: 20px;
-}
-
-.streak-item {
-  position: relative;
-  display: grid;
-  grid-template-columns: subgrid;
-  grid-column: 1 / -1;
-  align-items: center;
-  padding: 7px 4px;
-  border-radius: 8px;
-}
-
-.streak-item:hover {
-  background: #f8fafc;
-}
+/* ---- Streaks tab ----
+   StreakItem is a kind on the shared .item-list/.item-row base (same as .task-item/.reward-item) —
+   see ItemList.tsx/ItemRow.tsx — so the grid, hover, drag/group handles and the remove button's
+   appearance and hover-reveal all come from the base rules above. Only the semantic bits (flame,
+   best badge, name) get their own styling here. */
 
 /* Flame + count badge. Lit = current period done; grace = streak alive but this period still open;
    cold = no streak. Colour comes from the streak's own colour via --streak-color. */
@@ -2372,36 +2349,10 @@ main {
   letter-spacing: 0.06em;
 }
 
-.streak-edit-anchor {
-  flex-shrink: 0;
-}
-
-.streak-item .icon-btn,
-.streak-item .remove {
-  opacity: 0;
-  transition: opacity 0.1s;
-}
-
-.streak-item:hover .icon-btn,
-.streak-item:hover .remove {
-  opacity: 1;
-}
-
-.streak-item .remove {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 6px;
-}
-
-.streak-item .remove:hover {
-  color: #ef4444;
-  background: #fef2f2;
+/* A counter streak has no "best" (no consecutive-run notion) — kept in the DOM so it still holds its
+   grid column (matches every row's fixed-position value slot), just invisible. */
+.streak-best.empty {
+  visibility: hidden;
 }
 
 /* ---- Notion-style condition builder (a streak's "counts when you complete") ----
