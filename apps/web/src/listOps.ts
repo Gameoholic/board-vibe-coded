@@ -40,6 +40,18 @@ export function withMembership<T extends Listed>(items: T[], ids: string[], grou
   return items.map((it) => (set.has(it.id) ? { ...it, groupId } : it));
 }
 
+// Stable-partition one section's order so the items matching `trails` come last (relative order kept
+// on both sides), stamping each item's new position — the client mirror of the server keeping retired
+// one-time tasks at the end of their tab (BoardStore.settleRetired).
+export function withTrailing<T extends Listed & { sectionId: string }>(
+  items: T[],
+  sectionId: string,
+  trails: (item: T) => boolean,
+): T[] {
+  const ordered = items.filter((it) => it.sectionId === sectionId).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  return withOrder(items, [...ordered.filter((it) => !trails(it)), ...ordered.filter(trails)].map((it) => it.id));
+}
+
 // A deleted group ungroups its members (they stay in the list).
 export function withoutGroup<T extends Listed>(items: T[], groupId: string): T[] {
   return items.map((it) => (it.groupId === groupId ? { ...it, groupId: undefined } : it));

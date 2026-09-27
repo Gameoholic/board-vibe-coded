@@ -38,7 +38,7 @@ export type {
 } from "@board/contracts";
 // The per-type behaviour registry — consumers read board state through this instead of switching
 // on `task.type`, so adding a type is one entry in the contract, not edits scattered across the UI.
-export { behaviorOf, taskPointValue } from "@board/contracts";
+export { behaviorOf, behaviorOfType, isRetired, taskPointValue } from "@board/contracts";
 // Pure per-box schedule gate + its human label — the display-only "do this at a certain hour" lock.
 export { isBoxLocked, boxScheduleLabel } from "@board/contracts";
 // Pure timing curve for the screen-off wind-down nudge (idle → ramp → takeover) — see WindDownOverlay.

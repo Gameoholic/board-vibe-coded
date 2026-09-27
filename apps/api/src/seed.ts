@@ -22,18 +22,21 @@ export function ensureStreaksTab(store: BoardStore): void {
   store.seedSection("Streaks", "#ef4444", [{ type: "checkbox" }], "streaks");
 }
 
-// Non-destructive migration: the Tasks tab is one-time tasks by design (check it, it's gone — never
-// reset by a period roll), so it offers only the "once" type, not "checkbox" (which carries a box
-// count and scheduled times that don't apply to a task done exactly once). Older boards seeded it
-// with "checkbox"; bring the allowed type in line so new tasks there use "once". Existing tasks are
-// untouched — allowedTypes only gates creation (like ensureRegistryTypes) — a task's type is fixed at
-// creation, so a pre-existing Tasks-tab item stays a plain checkbox until recreated.
+// Non-destructive migration: the Tasks tab is one-time tasks by design (check it, it's gone), so it
+// offers only the "once" type, not "checkbox" (whose box count and scheduled times mean nothing for a
+// one-off). Older boards seeded it with "checkbox": bring the allowed type in line, then convert the
+// tab's existing plain checkboxes to "once" via TaskTypeChanged (logged, with the previous type), so
+// they edit and retire like one-time tasks too. A checkbox carrying a box count or schedule is left
+// alone rather than silently losing that data. Idempotent — converted tasks are skipped next boot.
 export function ensureTasksTabOnceType(store: BoardStore): void {
   const tasksTab = store.listSections().find((s) => s.kind === "tasks" && s.name === "Tasks");
   if (!tasksTab) return;
   const isOnceOnly = tasksTab.allowedTypes.length === 1 && tasksTab.allowedTypes[0].type === "once";
-  if (isOnceOnly) return;
-  store.setSectionAllowedTypes(tasksTab.id, [{ type: "once" }]);
+  if (!isOnceOnly) store.setSectionAllowedTypes(tasksTab.id, [{ type: "once" }]);
+  for (const task of store.listTasks(tasksTab.id)) {
+    const plain = task.type === "checkbox" && (task.count ?? 1) <= 1 && !task.schedule;
+    if (plain) store.changeTaskType(task.id, "once");
+  }
 }
 
 // Non-destructive migration: the Registry tab offers tiered + repeatable tasks. Older boards had it

@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import AppNav, { type AppView } from "./AppNav";
 import CardCanvas from "./CardCanvas";
-import { groupsApi, withMembership, withOrder, withoutGroup } from "./listOps";
+import { groupsApi, withMembership, withOrder, withoutGroup, withTrailing } from "./listOps";
 import { CanvasSettingsProvider } from "./useCanvasSettings";
 import FlyingPoints, { type Flyer, type FlyOrigin, type Point } from "./FlyingPoints";
 import type { FlyerTier } from "./flyerTiers";
@@ -27,7 +27,7 @@ import SettingsView from "./SettingsView";
 import ShopView from "./ShopView";
 import type { StreakPayload } from "./StreakForm";
 import WindDownOverlay from "./WindDownOverlay";
-import { behaviorOf, taskPointValue } from "./types";
+import { behaviorOf, isRetired, taskPointValue } from "./types";
 import type { FormulaPreview, Group, PeriodKind, PeriodRecap, PeriodStatus, PointsFormula, Reward, Section, Settings, StreakView, Task, TaskSchedule, TaskType, TierDef } from "./types";
 import { BoardClockProvider } from "./useBoardClock";
 import { useLocalConfig } from "./useLocalConfig";
@@ -322,7 +322,8 @@ function App() {
       body: JSON.stringify({ sectionId, ...payload }),
     });
     const task = TaskSchema.parse(await res.json());
-    setTasks((prev) => [...prev, task]);
+    // The server lands a new task ahead of the tab's retired one-time tasks; mirror that locally.
+    setTasks((prev) => withTrailing([...prev, task], sectionId, isRetired));
   }
 
   // Streak counts are the server's to compute (from completion history), so any task change that
@@ -341,7 +342,14 @@ function App() {
   function setLevel(task: Task, level: number, origin?: FlyOrigin) {
     const b = behaviorOf(task);
     const patch = b.patchForLevel(task, level);
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, ...patch } : t)));
+    setTasks((prev) => {
+      const next = prev.map((t) => (t.id === task.id ? { ...t, ...patch } : t));
+      if (!b.retiresWhenDone) return next;
+      // Mirror the server's retire rules (BoardStore.settleDoneChange): a finished one-time task leaves
+      // its group, and the tab's retired tasks trail its order.
+      const retiring = b.isDone({ ...task, ...patch });
+      return withTrailing(retiring ? withMembership(next, [task.id], undefined) : next, task.sectionId, isRetired);
+    });
     fetch(`/api/tasks/${task.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

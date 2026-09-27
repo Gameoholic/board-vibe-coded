@@ -153,6 +153,15 @@ export const BoardEvent = z.discriminatedUnion("type", [
     changes: TaskEditFields,
     previous: TaskEditFields,
   }),
+  // A task's type changed (e.g. a Tasks-tab checkbox became a one-time "once" task). Its own event,
+  // not a TaskEdited field, because the type is structural — it decides which fields mean anything —
+  // and no UI edits it; only migrations emit it. `previousType` keeps the log self-describing.
+  z.object({
+    type: z.literal("TaskTypeChanged"),
+    taskId: z.string(),
+    taskType: StoredTaskType,
+    previousType: StoredTaskType,
+  }),
   // Reorders a section's tasks. When tasks are grouped they move as a block, so `orderedIds` always
   // keeps each group's members contiguous — but the event itself is just the flat task-id order.
   z.object({ type: z.literal("TasksReordered"), sectionId: z.string(), orderedIds: z.array(z.string()) }),

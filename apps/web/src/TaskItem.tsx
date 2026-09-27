@@ -14,6 +14,10 @@ import type { BoxSchedule, Task, TaskSchedule, TierDef } from "./types";
 import { useBoardClock } from "./useBoardClock";
 import { useClickOutside } from "./useClickOutside";
 
+// How long (seconds) a just-finished one-time task shows checked before it leaves the list — long enough
+// to register the tick, short enough that it's plainly gone by the time the points land.
+const RETIRE_EXIT_DELAY = 0.45;
+
 // The task-edit / add-task patch shape, shared by the row callbacks (kept in one alias so the
 // schedule field is threaded through every call site consistently).
 type TaskPatch = { text?: string; points?: number; estimateMinutes?: number | null; estimateEffortIndex?: number | null; pointsSource?: "builder" | "manual"; description?: string | null; tiers?: TierDef[]; count?: number; progress?: number; schedule?: TaskSchedule };
@@ -221,6 +225,11 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
   const [inlineText, setInlineText] = useState(task.text);
   const editRef = useRef<HTMLDivElement>(null);
   useClickOutside(editRef, () => setEditOpen(false), editOpen);
+  // Set when this click finishes a task that leaves its list (one-time). The row is removed in the same
+  // update, and a leaving row keeps rendering with its last props (still unchecked) — so it reads this
+  // instead, showing checked + hatched through a short delayed exit before it's tossed off the list.
+  const [retiring, setRetiring] = useState(false);
+  const shownDone = task.done || retiring;
 
   function startInline() { setInlineText(task.text); setInlineEditing(true); }
   function commitInline() {
@@ -410,9 +419,13 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
   }
 
   return (
-    <ItemRow {...rowProps} className={`task-item${task.done ? " done" : ""}${showTimer ? " has-footer" : ""}`}>
+    <ItemRow
+      {...rowProps}
+      className={`task-item${shownDone ? " done" : ""}${showTimer ? " has-footer" : ""}`}
+      exitDelay={retiring ? RETIRE_EXIT_DELAY : undefined}
+    >
       {(() => {
-        const locked = !task.done && boxLocked(0);
+        const locked = !shownDone && boxLocked(0);
         const tip = boxTip(0, locked);
         if (locked) {
           // Scheduled, not-yet-due: locked with a lock badge and an "Unlocks …" tooltip. The Tooltip
@@ -427,8 +440,12 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
         const input = (
           <input
             type="checkbox"
-            checked={task.done}
-            onChange={() => onSetLevel(task, b.levelOnClick(task, 0), pointsOrigin())}
+            checked={shownDone}
+            onChange={() => {
+              const level = b.levelOnClick(task, 0);
+              setRetiring(b.retiresWhenDone && level >= 1);
+              onSetLevel(task, level, pointsOrigin());
+            }}
             style={{ "--task-color": color } as React.CSSProperties}
           />
         );

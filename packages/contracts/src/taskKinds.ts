@@ -41,6 +41,9 @@ export interface TaskBehavior {
   readonly unbounded: boolean;
   /** Whether the row carries the elapsed-time timer that auto-advances the level (tiered only). */
   readonly supportsTimer: boolean;
+  /** Whether a finished task leaves its list (one-time tasks: done means gone). It stays in the
+   *  board's state — still done, still worth its points — it just isn't listed any more. */
+  readonly retiresWhenDone: boolean;
 }
 
 // count>1 ⇒ a row of `progress`-driven boxes; count≤1 ⇒ a plain `done` checkbox. `filled` reads
@@ -65,6 +68,7 @@ const checkbox: TaskBehavior = {
   renderKind: (t) => (isMultiBox(t) ? "boxes" : "checkbox"),
   unbounded: false,
   supportsTimer: false,
+  retiresWhenDone: false,
 };
 
 const tiered: TaskBehavior = {
@@ -81,6 +85,7 @@ const tiered: TaskBehavior = {
   renderKind: () => "boxes",
   unbounded: false,
   supportsTimer: true,
+  retiresWhenDone: false,
 };
 
 // A single box you tick again and again — the whiteboard tally. Its completion count lives in
@@ -101,18 +106,30 @@ const repeatable: TaskBehavior = {
   renderKind: () => "counter",
   unbounded: true,
   supportsTimer: false,
+  retiresWhenDone: false,
 };
 
-// A single "do it once" checkbox — the Tasks tab's kind: check it and it's gone, never repeated
-// within a period. Behaviorally identical to a 1-box checkbox (same native toggle, same scoring);
-// the only difference is `supportsQuantity: false`, so the add/edit forms never offer a box count or
-// scheduled times for it — neither is meaningful for a task that only ever happens once.
-const once: TaskBehavior = { ...checkbox, supportsQuantity: false };
+// A single "do it once" checkbox — the Tasks tab's kind: check it and it's gone. Scores exactly like
+// a 1-box checkbox (same native toggle); it differs in two ways: no box count or scheduled times
+// (`supportsQuantity: false` — neither means anything for a one-off), and a finished one leaves its
+// list (`retiresWhenDone`) instead of sitting there hatched like a daily task waiting for tomorrow.
+const once: TaskBehavior = { ...checkbox, supportsQuantity: false, retiresWhenDone: true };
 
 const TASK_BEHAVIORS: Record<TaskType, TaskBehavior> = { checkbox, tiered, repeatable, once };
 
 export function behaviorOf(task: Task): TaskBehavior {
   return TASK_BEHAVIORS[task.type];
+}
+
+/** A finished task of a type that leaves its list once done (one-time tasks) — hidden, not deleted. */
+export function isRetired(task: Task): boolean {
+  const b = behaviorOf(task);
+  return b.retiresWhenDone && b.isDone(task);
+}
+
+/** A type's behaviour before any task of it exists — for config-level questions (what a tab offers). */
+export function behaviorOfType(type: TaskType): TaskBehavior {
+  return TASK_BEHAVIORS[type];
 }
 
 /** Live point contribution of a task to the running total. */

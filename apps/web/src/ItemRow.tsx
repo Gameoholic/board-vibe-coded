@@ -43,11 +43,17 @@ interface ItemRowProps<T> {
   // the streak pick-whip hit-tests). List mechanics use data-item-id, set here for every kind.
   attrs?: Record<string, string>;
   onContextMenu?: (e: React.MouseEvent) => void;
+  // Seconds to hold the row in place before its exit animation plays — for a row leaving because it
+  // was finished, so the finished state registers before it goes. Absent ≡ leave immediately.
+  exitDelay?: number;
   children: React.ReactNode;
 }
 
-function ItemRow<T>({ value, id, row, className, attrs, onContextMenu, children }: ItemRowProps<T>) {
+function ItemRow<T>({ value, id, row, className, attrs, onContextMenu, exitDelay, children }: ItemRowProps<T>) {
   const controls = useDragControls();
+  const exit = exitDelay
+    ? { ...itemMotionProps.exit, transition: { ...itemMotionProps.transition.default, delay: exitDelay } }
+    : itemMotionProps.exit;
   return (
     <Reorder.Item
       value={value}
@@ -59,6 +65,7 @@ function ItemRow<T>({ value, id, row, className, attrs, onContextMenu, children 
       {...attrs}
       onContextMenu={onContextMenu}
       {...itemMotionProps}
+      exit={exit}
     >
       <span
         className={`drag-handle${row.draggable ? "" : " disabled"}`}

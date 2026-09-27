@@ -23,7 +23,7 @@ import TaskItem from "./TaskItem";
 import type { FlyOrigin } from "./FlyingPoints";
 import { useBoardClock } from "./useBoardClock";
 import type { TabPrefs } from "./useLocalConfig";
-import { isBoxLocked } from "./types";
+import { behaviorOfType, isBoxLocked, isRetired } from "./types";
 import { uid } from "./uid";
 import type { Group, Section, Settings, StreakView, Task, TaskSchedule, TaskType, TierDef } from "./types";
 
@@ -65,6 +65,12 @@ const TASK_DISPLAY: DisplayOption[] = [
   { key: "estimate", label: "Time estimate", icon: HourglassIcon },
   { key: "timer", label: "Timer", icon: TimerIcon },
 ];
+
+// Offered only on a tab whose tasks leave the list when done (one-time tasks) — the way back to them,
+// to look or to uncheck a mis-click. Off by default: done means gone.
+const COMPLETED_DISPLAY: DisplayOption = { key: "completed", label: "Completed tasks", icon: CircleCheckIcon };
+
+const byOrder = (a: Task, b: Task) => (a.order ?? 0) - (b.order ?? 0);
 
 // Sort by a task's ceiling (its highest reachable value) and completion — both read from the type's
 // behaviour so no sort logic branches on task.type.
@@ -155,44 +161,64 @@ function SectionCard({
   const scheduleCadence: Cadence = section.period === "week" ? "weekly" : "daily";
   // Sort + display toggles come from the persisted per-tab prefs (see useLocalConfig). They're a
   // pure display transform, not board truth, so they live per device — but survive reloads.
-  const view = tabView(prefs, onPrefsChange, isStreaks ? [] : TASK_DISPLAY);
+  // The "Completed tasks" toggle only exists on a tab whose tasks retire when done (read off the tab's
+  // allowed types, so it's there before the first one-time task is even added).
+  const retiresTasks = section.allowedTypes.some((a) => behaviorOfType(a.type).retiresWhenDone);
+  const taskDisplay = retiresTasks ? [...TASK_DISPLAY, COMPLETED_DISPLAY] : TASK_DISPLAY;
+  const view = tabView(prefs, onPrefsChange, isStreaks ? [] : taskDisplay);
   const sortMode = view.sortMode as AnySortMode;
   const showEstimate = view.shown("estimate");
   const showTimer = view.shown("timer");
+  const showCompleted = retiresTasks && view.shown("completed");
+
+  // Finished one-time tasks leave the list (they stay done and keep their points). The server keeps
+  // them trailing the tab's order and out of groups, so the listed tasks are one contiguous run.
+  const listedTasks = useMemo(() => (showCompleted ? tasks : tasks.filter((t) => !isRetired(t))), [tasks, showCompleted]);
+  // The list only sees listed tasks, but a reorder must name the whole tab — the hidden ones already
+  // trail, so they're simply appended in their current order.
+  const hiddenIds = useMemo(
+    () => tasks.filter((t) => !listedTasks.includes(t)).sort(byOrder).map((t) => t.id),
+    [tasks, listedTasks],
+  );
+  const reorderTab = (orderedIds: string[]) => onReorderItems([...orderedIds, ...hiddenIds]);
+  const ejectFromTabGroup = (taskId: string, groupId: string, newOrder: string[]) =>
+    onEjectFromGroup(taskId, groupId, [...newOrder, ...hiddenIds]);
 
   // Board clock (ticks ~1/min) — only read to lock-aware-sort "Get done quick"; a tick re-renders the
   // card, which is cheap and lets a task slide up the moment it unlocks.
   const { now, settings: boardSettings } = useBoardClock();
 
   const displayedTasks = useMemo(() => {
+    const list = listedTasks;
     // "Get done quick": shortest doable tasks first so you can knock them out. Ranked in bands —
     // 0 doable+timed (sorted by time asc), 1 schedule-locked (not yet unlockable — sunk to just above
     // the untimed), 2 no time assigned, 3 completed (very bottom). Within a band, shorter time first.
     if (sortMode === "quick") {
       const rank = (t: Task) =>
         isTaskDone(t) ? 3 : taskLocked(t, now, boardSettings) ? 1 : estMinutes(t) == null ? 2 : 0;
-      return [...tasks].sort(
+      return [...list].sort(
         (a, b) => rank(a) - rank(b) || (estMinutes(a) ?? Infinity) - (estMinutes(b) ?? Infinity),
       );
     }
-    if (sortMode === "points-desc") return [...tasks].sort((a, b) => maxValue(b) - maxValue(a));
-    if (sortMode === "points-asc") return [...tasks].sort((a, b) => maxValue(a) - maxValue(b));
+    if (sortMode === "points-desc") return [...list].sort((a, b) => maxValue(b) - maxValue(a));
+    if (sortMode === "points-asc") return [...list].sort((a, b) => maxValue(a) - maxValue(b));
     if (sortMode === "status-incomplete")
-      return [...tasks].sort((a, b) => Number(isTaskDone(a)) - Number(isTaskDone(b)));
+      return [...list].sort((a, b) => Number(isTaskDone(a)) - Number(isTaskDone(b)));
     if (sortMode === "status-complete")
-      return [...tasks].sort((a, b) => Number(isTaskDone(b)) - Number(isTaskDone(a)));
+      return [...list].sort((a, b) => Number(isTaskDone(b)) - Number(isTaskDone(a)));
     // Time sorts: tasks without an estimate sink to the bottom either way.
     if (sortMode === "time-asc")
-      return [...tasks].sort((a, b) => (estMinutes(a) ?? Infinity) - (estMinutes(b) ?? Infinity));
+      return [...list].sort((a, b) => (estMinutes(a) ?? Infinity) - (estMinutes(b) ?? Infinity));
     if (sortMode === "time-desc")
-      return [...tasks].sort((a, b) => (estMinutes(b) ?? -1) - (estMinutes(a) ?? -1));
+      return [...list].sort((a, b) => (estMinutes(b) ?? -1) - (estMinutes(a) ?? -1));
     // Date added: createdAt is an ISO string, so lexicographic compare is chronological.
     if (sortMode === "added-newest")
-      return [...tasks].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      return [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     if (sortMode === "added-oldest")
-      return [...tasks].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    return tasks;
-  }, [tasks, sortMode, now, boardSettings]);
+      return [...list].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    // Manual: the stored order (used as the flat list while the Completed view is on).
+    return [...list].sort(byOrder);
+  }, [listedTasks, sortMode, now, boardSettings]);
 
   const displayedStreaks = useMemo(() => {
     if (sortMode === "count-desc") return [...streaks].sort((a, b) => b.count - a.count);
@@ -218,7 +244,7 @@ function SectionCard({
             onSelect={view.setSortMode}
             pinned={isStreaks ? undefined : { modes: pinnedSorts, onToggle: onTogglePin }}
           />
-          {!isStreaks && <DisplayMenu options={TASK_DISPLAY} shown={view.shown} onToggle={view.setShown} />}
+          {!isStreaks && <DisplayMenu options={taskDisplay} shown={view.shown} onToggle={view.setShown} />}
         </>
       }
       footer={
@@ -280,8 +306,10 @@ function SectionCard({
         />
       ) : (
         <ItemList
-          items={tasks}
-          manual={sortMode === "manual"}
+          items={listedTasks}
+          // The Completed view is a flat look-back (finished tasks sit ungrouped at the end), so it
+          // doesn't reorder or group — that happens in the normal view.
+          manual={sortMode === "manual" && !showCompleted}
           sorted={displayedTasks}
           groups={groups}
           noun="tasks"
@@ -301,10 +329,10 @@ function SectionCard({
               onEdit={(patch) => onEditTask(task.id, patch)}
             />
           )}
-          onReorder={onReorderItems}
+          onReorder={reorderTab}
           onAddGroup={onAddGroup}
           onExtendGroup={onExtendGroup}
-          onEjectFromGroup={onEjectFromGroup}
+          onEjectFromGroup={ejectFromTabGroup}
           onEditGroup={onEditGroup}
           onRemoveGroup={onRemoveGroup}
         />

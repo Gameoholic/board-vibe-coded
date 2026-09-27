@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   type AllowedType,
   behaviorOf,
+  behaviorOfType,
   type BoardEvent,
   type ClosedPeriod,
   type CompletionRecord,
@@ -16,6 +17,7 @@ import {
   effortMultOf,
   type FormulaPreview,
   type Group,
+  isRetired,
   type PatchSettingsBody,
   type PointsFormula,
   pointsFromMinutes,
@@ -40,6 +42,7 @@ import {
   type Task,
   type TaskEditFields,
   taskPointValue,
+  type TaskType,
   type TierDef,
   type Timer,
 } from "@board/contracts";
@@ -414,6 +417,22 @@ export class BoardStore {
     if (changes.count !== undefined) previous.count = task.count;
     if (changes.schedule !== undefined) previous.schedule = task.schedule;
     this.commit({ type: "TaskEdited", taskId: id, changes, previous }, idempotencyKey);
+    return this.readTask(this.requireTask(id));
+  }
+
+  // Changes a task's type. No UI calls this — it's the command behind TaskTypeChanged, used by seed
+  // migrations (see ensureTasksTabOnceType). Refuses a type the task's section doesn't allow, and a
+  // type that can't hold the task's current data (a box count or schedule on a type without quantity)
+  // rather than silently dropping it.
+  changeTaskType(id: string, type: TaskType): Task {
+    const task = this.requireTask(id);
+    if (task.type === type) return this.readTask(task);
+    const section = this.requireSection(task.sectionId);
+    if (!section.allowedTypes.some((a) => a.type === type)) throw badRequest(`section does not allow ${type} tasks`);
+    if (!behaviorOfType(type).supportsQuantity && ((task.count ?? 1) > 1 || task.schedule)) {
+      throw badRequest(`a task with a box count or schedule can't become ${type}`);
+    }
+    this.commit({ type: "TaskTypeChanged", taskId: id, taskType: type, previousType: task.type });
     return this.readTask(this.requireTask(id));
   }
 
@@ -982,6 +1001,8 @@ export class BoardStore {
           completedAt: null,
         });
         this.orderList(event.sectionId).push(event.taskId);
+        // A new task lands at the end of the listed run, ahead of any retired tasks.
+        this.settleRetired(event.sectionId);
         return;
       }
       case "TaskCompleted":
@@ -990,12 +1011,15 @@ export class BoardStore {
           t.done = true;
           t.completedAt = occurredAt;
         });
+        this.settleDoneChange(event.taskId);
         return;
       case "TaskUncompleted":
         this.mutateTask(event.taskId, occurredAt, (t) => {
           t.done = false;
           t.completedAt = null;
         });
+        // An unchecked one-time task rejoins the listed run, at its end.
+        this.settleDoneChange(event.taskId);
         return;
       case "TaskTierSet":
         // Selecting any tier is a completion moment for streak purposes; clearing it is not.
@@ -1037,13 +1061,22 @@ export class BoardStore {
           if (c.schedule !== undefined) t.schedule = c.schedule.some(Boolean) ? c.schedule : undefined;
         });
         return;
+      case "TaskTypeChanged":
+        this.mutateTask(event.taskId, occurredAt, (t) => {
+          t.type = event.taskType;
+        });
+        // A task that was already done when it became one-time retires now.
+        this.settleDoneChange(event.taskId);
+        return;
       case "TasksReordered":
         // orderedIds is the section's full task permutation; it becomes the new order. Any id not
-        // listed (defensive) trails, matching orderBy's fallback.
+        // listed (defensive) trails, matching orderBy's fallback. Retired tasks are re-settled to the
+        // end so no posted order can strand one inside the listed run.
         this.itemOrder.set(
           event.sectionId,
           orderBy(this.orderList(event.sectionId), (id) => id, event.orderedIds),
         );
+        this.settleRetired(event.sectionId);
         return;
       case "TaskDeleted": {
         const task = this.tasks.find((t) => t.id === event.taskId);
@@ -1217,6 +1250,32 @@ export class BoardStore {
     if (!task) return;
     fn(task);
     task.updatedAt = occurredAt;
+  }
+
+  // Finished one-time tasks leave their list (TaskBehavior.retiresWhenDone) but stay in state — still
+  // done, still worth their points. Two derived rules keep the list base working around them, both
+  // fold rules over the log rather than events, so a rebuild lands exactly here too:
+  //  - a task that retires drops out of its group (a hidden member would split the group's run), and
+  //  - a section's retired tasks always trail its order (a stable partition), so the tasks still
+  //    listed are one contiguous run that reorders and groups without a hidden task stranded inside.
+  private settleDoneChange(taskId: string): void {
+    const task = this.tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    if (isRetired(task) && task.groupId) {
+      const groupId = task.groupId;
+      task.groupId = undefined;
+      this.dropGroupIfEmpty(groupId);
+    }
+    this.settleRetired(task.sectionId);
+  }
+
+  private settleRetired(sectionId: string): void {
+    const retired = new Set(
+      this.tasks.filter((t) => t.sectionId === sectionId && isRetired(t)).map((t) => t.id),
+    );
+    if (retired.size === 0) return;
+    const list = this.orderList(sectionId);
+    this.itemOrder.set(sectionId, [...list.filter((id) => !retired.has(id)), ...list.filter((id) => retired.has(id))]);
   }
 }
 
