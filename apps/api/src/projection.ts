@@ -107,6 +107,9 @@ export class BoardStore {
   private spent = 0;
   // Points kept from tasks a period roll unchecked — the sum of every TasksReset's frozen pointsBanked.
   private banked = 0;
+  // Boxes kept the same way, per task: the filled level each task held whenever a roll unchecked it,
+  // summed. An "all time" counter adds this to the live level (see computeCounter).
+  private bankedLevels = new Map<string, number>();
 
   constructor(private readonly store: EventStore) {
     for (const stored of this.store.readAll()) this.apply(stored);
@@ -184,13 +187,8 @@ export class BoardStore {
     // rises on a tick and falls on an untick. Daily/weekly instead fold completion history.
     if (streak.type === "counter") {
       const levels = new Map(this.tasks.map((t) => [t.id, behaviorOf(t).filled(t)]));
-      // "Now" needs only the live levels; "all time" also folds history (honest via day snapshots).
-      const { count, active, best } = computeCounter(streak, levels, {
-        completions: this.completions,
-        settled: this.settled.day,
-        settings: this.settings,
-        now: clockNow(),
-      });
+      // "Now" needs only the live levels; "all time" adds what every period roll banked on unticking.
+      const { count, active, best } = computeCounter(streak, levels, this.bankedLevels);
       return { ...streak, count, active, best, order };
     }
     // Box count per task (for `required: "all"`) and live filled level (for the current open period,
@@ -918,6 +916,7 @@ export class BoardStore {
     this.rewards = [];
     this.spent = 0;
     this.banked = 0;
+    this.bankedLevels.clear();
   }
 
   // Timers are client-ephemeral: updated in place, never logged, gone on restart.
@@ -1174,9 +1173,11 @@ export class BoardStore {
         );
         return;
       case "TasksReset":
-        // Back to level 0 through the one level→storage mapping; the frozen value moves to `banked`.
+        // Back to level 0 through the one level→storage mapping; the frozen value moves to `banked`, and
+        // the level it held to `bankedLevels`.
         for (const id of event.taskIds) {
           this.mutateTask(id, occurredAt, (t) => {
+            this.bankedLevels.set(id, (this.bankedLevels.get(id) ?? 0) + behaviorOf(t).filled(t));
             Object.assign(t, behaviorOf(t).patchForLevel(t, 0));
             t.completedAt = null;
           });

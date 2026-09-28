@@ -132,22 +132,18 @@ test("current open period is live — a same-day check-then-uncheck drops it", (
   assert.equal(on.active, true);
 });
 
-test("counter 'all time' sums each day's reached level, snapshot-honest, plus legacy and today live", () => {
-  const s = { ...counterOf("t1"), since: "all", legacy: 10 };
-  // Raw log: reached 3 on the 20th, and 3 on the 21st. But the 21st's close snapshot froze 2 (a box
-  // was unchecked before close) — so the 21st must count 2, not 3. Today (23rd) has 1 ticked live.
-  const completions = [lvl(20, 3), lvl(21, 3)];
-  const settled = new Map([
-    ["2026-09-20", new Map([["t1", 3]])],
-    ["2026-09-21", new Map([["t1", 2]])],
-  ]);
-  const r = computeCounter(s, new Map([["t1", 1]]), { completions, settled, now });
-  assert.equal(r.count, 16); // 10 legacy + 3 (20th) + 2 (21st, snapshot wins) + 1 (today live)
+test("counter 'all time' is legacy + the levels banked at each reset + the live level", () => {
+  const s = { ...counterOf("a", "b"), since: "all", legacy: 10 };
+  // Rolls banked 5 boxes of a and 2 of b over time; right now a has 1 ticked, b none.
+  const banked = new Map([["a", 5], ["b", 2]]);
+  const r = computeCounter(s, new Map([["a", 1], ["b", 0]]), banked);
+  assert.equal(r.count, 18); // 10 legacy + 5 + 2 banked + 1 live
   assert.equal(r.active, true);
+  // Unticking now lowers it at once; what was banked stays.
+  assert.equal(computeCounter(s, new Map([["a", 0], ["b", 0]]), banked).count, 17);
 });
 
-test("counter 'now' ignores both history and legacy — just the live ticked sum", () => {
+test("counter 'now' ignores both banked history and legacy — just the live ticked sum", () => {
   const s = { ...counterOf("t1"), since: "created", legacy: 4 };
-  const completions = [lvl(20, 3), lvl(21, 3)]; // history + legacy both irrelevant in "now" mode
-  assert.equal(computeCounter(s, new Map([["t1", 2]]), { completions, now }).count, 2); // live only
+  assert.equal(computeCounter(s, new Map([["t1", 2]]), new Map([["t1", 9]])).count, 2); // live only
 });

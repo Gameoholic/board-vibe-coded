@@ -58,8 +58,7 @@ function isoWeekKey(c: Civil): string {
   return `${isoYear}-W${String(week).padStart(2, "0")}`;
 }
 
-// Bucket key for a completion. Weekly uses the ISO-week key; daily and counter both bucket by local
-// day (a counter tallies distinct days per task, so a same-day re-check collapses to one).
+// Bucket key for a completion. Weekly uses the ISO-week key; daily buckets by local day.
 function keyOf(c: Civil, type: StreakType): string {
   if (type === "weekly") return isoWeekKey(c);
   return `${c.y}-${String(c.m).padStart(2, "0")}-${String(c.d).padStart(2, "0")}`;
@@ -218,69 +217,31 @@ export function computeStreak(
 }
 
 /**
- * A `counter` streak's number, honouring `since` and the backfilled `legacy` (always added):
+ * A `counter` streak's number, honouring `since` and the backfilled `legacy`:
  *  - "Now" (`since` !== "all"): the live sum of the linked tasks' currently-ticked boxes. Ticking a
  *    box raises it, unticking lowers it — every tick moves it by one, exactly. `currentLevels` maps
  *    each task to its filled-box count (`behaviorOf(task).filled(task)`), resolved live by the caller.
- *  - "All time" (`since === "all"`): the lifetime tick total — for each linked task, the level reached
- *    on every day of history, summed. Honest via closed-day snapshots: a box checked then unchecked
- *    before close reads its frozen close-time level (so an accidental tick doesn't count), while the
- *    current open day uses the live level so an untick lowers it right now. Needs the history inputs in
- *    `opts` (as the projection has them); without them it degrades to the live sum.
+ *  - "All time" (`since === "all"`): the lifetime tick total — `legacy`, plus for each linked task the
+ *    boxes it held each time a period roll unticked it (`bankedLevels`, folded by the caller on every
+ *    TasksReset), plus what it holds now. Counting per *reset*, not per day, is what makes a tick that
+ *    stays up across day closes (a weekly task, a one-time task that never resets) count once rather
+ *    than once for every day it sat ticked. Honest: a box unticked before its reset was never banked,
+ *    and an untick now lowers the live part right away. Without `bankedLevels` it's legacy + live.
  * Lit while non-zero.
  */
 export function computeCounter(
   streak: Pick<Streak, "matcher"> & Partial<Pick<Streak, "since" | "legacy">>,
   currentLevels: Map<string, number>,
-  opts: StreakOpts & { completions?: CompletionRecord[]; now?: Date } = {},
+  bankedLevels: Map<string, number> = new Map(),
 ): StreakResult {
   // A counter has no consecutive-run notion, so `best` is always 0 (the UI hides it for counters).
   if (streak.matcher.kind !== "tasks") return { count: 0, active: false, best: 0 };
-  const conditions = streak.matcher.conditions;
-  // Backfill is the pre-app history, so it only applies to "all time"; "now" starts fresh, no legacy.
-  const legacy = streak.since === "all" ? (streak.legacy ?? 0) : 0;
-
-  // "Now": the plain live sum (also the fallback when history inputs weren't supplied — then legacy is
-  // 0 anyway unless since is "all").
-  if (streak.since !== "all" || !opts.completions) {
-    let count = legacy;
-    for (const c of conditions) count += currentLevels.get(c.taskId) ?? 0;
-    return { count, active: count > 0, best: 0 };
-  }
-
-  // "All time": sum each linked task's per-day reached level across history. Day-bucketing mirrors the
-  // daily-streak path (settings-based keys in production, legacy local-day keys in bare tests).
-  const timeZone = opts.settings?.timeZone ?? DEFAULT_TIME_ZONE;
-  const dayKeyOf = (iso: string): string =>
-    opts.settings ? periodKeyFor(iso, "day", opts.settings) : keyOf(civilOf(iso, timeZone), "daily");
-  const now = opts.now ?? new Date();
-  const todayKey = dayKeyOf(now.toISOString());
-
-  const wanted = new Set(conditions.map((c) => c.taskId));
-  // Raw max level reached per task per day (from the log) — the fallback for unsettled past days.
-  const rawByTaskDay = new Map<string, Map<string, number>>();
-  for (const rec of opts.completions) {
-    if (!wanted.has(rec.taskId)) continue;
-    const key = dayKeyOf(rec.occurredAt);
-    let m = rawByTaskDay.get(rec.taskId);
-    if (!m) rawByTaskDay.set(rec.taskId, (m = new Map()));
-    m.set(key, Math.max(m.get(key) ?? 0, rec.count ?? 1));
-  }
-
-  let count = legacy;
-  for (const taskId of wanted) {
-    // Every day this task has any evidence: a raw completion, or an entry in a settled snapshot (the
-    // projection freezes every task per closed period, so this reaches back before the streak existed).
-    const days = new Set<string>(rawByTaskDay.get(taskId)?.keys() ?? []);
-    if (opts.settled) for (const [dayKey] of opts.settled) days.add(dayKey);
-    for (const dayKey of days) {
-      const settledDay = opts.settled?.get(dayKey);
-      if (settledDay) count += settledDay.get(taskId) ?? 0; // closed day: honest frozen level
-      else if (dayKey === todayKey) count += currentLevels.get(taskId) ?? 0; // open today: live
-      else count += rawByTaskDay.get(taskId)?.get(dayKey) ?? 0; // unsettled past: raw best-effort
-    }
-    // If today has no completion record yet but boxes are ticked live, still include it.
-    if (!days.has(todayKey)) count += currentLevels.get(taskId) ?? 0;
+  // Backfill and banked ticks are both history, so only "all time" adds them; "now" starts fresh.
+  const allTime = streak.since === "all";
+  let count = allTime ? (streak.legacy ?? 0) : 0;
+  for (const c of streak.matcher.conditions) {
+    count += currentLevels.get(c.taskId) ?? 0;
+    if (allTime) count += bankedLevels.get(c.taskId) ?? 0;
   }
   return { count, active: count > 0, best: 0 };
 }
