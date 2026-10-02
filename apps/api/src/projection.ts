@@ -4,8 +4,6 @@ import {
   behaviorOf,
   behaviorOfType,
   type BoardEvent,
-  boosted,
-  boostOf,
   bountyWeight,
   canBounty,
   canBreakDown,
@@ -24,7 +22,20 @@ import {
   doneFromPieces,
   effortMultOf,
   type FormulaPreview,
+  freezeRefusal,
+  freezerOf,
+  freezesAtWeekEnd,
+  fromBoost,
+  frostFill,
+  frostShare,
   gatherGroups,
+  isFullFrost,
+  modifiersOf,
+  payout,
+  type RecapFrost,
+  type RecapFrozen,
+  streakRefusal,
+  waitDays,
   type Group,
   isRetired,
   newPiecePoints,
@@ -60,7 +71,6 @@ import {
   type StreakType,
   type StreakView,
   statusChange,
-  streakCanCount,
   statusOf,
   type Task,
   type TaskEditFields,
@@ -69,6 +79,7 @@ import {
   type TaskType,
   type TierDef,
   type Timer,
+  wholeWorth,
 } from "@board/contracts";
 import { now as clockNow } from "./clock.js";
 import type { AppendResult, EventStore } from "./db.js";
@@ -178,6 +189,10 @@ export class BoardStore {
   private tallies: Record<PeriodKind, PeriodTally> = { day: newTally(), week: newTally() };
   // Every streak's count as the open week started (frozen on its PeriodStarted) — the recap's start.
   private weekStartStreaks: Map<string, number> | null = null;
+  // Each task in a Freezer → the first day (a day key) whose frost isn't banked yet: the day it froze, then
+  // the day after each week close that banked it (see bankFrost). Thawing drops it, so a thaw mid-week loses
+  // that week's days on ice.
+  private frostFrom = new Map<string, string>();
 
   // `random` is the Bounty roll's randomness (its result is recorded; a rebuild never calls it) —
   // injectable so tests can roll deterministically.
@@ -332,17 +347,30 @@ export class BoardStore {
     });
   }
 
-  // A task's completion, paid at its boost (its Bounty's, or its parent's — boostOf), the award frozen on
-  // the event with the factor that produced it.
+  // A task's completion, paid at the modifiers on it now (its Bounty's and frost — or its task's, for a
+  // piece — and Subzero), the award frozen on the event with the modifiers that produced it. A broken-down
+  // task finishes once its pieces have paid, so a floor on the whole task counts what they paid.
   private completion(task: Task): BoardEvent {
     const parent = task.parentId ? this.tasks.find((t) => t.id === task.parentId) : undefined;
-    const boost = boostOf({ bounty: this.bountyOn(task) }, parent ? { bounty: this.bountyOn(parent) } : undefined);
+    const pieces = this.piecesOf(task.id);
+    const modifiers = modifiersOf(this.readTask(task), {
+      settings: this.settings,
+      section: this.sections.find((s) => s.id === task.sectionId),
+      ...(parent ? { parent: { bounty: this.bountyOn(parent), frostDays: parent.frostDays } } : {}),
+      hasPieces: pieces.length > 0,
+      piecesPaid: pieces.reduce((sum, p) => sum + taskPointValue(p), 0),
+    });
     return {
       type: "TaskCompleted",
       taskId: task.id,
-      pointsAwarded: boosted(task.points ?? 0, boost),
-      ...(boost !== 1 ? { boost } : {}),
+      pointsAwarded: payout(task.points ?? 0, modifiers),
+      ...(modifiers.length > 0 ? { modifiers } : {}),
     };
+  }
+
+  // Whether a task sits in a Freezer (its tab is one).
+  private inFreezer(task: Pick<Task, "sectionId">): boolean {
+    return !!this.sections.find((s) => s.id === task.sectionId)?.freezerFor;
   }
 
   private isPruned(task: Task): boolean {
@@ -442,8 +470,25 @@ export class BoardStore {
 
   // ---- commands (validate → append → apply) ----
 
-  seedSection(name: string, color: string, allowedTypes: AllowedType[], kind: SectionKind = "tasks", period?: SectionPeriod): Section {
-    const event: BoardEvent = { type: "SectionCreated", sectionId: randomUUID(), name, color, kind, allowedTypes, ...(period ? { period } : {}) };
+  // `freezerFor`: the tab this one is the Freezer of (see seed.ts — a Freezer is seeded beside its tab).
+  seedSection(
+    name: string,
+    color: string,
+    allowedTypes: AllowedType[],
+    kind: SectionKind = "tasks",
+    period?: SectionPeriod,
+    freezerFor?: string,
+  ): Section {
+    const event: BoardEvent = {
+      type: "SectionCreated",
+      sectionId: randomUUID(),
+      name,
+      color,
+      kind,
+      allowedTypes,
+      ...(period ? { period } : {}),
+      ...(freezerFor ? { freezerFor } : {}),
+    };
     this.commit(event);
     return this.requireSection(event.sectionId);
   }
@@ -479,6 +524,7 @@ export class BoardStore {
 
   createTask(body: CreateTaskBody, idempotencyKey?: string | null): Task {
     const section = this.requireSection(body.sectionId);
+    if (section.freezerFor) throw badRequest("tasks freeze into the Freezer; they aren't added to it");
     if (!section.allowedTypes.some((a) => a.type === body.type)) {
       throw badRequest(`section does not allow ${body.type} tasks`);
     }
@@ -618,6 +664,7 @@ export class BoardStore {
     idempotencyKey?: string | null,
   ): Task {
     const task = this.requireTask(id);
+    if (this.inFreezer(task)) throw badRequest("tasks in the Freezer have no status");
     const note = status === "blocked" && blocker.note ? blocker.note : undefined;
     const blockedBy = status === "blocked" ? blocker.taskId : undefined;
     if (blockedBy !== undefined) {
@@ -662,8 +709,35 @@ export class BoardStore {
     return this.readTask(task);
   }
 
+  // Freeze a task into its tab's Freezer, or thaw it back out. Freezing is for a task of a tab that has one,
+  // and not one freezeRefusal turns away (a piece, the Bounty, a blocked or finished task). Thawing starts it
+  // — In progress, at the top of its tab — and pays the thaw bonus if it has frost: frozen on the event, so a
+  // later change to the setting never re-prices it. Saying what's already so is a no-op.
+  setFrozen(id: string, frozen: boolean, idempotencyKey?: string | null): Task {
+    const task = this.requireTask(id);
+    const section = this.requireSection(task.sectionId);
+    if (frozen) {
+      if (section.freezerFor) return this.readTask(task);
+      const freezer = freezerOf(this.sections, section.id);
+      if (!freezer) throw badRequest("this tab has no Freezer");
+      const refusal = freezeRefusal(this.readTask(task));
+      if (refusal) throw badRequest(refusal);
+      this.commit({ type: "TaskFrozen", taskId: id, sectionId: freezer.id }, idempotencyKey);
+    } else {
+      if (!section.freezerFor) return this.readTask(task);
+      if (task.parentId) throw badRequest("a piece thaws with its task");
+      const thawBonus = frostShare(task, this.settings) > 0 ? this.settings.freezer.thawBonus : 0;
+      this.commit(
+        { type: "TaskThawed", taskId: id, sectionId: section.freezerFor, ...(thawBonus > 0 ? { thawBonus } : {}) },
+        idempotencyKey,
+      );
+    }
+    return this.readTask(this.requireTask(id));
+  }
+
   setDone(id: string, done: boolean, idempotencyKey?: string | null): Task {
     const task = this.requireTask(id);
+    if (this.inFreezer(task)) throw badRequest("a frozen task has to be thawed first");
     const pieces = this.piecesOf(id);
     const bountiesBefore = this.activeBounties().length;
     if (pieces.length > 0) {
@@ -854,13 +928,14 @@ export class BoardStore {
     return this.readStreak(this.requireStreak(id));
   }
 
-  // A daily or weekly streak counts only tasks that reset on its beat (see streakCanCount).
+  // A streak counts only tasks that reset — a daily or weekly one only on its beat (see streakRefusal).
   private assertStreakCanCount(type: StreakType, matcher: StreakMatcher): void {
     if (matcher.kind !== "tasks") return;
     for (const { taskId } of matcher.conditions) {
       const task = this.tasks.find((t) => t.id === taskId);
       const section = task && this.sections.find((s) => s.id === task.sectionId);
-      if (section && !streakCanCount(type, section)) throw badRequest(`${type} streaks only take ${type} tasks`);
+      const refusal = section ? streakRefusal(type, section) : null;
+      if (refusal) throw badRequest(refusal);
     }
   }
 
@@ -1067,6 +1142,8 @@ export class BoardStore {
     const tally = this.tallies[kind];
     const streaksAtStart = this.weekStartStreaks;
     let streaksAtEnd: StreakView[] = [];
+    let frost: RecapFrost[] = [];
+    let frozen: RecapFrozen[] = [];
     // A week starts by freezing where every streak stands — counted once the last week is closed and
     // reset, so a tick still up from it isn't counted for both weeks.
     const start = () => {
@@ -1090,8 +1167,13 @@ export class BoardStore {
           this.commit({ type: "TasksReset", taskIds: reset.map((t) => t.id), pointsBanked });
         }
         start();
-        // A week close rolls the new week's Bounties (a first start closes nothing, so it doesn't).
-        if (kind === "week") this.startWeekBounties(currentKey, now);
+        // A week close banks the frost the Freezer gathered, freezes what has waited too long, then rolls the
+        // new week's Bounties from the Freezer (a first start closes nothing, so it does none of it).
+        if (kind === "week") {
+          frost = this.bankFrost(open.key);
+          frozen = this.freezeWaiting(now);
+          this.startWeekBounties(currentKey, now);
+        }
       }
     } else {
       start();
@@ -1104,7 +1186,7 @@ export class BoardStore {
             .sort()
             .map((dayKey) => this.recapDay(dayKey, tally.has(dayKey) ? [tally.get(dayKey)!] : []))
         : [this.recapDay(closedKey, [...tally.values()])];
-    const recap: Omit<PeriodRecap, "bounties"> = {
+    const recap: Omit<PeriodRecap, "bounties" | "bountyEmpty"> = {
       kind,
       periodKey: closedKey,
       days,
@@ -1117,17 +1199,64 @@ export class BoardStore {
         start: streaksAtStart?.get(st.id) ?? null,
         end: st.count,
       })),
+      frost,
+      frozen,
     };
-    const bounties = kind === "week" && open && open.key !== currentKey ? this.bountiesView(now) : [];
+    const weekClosed = kind === "week" && !!open && open.key !== currentKey;
+    const bounties = weekClosed ? this.bountiesView(now) : [];
+    // Bounties are on, but there was nothing on ice to roll — the recap says so.
+    const bountyEmpty = weekClosed && this.settings.bounty.enabled && bounties.length === 0;
     // The week ends with the day that ends it: once the week a day was in is over, ending the day ends the
     // week too — a follow-up of the owner's one answer, so a week is never asked about. Its recap comes
     // along (a first week only starts, with nothing to recap).
     if (kind === "day" && this.periodStatus(now).week.due) {
       const weekWasOpen = this.openPeriods.week !== undefined;
       const week = this.rollPeriod("week", now);
-      return { recap: { ...recap, bounties }, streaks: week.streaks, ...(weekWasOpen ? { week: week.recap } : {}) };
+      return { recap: { ...recap, bounties, bountyEmpty }, streaks: week.streaks, ...(weekWasOpen ? { week: week.recap } : {}) };
     }
-    return { recap: { ...recap, bounties }, streaks: this.listStreaks() };
+    return { recap: { ...recap, bounties, bountyEmpty }, streaks: this.listStreaks() };
+  }
+
+  // A week close's frost: every task in a Freezer banks the whole days it spent there since its last bank,
+  // through the closing week's last day — one event for them all, recorded so a rebuild never counts again.
+  // A task frozen during the week counts from the day it froze (a day not yet ended is still today), and one
+  // thawed before the close counts nothing: frost stops the moment it thaws. Returns, for the recap, each
+  // task (not a piece) whose frost grew.
+  private bankFrost(weekKey: string): RecapFrost[] {
+    const through = addDays(weekKey, 6);
+    const onIce = this.tasks.filter((t) => this.inFreezer(t));
+    if (onIce.length === 0) return [];
+    // What its frost adds, on the whole task (a broken-down one's pieces pay it).
+    const frostOf = (t: Task) => Math.round(wholeWorth(t, this.piecesOf(t.id)) * frostShare(t, this.settings));
+    const before = new Map(onIce.map((t) => [t.id, { points: frostOf(t), fill: frostFill(t, this.settings), full: isFullFrost(t, this.settings) }]));
+    const tasks = onIce.map((t) => ({ taskId: t.id, days: Math.max(0, daysBetween(this.frostFrom.get(t.id) ?? weekKey, through) + 1) }));
+    this.commit({ type: "FrostBanked", periodKey: weekKey, through, tasks });
+    return onIce.flatMap((t) => {
+      const was = before.get(t.id)!;
+      const fill = frostFill(t, this.settings);
+      if (t.parentId || fill <= was.fill) return [];
+      const full = isFullFrost(t, this.settings);
+      return [{ taskId: t.id, name: t.text, from: was.points, to: frostOf(t), fillFrom: was.fill, fillTo: fill, subzero: full, subzeroNow: full && !was.full }];
+    });
+  }
+
+  // A week close freezes every task that has waited too long in its tab's Backlog (freezesAtWeekEnd) into
+  // that tab's Freezer, recording how long it waited. Returns them for the recap.
+  private freezeWaiting(now: Date): RecapFrozen[] {
+    const at = now.toISOString();
+    return this.sections
+      .filter((freezer) => freezer.freezerFor)
+      .flatMap((freezer) =>
+        this.tasks
+          .filter((t) => t.sectionId === freezer.freezerFor && !t.parentId)
+          .map((t) => this.readTask(t))
+          .filter((task) => freezesAtWeekEnd(task, at, this.settings))
+          .map((task) => {
+            const waited = waitDays(task, at);
+            this.commit({ type: "TaskFrozen", taskId: task.id, sectionId: freezer.id, waited });
+            return { taskId: task.id, name: task.text, waited };
+          }),
+      );
   }
 
   // One day of a recap from its tally (or several, for a day that ran on): per tab, in the tab's order,
@@ -1295,6 +1424,7 @@ export class BoardStore {
         kind: s.kind,
         ...(s.period ? { period: s.period } : {}),
         allowedTypes: s.allowedTypes,
+        ...(s.freezerFor ? { freezerFor: s.freezerFor } : {}),
       });
     }
     for (const s of sections) {
@@ -1380,6 +1510,7 @@ export class BoardStore {
     this.bankedRerolls = 0;
     this.tallies = { day: newTally(), week: newTally() };
     this.weekStartStreaks = null;
+    this.frostFrom.clear();
   }
 
   // Timers are client-ephemeral: updated in place, never logged, gone on restart.
@@ -1472,6 +1603,7 @@ export class BoardStore {
           kind: event.kind ?? "tasks",
           ...(event.period ? { period: event.period } : {}),
           allowedTypes: event.allowedTypes,
+          ...(event.freezerFor ? { freezerFor: event.freezerFor } : {}),
         });
         this.itemOrder.set(event.sectionId, []);
         return;
@@ -1514,31 +1646,41 @@ export class BoardStore {
           ...(count !== undefined && count > 1 ? { progress: 0 } : {}),
           ...(event.schedule?.some(Boolean) ? { schedule: event.schedule } : {}),
           ...(event.parentId ? { parentId: event.parentId } : {}),
+          // A new task waits in the Backlog from the moment it's made.
+          waitMs: 0,
+          waitingSince: occurredAt,
           createdAt: occurredAt,
           updatedAt: occurredAt,
           completedAt: null,
         });
+        // One made straight into a Freezer (reset-keep-board re-creating what was frozen) is on ice from today.
+        if (this.sections.find((s) => s.id === event.sectionId)?.freezerFor) {
+          this.frostFrom.set(event.taskId, this.openPeriods.day?.key ?? dayKeyFor(occurredAt, this.settings));
+        }
         this.orderList(event.parentId ?? event.sectionId).push(event.taskId);
         // A new task lands at the end of the listed run, ahead of any retired tasks.
         this.settleRetired(event.sectionId);
         return;
       }
-      case "TaskCompleted":
+      case "TaskCompleted": {
         this.recordCompletion(event.taskId, occurredAt);
+        // What it was paid at — an older completion recorded only its Bounty's factor (`boost`).
+        const paidWith = event.modifiers ?? fromBoost(event.boost);
         this.mutateTask(event.taskId, occurredAt, (t) => {
           t.done = true;
           t.completedAt = occurredAt;
-          if (event.boost !== undefined && event.boost !== 1) t.boost = event.boost;
-          else delete t.boost;
+          if (paidWith?.length) t.paidWith = paidWith;
+          else delete t.paidWith;
         });
         this.settleDoneChange(event.taskId);
         this.releaseDependents(event.taskId, occurredAt);
         return;
+      }
       case "TaskUncompleted":
         this.mutateTask(event.taskId, occurredAt, (t) => {
           t.done = false;
           t.completedAt = null;
-          delete t.boost;
+          delete t.paidWith;
         });
         // An unchecked one-time task rejoins the listed run, at its end.
         this.settleDoneChange(event.taskId);
@@ -1611,6 +1753,7 @@ export class BoardStore {
         this.tasks = this.tasks.filter((t) => t.id !== event.taskId);
         this.timers.delete(event.taskId);
         this.prunedIn.delete(event.taskId);
+        this.frostFrom.delete(event.taskId);
         this.dropGroupIfEmpty(task?.groupId);
         // Nothing is left to wait on, so whatever waited on it goes back to where it was.
         this.releaseDependents(event.taskId, occurredAt, true);
@@ -1668,13 +1811,63 @@ export class BoardStore {
       case "PiecesReordered":
         this.itemOrder.set(event.taskId, orderBy(this.orderList(event.taskId), (id) => id, event.orderedIds));
         return;
+      case "TaskFrozen": {
+        const task = this.tasks.find((t) => t.id === event.taskId);
+        if (!task) return;
+        // To the end of the Freezer's list, out of its group; on ice from the open day (still today until it's
+        // ended). Its pieces go with it — they're listed under it, wherever it is.
+        this.removeFromOrder(task.sectionId, task.id);
+        this.orderList(event.sectionId).push(task.id);
+        const groupId = task.groupId;
+        task.groupId = undefined;
+        this.dropGroupIfEmpty(groupId);
+        const day = this.openPeriods.day?.key ?? dayKeyFor(occurredAt, this.settings);
+        for (const t of [task, ...this.piecesOf(task.id)]) {
+          // No status in the Freezer, and a thaw bonus is gone for good; its wait starts again from nothing.
+          Object.assign(t, { sectionId: event.sectionId, tabSince: occurredAt, waitMs: 0, waitingSince: occurredAt, updatedAt: occurredAt });
+          delete t.status;
+          delete t.statusSince;
+          delete t.blocker;
+          delete t.thawBonus;
+          this.frostFrom.set(t.id, day);
+        }
+        return;
+      }
+      case "TaskThawed": {
+        const task = this.tasks.find((t) => t.id === event.taskId);
+        if (!task) return;
+        // Back to its tab, at the top of it, started — so its wait is paused; frost stops (what it gathered
+        // since the last week close is never banked). Retired tasks still trail its tab.
+        this.removeFromOrder(task.sectionId, task.id);
+        this.orderList(event.sectionId).unshift(task.id);
+        for (const t of [task, ...this.piecesOf(task.id)]) {
+          Object.assign(t, { sectionId: event.sectionId, tabSince: occurredAt, waitMs: 0, updatedAt: occurredAt });
+          delete t.waitingSince;
+          this.frostFrom.delete(t.id);
+        }
+        Object.assign(task, { status: "in-progress", statusSince: occurredAt });
+        if (event.thawBonus) task.thawBonus = event.thawBonus;
+        else delete task.thawBonus;
+        this.settleRetired(event.sectionId);
+        return;
+      }
+      case "FrostBanked":
+        for (const { taskId, days } of event.tasks) {
+          this.mutateTask(taskId, occurredAt, (t) => {
+            if (days > 0) t.frostDays = (t.frostDays ?? 0) + days;
+          });
+          this.frostFrom.set(taskId, addDays(event.through, 1));
+        }
+        return;
       case "TaskStatusSet":
         this.mutateTask(event.taskId, occurredAt, (t) => {
           const change = statusChange(t, event.status, { note: event.note, taskId: event.blockedBy }, occurredAt);
-          t.status = change.status;
-          if (change.statusSince) t.statusSince = change.statusSince;
-          if (change.blocker) t.blocker = change.blocker;
-          else delete t.blocker;
+          // The band and why, the wait across the move (In progress pauses it), and a thaw bonus only In
+          // progress keeps.
+          Object.assign(t, change);
+          if (!change.blocker) delete t.blocker;
+          if (change.thawBonus === undefined) delete t.thawBonus;
+          if (change.waitingSince === undefined) delete t.waitingSince;
         });
         return;
       case "GroupCreated": {
@@ -1785,7 +1978,7 @@ export class BoardStore {
           this.mutateTask(id, occurredAt, (t) => {
             this.bankedLevels.set(id, (this.bankedLevels.get(id) ?? 0) + behaviorOf(t).filled(t));
             Object.assign(t, behaviorOf(t).patchForLevel(t, 0));
-            delete t.boost;
+            delete t.paidWith;
             t.completedAt = null;
           });
         }
@@ -1921,9 +2114,9 @@ export class BoardStore {
       const release = releasedFrom(task, blockerId, occurredAt);
       if (!release) continue;
       this.mutateTask(task.id, occurredAt, (t) => {
-        t.status = release.status;
-        t.statusSince = release.statusSince;
+        Object.assign(t, release);
         delete t.blocker;
+        if (release.waitingSince === undefined) delete t.waitingSince;
       });
     }
   }
@@ -1943,6 +2136,11 @@ const newTally = (): PeriodTally => new Map();
 /** The day key `days` after `key` ("2026-09-27" + 6 → "2026-10-03"). */
 function addDays(key: string, days: number): string {
   return new Date(Date.parse(`${key}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** Whole days from one day key to another ("2026-09-27" → "2026-10-03" is 6; negative when `to` is earlier). */
+function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }
 
 /** The idempotency key for one of several events a single request commits (null without a key). */

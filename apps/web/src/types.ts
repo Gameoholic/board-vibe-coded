@@ -57,14 +57,18 @@ export { behaviorOf, behaviorOfType, canPrune, isRetired, taskPointValue } from 
 export { statusOf, statusChange, releasedFrom } from "@board/contracts";
 // Break down: which tasks can hold pieces, what new pieces are worth, and when a task with pieces is done —
 // the rules the server folds, mirrored so the optimistic state lands where the server will.
-export { canBreakDown, doneFromPieces, newPiecePoints } from "@board/contracts";
-// The weekly Bounty: the factor a completion is paid at (its Bounty's, or its parent's) — as the server
-// freezes it on the completion.
-export { boostOf } from "@board/contracts";
+export { canBreakDown, doneFromPieces, newPiecePoints, wholeWorth } from "@board/contracts";
+// Modifiers — what changes what a task pays (the Bounty, frost, Subzero) — and the one payout they compose
+// into, as the server pays a completion.
+export { modifiersOf, onWholeTask, payout } from "@board/contracts";
+export type { AppliedModifier, ModifierContext, ModifierId, RecapFrost, RecapFrozen, FreezerSettings } from "@board/contracts";
+// The Freezer: the wait clock, frost, and who may freeze — the rules the server folds.
+export { daysSince, freezeRefusal, freezerOf, frostFill, frostShare, isFullFrost, waitDays, willFreezeAtWeekEnd } from "@board/contracts";
 // Pure per-box schedule gate + its human label — the display-only "do this at a certain hour" lock.
 export { isBoxLocked, boxScheduleLabel } from "@board/contracts";
-// Which streaks can count a task: a daily streak a daily tab's, a weekly one a weekly tab's, a counter any.
-export { streakCanCount } from "@board/contracts";
+// Which streaks can count a task (a daily streak a daily tab's, a weekly one a weekly tab's, a counter any
+// that resets — none a one-time task), and why not.
+export { streakCanCount, streakRefusal } from "@board/contracts";
 // Pure timing curve for the screen-off wind-down nudge (idle → ramp → takeover) — see WindDownOverlay.
 export { windDownState, dayKeyFor } from "@board/contracts";
 export type { WindDownPhase, WindDownState } from "@board/contracts";

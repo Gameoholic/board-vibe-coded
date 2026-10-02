@@ -31,8 +31,9 @@ export function inHandLabel(since: string, now: string, settings: Settings): str
 }
 
 // The Status choices in a task's actions menu — one set, captioned "Status" — the current one ticked. Blocked asks why (`onBlock` opens
-// that form), so it reads "Blocked…" — and picking it again on a blocked task edits the reason.
-export function statusActions(task: Task, onSet: (status: TaskStatus) => void, onBlock: () => void): RowAction[] {
+// that form), so it reads "Blocked…" — and picking it again on a blocked task edits the reason. `leaving` is
+// what moving it out of In progress costs (a thaw bonus taken back), said on the choices that do.
+export function statusActions(task: Task, onSet: (status: TaskStatus) => void, onBlock: () => void, leaving?: string): RowAction[] {
   const current = statusOf(task);
   return STATUS_BANDS.map(({ status, label, icon }) => ({
     key: `status-${status}`,
@@ -40,6 +41,7 @@ export function statusActions(task: Task, onSet: (status: TaskStatus) => void, o
     icon,
     checked: status === current,
     set: STATUS_SET,
+    ...(leaving && current === "in-progress" && status !== "in-progress" ? { warning: leaving } : {}),
     onSelect: () => (status === "blocked" ? onBlock() : onSet(status)),
   }));
 }

@@ -33,9 +33,10 @@ interface CanvasCardProps {
   actions?: React.ReactNode; // header-right, after the move handle (sort, display, …)
   footer?: React.ReactNode; // below the body (typically a CardAdd)
   children: React.ReactNode; // the body — the tab's list
+  className?: string; // a tab kind's own look on the card (the Freezer's ice)
 }
 
-function CanvasCard({ frame, title, actions, footer, children }: CanvasCardProps) {
+function CanvasCard({ frame, title, actions, footer, children, className }: CanvasCardProps) {
   const { layout, resetSignal, onLayoutChange } = frame;
   // The scale context provides a stable ref (not a reactive value) so the card doesn't re-render on
   // zoom — re-rendering would trigger Reorder.Item layout animations on every zoom step.
@@ -157,7 +158,7 @@ function CanvasCard({ frame, title, actions, footer, children }: CanvasCardProps
 
   return (
     <motion.section
-      className="board-card"
+      className={`board-card${className ? ` ${className}` : ""}`}
       style={{ x, y, width: w, minHeight: h, zIndex: layout.z }}
       onPointerDown={focusCard}
       initial={{ opacity: 0, scale: 0.94 }}

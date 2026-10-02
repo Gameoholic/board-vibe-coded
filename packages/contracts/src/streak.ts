@@ -25,13 +25,21 @@ export interface CompletionRecord {
   weekKey?: string;
 }
 
-/** Whether a streak of `type` can count a task in `section`: a daily streak only a daily tab's tasks, a
- *  weekly one only a weekly tab's — they reset on its beat. Any other pairing can't work: a weekly task
- *  stays ticked all week (a daily streak would count it every day), a daily one is unticked before its
- *  week settles (a weekly streak would never see it), and one that never resets would count for ever once
- *  ticked. A counter counts ticks, so it takes any task. */
+/** Why a streak of `type` can't count a task in `section` — null when it can. No streak takes a task from a
+ *  tab that never resets (one-time tasks: Tasks, the Freezer) — it would count for ever once ticked. A daily
+ *  streak takes only a daily tab's tasks and a weekly one a weekly tab's, since they reset on its beat: a
+ *  weekly task stays ticked all week (a daily streak would count it every day), and a daily one is unticked
+ *  before its week settles (a weekly streak would never see it). A counter counts ticks, so it takes any
+ *  task that resets. */
+export function streakRefusal(type: StreakType, section: Pick<Section, "period">): string | null {
+  if (section.period == null) return "Streaks don't take one-time tasks";
+  if (type === "counter" || section.period === (type === "daily" ? "day" : "week")) return null;
+  return `${type === "daily" ? "Daily" : "Weekly"} streaks only take ${type} tasks`;
+}
+
+/** Whether a streak of `type` can count a task in `section` (see streakRefusal). */
 export function streakCanCount(type: StreakType, section: Pick<Section, "period">): boolean {
-  return type === "counter" || section.period === (type === "daily" ? "day" : "week");
+  return streakRefusal(type, section) === null;
 }
 
 interface Civil {

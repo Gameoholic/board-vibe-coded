@@ -1,10 +1,12 @@
-import { behaviorOf, parsePercent, POINTS_PER_PERCENT } from "@board/contracts";
+import { behaviorOf, formatPercent, parsePercent, POINTS_PER_PERCENT } from "@board/contracts";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FlyOrigin } from "./FlyingPoints";
 import type { RowAction } from "./ActionMenu";
+import AgeChip from "./AgeChip";
 import BlockForm, { type BlockReason } from "./BlockForm";
-import { BreakDownIcon, CopyIcon, EyeIcon, HourglassIcon, LockIcon, OutdentIcon, RerollIcon, ScissorsIcon } from "./Icons";
+import { BreakDownIcon, CopyIcon, EyeIcon, HourglassIcon, LockIcon, OutdentIcon, RerollIcon, ScissorsIcon, SnowflakeIcon, ThawIcon } from "./Icons";
 import ItemRow, { RowRemove, type RowContext } from "./ItemRow";
+import { lookOf } from "./modifierLooks";
 import { PieceList, PieceStrip, PiecesSummary, type RowPieces } from "./Pieces";
 import { deleteAction, editAction } from "./rowActions";
 import PointsBracket from "./PointsBracket";
@@ -15,8 +17,8 @@ import StatusPill from "./StatusPill";
 import TaskTimer from "./TaskTimer";
 import { inHandLabel, pieceStatusActions, statusActions } from "./taskStatus";
 import Tooltip from "./Tooltip";
-import { boxScheduleLabel, isBoxLocked, isRetired, statusOf } from "./types";
-import type { BoxSchedule, Task, TaskSchedule, TaskStatus, TierDef } from "./types";
+import { boxScheduleLabel, isBoxLocked, isRetired, onWholeTask, statusOf, wholeWorth } from "./types";
+import type { AppliedModifier, BoxSchedule, Task, TaskSchedule, TaskStatus, TierDef } from "./types";
 import { uid } from "./uid";
 import { useBoardClock } from "./useBoardClock";
 import { useClickOutside } from "./useClickOutside";
@@ -63,10 +65,17 @@ interface TaskItemProps {
   pieces?: RowPieces;
   // Only on a piece: take it out of its task into the tab's list ("Make it its own task").
   onMakeOwn?: () => void;
-  // What its completion is (or was) paid at, when not ×1 — a Bounty's ×2 — shown in its bracket.
-  multiplier?: number;
+  // What its completion is (or was) paid at — its modifiers (a Bounty, frost, Subzero): its bracket shows what
+  // it pays, each one tags its name and says what it does on a line under it.
+  modifiers: readonly AppliedModifier[];
   // Only on a Bounty still to win, while rerolls are left: its menu's Reroll, and how many are left.
   reroll?: { left: number; onReroll: () => void };
+  // Only in a Freezer: thawing it (the button in its box's place, and its menu) and what that gains.
+  onIce?: { onThaw: () => void; gains?: string };
+  // Only in a tab with a Freezer: freezing it, or why it can't be.
+  freeze?: { onFreeze: () => void; refusal: string | null };
+  // The tab's Age Display toggle: how long it has waited, beside its name.
+  showAge: boolean;
 }
 
 export interface RowStatus {
@@ -264,7 +273,7 @@ function formatMinutes(total: number): string {
   return `${m}m`;
 }
 
-function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, pointsHidden, onSetLevel, onRemove, onEdit, onDuplicate, prune, onSetPruned, status, pieces, onMakeOwn, multiplier, reroll }: TaskItemProps) {
+function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, pointsHidden, onSetLevel, onRemove, onEdit, onDuplicate, prune, onSetPruned, status, pieces, onMakeOwn, modifiers, reroll, onIce, freeze, showAge }: TaskItemProps) {
   const b = behaviorOf(task);
   const { now, settings, openDay } = useBoardClock();
   // A scheduled box shows a lock until its time arrives — but only on checkbox tasks (the gate is
@@ -296,8 +305,10 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
   const [retiring, setRetiring] = useState<false | "tick" | "finale">(false);
   const shownDone = task.done || !!retiring;
   // Break down: the pieces it holds — every one shown ticked while its finale plays, since the leaving row's
-  // last props are from before the last tick — and whether the type-a-piece entry is open under it.
-  const pieceItems = (pieces?.items ?? []).map((p) => (retiring === "finale" ? ticked(p) : p));
+  // last props are from before the last tick (the one just ticked paid at its modifiers now) — and whether the
+  // type-a-piece entry is open under it.
+  const finaleTick = (p: Task): Task => (!pieces || behaviorOf(p).isDone(p) ? p : { ...ticked(p), paidWith: pieces.modifiersOf(p) });
+  const pieceItems = (pieces?.items ?? []).map((p) => (retiring === "finale" ? finaleTick(p) : p));
   const [breakingDown, setBreakingDown] = useState(false);
   function startBreakDown() {
     setBreakingDown(true);
@@ -345,9 +356,10 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
   function cancelInline() { setInlineEditing(false); }
 
   const pointsRef = useRef<HTMLSpanElement>(null);
-  // A broken-down task's bracket is its whole worth: its pieces' points, plus any it keeps for itself.
-  const percents =
-    pieceItems.length > 0 ? [pieceItems.reduce((sum, p) => sum + behaviorOf(p).maxValue(p), b.maxValue(task))] : b.percents(task);
+  // A broken-down task's bracket is its whole worth: its pieces' points, plus any it keeps for itself — at
+  // its modifiers on the whole (its frost on all of it; Subzero the least all of it pays).
+  const percents = pieceItems.length > 0 ? [wholeWorth(task, pieceItems)] : b.percents(task);
+  const bracketModifiers = pieceItems.length > 0 ? onWholeTask(modifiers) : modifiers;
 
   function pointsOrigin(): FlyOrigin | undefined {
     const el = pointsRef.current;
@@ -405,27 +417,54 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
       : []),
     ...(onMakeOwn ? [{ key: "make-own", label: "Make it its own task", icon: OutdentIcon, shortcut: "m", onSelect: onMakeOwn }] : []),
   ];
+  // A thawed task's bonus goes if it leaves In progress (by a status or a freeze) — said where you'd pick it.
+  const losesBonus = task.thawBonus ? `Takes back the +${formatPercent(task.thawBonus)} thaw bonus` : undefined;
   // A piece sits under its task rather than in a band, so it only takes Blocked.
   const statusChoices = !rowStatus
     ? []
     : task.parentId
       ? pieceStatusActions(task, () => pickStatus("blocked"), () => rowStatus.onSet("backlog"))
-      : statusActions(task, pickStatus, () => pickStatus("blocked"));
+      : statusActions(task, pickStatus, () => pickStatus("blocked"), losesBonus);
   // A Bounty still to win can be rerolled from its menu, saying what that spends.
   const rerollActions: RowAction[] =
     reroll && task.bounty && !b.isDone(task)
       ? [{ key: "reroll", label: "Reroll Bounty", icon: RerollIcon, shortcut: "r", warning: `${reroll.left} reroll${reroll.left === 1 ? "" : "s"} left`, onSelect: reroll.onReroll }]
       : [];
-  const actions: RowAction[][] = [
-    [editAction(() => setEditOpen(true))],
-    rerollActions,
-    [...pieceActions, ...statusChoices],
-    pruneActions,
-    [{ key: "duplicate", label: "Duplicate", icon: CopyIcon, shortcut: "d", onSelect: onDuplicate }],
-    [deleteAction(() => setRemoving(true))],
-  ];
+  // Into its tab's Freezer — shown even when it can't go, saying why (a Bounty, a blocked task). A piece goes
+  // with its task, and a finished task is out of the way already.
+  const freezeActions: RowAction[] =
+    freeze && !task.parentId && !b.isDone(task)
+      ? [
+          {
+            key: "freeze",
+            label: "Freeze",
+            icon: SnowflakeIcon,
+            shortcut: "f",
+            ...(freeze.refusal ? { disabled: true, warning: freeze.refusal } : losesBonus ? { warning: losesBonus } : {}),
+            onSelect: freeze.onFreeze,
+          },
+        ]
+      : [];
+  // On ice a task can only be thawed (which starts it), edited or deleted — and a Bounty rerolled.
+  const thawActions: RowAction[] = onIce
+    ? [{ key: "thaw", label: "Thaw", icon: ThawIcon, shortcut: "t", ...(onIce.gains ? { note: onIce.gains } : {}), onSelect: onIce.onThaw }]
+    : [];
+  const actions: RowAction[][] = onIce
+    ? [[editAction(() => setEditOpen(true))], [...thawActions, ...rerollActions], [deleteAction(() => setRemoving(true))]]
+    : [
+        [editAction(() => setEditOpen(true))],
+        rerollActions,
+        [...pieceActions, ...statusChoices],
+        freezeActions,
+        pruneActions,
+        [{ key: "duplicate", label: "Duplicate", icon: CopyIcon, shortcut: "d", onSelect: onDuplicate }],
+        [deleteAction(() => setRemoving(true))],
+      ];
+  // Its modifiers' always-on looks (a Bounty's embers, Subzero's snow) — while it's still to do.
+  const place = { onIce: !!onIce };
+  const auras = shownDone ? [] : [...new Set(modifiers.flatMap((m) => lookOf(m)?.aura?.(task, settings, place) ?? []))];
   // Row modifiers every render branch shares.
-  const rowMods = `${showTimer ? " has-footer" : ""}${task.pruned ? " pruned" : ""}${pieceItems.length > 0 || breakingDown ? " has-pieces" : ""}${retiring === "finale" ? " finishing" : ""}`;
+  const rowMods = `${showTimer ? " has-footer" : ""}${task.pruned ? " pruned" : ""}${pieceItems.length > 0 || breakingDown ? " has-pieces" : ""}${retiring === "finale" ? " finishing" : ""}${onIce ? " on-ice" : ""}${auras.map((a) => ` aura-${a}`).join("")}`;
   // Shown only while the tab's "Pruned tasks" view lists it: when it comes back.
   const prunedNote = task.pruned && prune ? <span className="task-pruned-note">back {prune.until}</span> : null;
   // The band's word on this row: how long an in-progress task has been in hand (so a stalled one stands
@@ -445,10 +484,46 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
   ) : null;
   // Hover-revealed; a touch screen reaches the same choices through the long-press menu.
   const statusPill = rowStatus && !task.parentId ? <StatusPill status={current} onPick={pickStatus} /> : null;
+  // Its modifiers while it's still to do: a tag each beside its name (frost's isn't said on ice, where
+  // everything is frozen), and a line each under it saying what it does — on ice with how full it is, a bar.
+  const modifierTags = shownDone
+    ? null
+    : modifiers.flatMap((m) => {
+        const look = lookOf(m);
+        if (!look || (onIce && !look.tagOnIce)) return [];
+        return [
+          <span key={m.id} className={`modifier-tag${look.aura?.(task, settings, place) ? " glow" : ""}`} style={{ "--c": look.color } as React.CSSProperties}>
+            {look.tag}
+          </span>,
+        ];
+      });
+  const modifierLines =
+    shownDone || modifiers.length === 0 ? null : (
+      <span className="modifier-lines">
+        {modifiers.map((m) => {
+          const look = lookOf(m);
+          if (!look) return null;
+          const fill = onIce && look.fill ? look.fill(task, settings) : null;
+          return (
+            <span key={m.id} className="modifier-line" style={{ "--c": look.color } as React.CSSProperties}>
+              <look.icon size={12} />
+              <span>{look.line(m, pieceItems.length > 0 ? percents[0] : task.points ?? 0)}</span>
+              {fill !== null && (
+                <>
+                  <span className="modifier-meter" aria-hidden="true">
+                    <i style={{ width: `${fill * 100}%` }} />
+                  </span>
+                  {fill >= 1 && <span className="subzero-badge">Subzero</span>}
+                </>
+              )}
+            </span>
+          );
+        })}
+      </span>
+    );
+  const ageChip = showAge && !shownDone ? <AgeChip task={task} onIce={!!onIce} freezes={!!freeze} /> : null;
   // A broken-down task's progress beside and under its name, and its pieces (plus the Break down entry)
   // under the row. Only a one-time task breaks down, so only the single-checkbox layout below holds these.
-  // This week's Bounty, stamped beside its name until it's won.
-  const bountyStamp = task.bounty && !shownDone ? <span className="bounty-stamp">Bounty ×{task.bounty.multiplier}</span> : null;
   const pieceStrip = pieceItems.length > 0 ? <PieceStrip pieces={pieceItems} color={color} /> : null;
   const piecesSummary =
     pieces && pieceItems.length > 0 ? <PiecesSummary pieces={pieceItems} open={pieces.open} onToggle={pieces.onToggle} /> : null;
@@ -469,7 +544,7 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
 
   const pointsBracket = (
     <span className={`points-prefix${pointsHidden ? " in-flight" : ""}`} ref={pointsRef}>
-      <PointsBracket percents={percents} multiplier={multiplier} />
+      <PointsBracket percents={percents} modifiers={bracketModifiers} />
     </span>
   );
 
@@ -579,8 +654,9 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitInline(); } else if (e.key === "Escape") { e.preventDefault(); cancelInline(); } }}
             />
           ) : (
-            <span className="task-text" onDoubleClick={startInline}>{task.text}{task.description && <TaskInfo text={task.description} />}{estBadge}{prunedNote}{statusNote}</span>
+            <span className="task-text" onDoubleClick={startInline}>{task.text}{task.description && <TaskInfo text={task.description} />}{estBadge}{modifierTags}{ageChip}{prunedNote}{statusNote}</span>
           )}
+          {modifierLines}
         </div>
         {statusPill}
         {removeControl}
@@ -632,18 +708,21 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
           })}
         </div>
         {pointsBracket}
-        {inlineEditing ? (
-          <input
-            className="task-inline-input"
-            value={inlineText}
-            autoFocus
-            onChange={(e) => setInlineText(e.target.value)}
-            onBlur={commitInline}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitInline(); } else if (e.key === "Escape") { e.preventDefault(); cancelInline(); } }}
-          />
-        ) : (
-          <span className="task-text" onDoubleClick={startInline}>{task.text}{task.description && <TaskInfo text={task.description} />}{estBadge}{prunedNote}{statusNote}</span>
-        )}
+        <div className="task-main">
+          {inlineEditing ? (
+            <input
+              className="task-inline-input"
+              value={inlineText}
+              autoFocus
+              onChange={(e) => setInlineText(e.target.value)}
+              onBlur={commitInline}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitInline(); } else if (e.key === "Escape") { e.preventDefault(); cancelInline(); } }}
+            />
+          ) : (
+            <span className="task-text" onDoubleClick={startInline}>{task.text}{task.description && <TaskInfo text={task.description} />}{estBadge}{modifierTags}{ageChip}{prunedNote}{statusNote}</span>
+          )}
+          {modifierLines}
+        </div>
         {statusPill}
         {removeControl}
         {timerFooter}
@@ -660,6 +739,20 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
       exitDelay={retiring === "finale" ? FINALE_EXIT_DELAY : retiring ? RETIRE_EXIT_DELAY : undefined}
     >
       {(() => {
+        // On ice it can't be done: its box is the way out — thawing it, which starts it.
+        if (onIce) {
+          return (
+            <button
+              type="button"
+              className="thaw-btn"
+              aria-label={`Thaw “${task.text}”`}
+              title={onIce.gains ? `Thaw · ${onIce.gains}` : "Thaw"}
+              onClick={onIce.onThaw}
+            >
+              <ThawIcon size={12} />
+            </button>
+          );
+        }
         const locked = !shownDone && boxLocked(0);
         const tip = boxTip(0, locked);
         if (locked) {
@@ -701,8 +794,9 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitInline(); } else if (e.key === "Escape") { e.preventDefault(); cancelInline(); } }}
           />
         ) : (
-          <span className="task-text" onDoubleClick={startInline}>{task.text}{task.description && <TaskInfo text={task.description} />}{estBadge}{bountyStamp}{pieceStrip}{prunedNote}{statusNote}</span>
+          <span className="task-text" onDoubleClick={startInline}>{task.text}{task.description && <TaskInfo text={task.description} />}{estBadge}{modifierTags}{ageChip}{pieceStrip}{prunedNote}{statusNote}</span>
         )}
+        {modifierLines}
         {piecesSummary}
       </div>
       {statusPill}

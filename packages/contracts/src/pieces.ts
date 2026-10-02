@@ -45,3 +45,10 @@ export function newPiecePoints(task: Pick<Task, "points">, pieces: Pick<Task, "p
 export function doneFromPieces(pieces: Task[]): boolean | null {
   return pieces.length === 0 ? null : pieces.every((p) => behaviorOf(p).isDone(p));
 }
+
+/** A task's whole worth: its own points, plus its pieces' once it's broken down — what its bracket shows,
+ *  and what its frost and Subzero are on (a piece pays its task's frost as it goes; the task's own finish
+ *  pays whatever a floor on the whole still asks). */
+export function wholeWorth(task: Task, pieces: readonly Task[]): number {
+  return pieces.reduce((sum, p) => sum + behaviorOf(p).maxValue(p), behaviorOf(task).maxValue(task));
+}

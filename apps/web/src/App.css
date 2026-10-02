@@ -4031,6 +4031,25 @@ main.shop-open > .zoom-controls {
   color: #ef4444;
 }
 
+/* What an action gains, said the same way (Thaw: "Start now for +0.5%"). */
+.action-menu-note {
+  display: block;
+  margin-top: 1px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #0284c7;
+}
+
+/* Shown, not pickable — its warning says why ("A Bounty can't be frozen"). */
+.action-menu-item.disabled {
+  cursor: default;
+  color: var(--text-dim);
+}
+
+.action-menu-item.disabled:focus {
+  background: none;
+}
+
 /* Only listed while the tab's Display shows pruned tasks: dimmed, and saying when it's back. The cells
    are dimmed, not the row — framer owns the row's own opacity (its enter/exit animation). */
 .task-item.pruned .task-text,
@@ -4527,28 +4546,435 @@ main.shop-open > .zoom-controls {
   font-size: 0.74rem;
 }
 
-/* ---- Weekly Bounty ----
-   This week's Bounty: a red stamp beside its name (with its multiplier), pinned above the rest of its list;
-   its bracket (and a boosted completion's, and its pieces') shows what it pays, in the stamp's red. */
-.points-boosted {
-  color: #dc2626;
+/* ---- Modifiers (modifierLooks.ts) ----
+   What changes what a task pays — the Bounty, frost, Subzero — each in its own colour (--c, from its look): a
+   stamp beside the name, a line under it saying what it does, and the bracket inked in their colours (one's,
+   or a blend of several), showing what it pays. This week's Bounty is also pinned above the rest of its list. */
+.points-modified {
+  background: var(--ink);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
   font-weight: 800;
 }
 
-.bounty-stamp {
+.modifier-tag {
   display: inline-block;
   margin-left: 8px;
   padding: 1px 5px;
   border: 1.5px solid currentColor;
   border-radius: 4px;
-  background: rgba(239, 68, 68, 0.08);
-  color: #dc2626;
+  background: color-mix(in srgb, var(--c) 8%, transparent);
+  color: var(--c);
   font-size: 0.58rem;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   vertical-align: 2px;
   transform: rotate(-4deg);
+}
+
+.modifier-tag + .modifier-tag {
+  margin-left: 5px;
+}
+
+.modifier-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 2px;
+}
+
+.modifier-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--c);
+}
+
+.modifier-line svg {
+  flex-shrink: 0;
+}
+
+/* On ice, frost's line carries a bar of how full it is — "Subzero" once it's full. */
+.modifier-meter {
+  display: inline-block;
+  width: 64px;
+  height: 5px;
+  margin-left: 3px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--c) 16%, transparent);
+  overflow: hidden;
+}
+
+.modifier-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #38bdf8, var(--c));
+}
+
+.subzero-badge {
+  padding: 0 5px;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+  background: rgba(79, 70, 229, 0.09);
+  color: #4f46e5;
+  font-size: 0.6rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* Auras: a modifier's always-on look on its row (its look's `aura`), like a game's enchanted glint — a shine
+   sweeping its bracket every few seconds and its tag glowing; a Bounty's row has embers rising through it,
+   a Subzero one snow drifting and an edge of ice that breathes. Off under reduced motion. */
+.modifier-tag.glow {
+  animation: tag-glow 2.4s ease-in-out infinite;
+}
+
+@keyframes tag-glow {
+  50% {
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--c) 14%, transparent),
+      0 0 14px color-mix(in srgb, var(--c) 45%, transparent);
+  }
+}
+
+.task-item[class*="aura-"] > .points-prefix .points-modified {
+  background-image: linear-gradient(100deg, transparent 0 42%, rgba(255, 255, 255, 0.95) 50%, transparent 58% 100%), var(--ink);
+  background-size: 300% 100%, 100% 100%;
+  background-repeat: no-repeat;
+  animation: bracket-glint 3.4s ease-in-out infinite;
+}
+
+@keyframes bracket-glint {
+  0%,
+  50% {
+    background-position: 100% 0, 0 0;
+  }
+  100% {
+    background-position: 0% 0, 0 0;
+  }
+}
+
+.task-item.aura-bounty {
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.14);
+}
+
+.task-item.aura-bounty::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, rgba(239, 68, 68, 0.55) 0 1.4px, transparent 2px) 0 0 / 46px 26px,
+    radial-gradient(circle, rgba(245, 158, 11, 0.5) 0 1px, transparent 1.6px) 17px 9px / 58px 30px;
+  -webkit-mask-image: linear-gradient(to top, #000, transparent 85%);
+  mask-image: linear-gradient(to top, #000, transparent 85%);
+  animation: embers 3s linear infinite;
+}
+
+@keyframes embers {
+  to {
+    background-position: 0 -26px, 17px -21px;
+  }
+}
+
+.task-item.aura-subzero {
+  background: linear-gradient(90deg, rgba(79, 70, 229, 0.07), rgba(56, 189, 248, 0.1));
+  animation: subzero-breathe 3.2s ease-in-out infinite;
+}
+
+@keyframes subzero-breathe {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 1px rgba(79, 70, 229, 0.25);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 1px rgba(79, 70, 229, 0.55),
+      0 0 18px rgba(56, 189, 248, 0.4);
+  }
+}
+
+.task-item.aura-subzero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.95) 0 1.2px, transparent 1.8px) 0 0 / 24px 22px,
+    radial-gradient(circle, rgba(129, 140, 248, 0.7) 0 1px, transparent 1.6px) 11px 6px / 31px 27px;
+  animation: snowdrift 5s linear infinite;
+}
+
+@keyframes snowdrift {
+  to {
+    background-position: 24px 22px, 42px 33px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modifier-tag.glow,
+  .task-item[class*="aura-"] > .points-prefix .points-modified,
+  .task-item.aura-bounty::before,
+  .task-item.aura-subzero,
+  .task-item.aura-subzero::after {
+    animation: none;
+  }
+}
+
+/* ---- The Freezer (a tab whose tasks froze out of another — see freezer.ts) ----
+   Light blue like a block of ice. Its rows can't be done: their box is a thaw button, warming on hover. */
+.board-card.freezer-card {
+  background:
+    radial-gradient(160px 100px at 0 0, rgba(255, 255, 255, 0.95), transparent 70%),
+    radial-gradient(220px 120px at 100% 0, rgba(186, 230, 253, 0.5), transparent 70%),
+    linear-gradient(180deg, #f2f9fe, #e6f4fd);
+  border-color: #bae6fd;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 1px 3px rgba(2, 132, 199, 0.08);
+}
+
+.freezer-card .item-row:hover:not(:has(.item-row:hover, .task-pieces:hover)) {
+  background: rgba(2, 132, 199, 0.06);
+}
+
+.thaw-btn {
+  justify-self: start;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: 1.5px solid #38bdf8;
+  border-radius: 5px;
+  background: var(--surface);
+  color: #0284c7;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.thaw-btn:hover,
+.thaw-btn:focus-visible {
+  outline: none;
+  border-color: #f97316;
+  background: #fff7ed;
+  color: #ea580c;
+}
+
+/* A task's age beside its name (AgeChip): days, then weeks, then months; amber in the week it'll freeze. */
+.age-chip {
+  margin-left: 7px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #f8fafc;
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  vertical-align: middle;
+  cursor: default;
+}
+
+.age-chip.on-ice {
+  border-color: #bae6fd;
+  background: rgba(255, 255, 255, 0.75);
+  color: #0284c7;
+}
+
+.age-chip.soon {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+/* While the pointer is over the chip's spot (AgeChip sets `age-peek`), the row's Status pill steps aside —
+   it sits over the end of the name's line, where the chip is — and the chip's details show. */
+.item-row.age-peek:hover:not(:has(.item-row:hover, .task-pieces:hover)) > .status-pill {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.age-chip-spot.peek .tooltip-bubble {
+  opacity: 1;
+}
+
+/* A tooltip of several lines (a block child per line). */
+.tooltip-line {
+  display: block;
+}
+
+.tooltip-line.warn {
+  color: #fdba74;
+}
+
+/* ---- The freeze effects (freezeFx.ts; sizes in freezeFxTiers.ts) ----
+   Spent particles on a layer of their own over the board — under the flying points (200), never taking the
+   pointer. Rows only ever get a class whose keyframes use `translate`/`scale`, adding to framer's transform. */
+.freeze-fx {
+  position: fixed;
+  inset: 0;
+  z-index: 190;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.freeze-fx-shard {
+  position: absolute;
+  border-radius: 2px;
+  box-shadow: 0 0 6px rgba(56, 189, 248, 0.5);
+}
+
+.freeze-fx-ring {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border: 2.5px solid;
+  border-radius: 50%;
+}
+
+.freeze-fx-text {
+  position: absolute;
+  white-space: nowrap;
+  font-size: 0.95rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  color: #0284c7;
+  text-shadow: 0 1px 0 var(--surface);
+}
+
+.freeze-fx-text.subzero {
+  font-size: 1.2rem;
+  color: #4f46e5;
+}
+
+.freeze-fx-stamp {
+  position: absolute;
+  padding: 4px 14px;
+  border: 3px solid currentColor;
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 10%, var(--surface));
+  font-size: 1.5rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.freeze-fx-stamp.subzero {
+  color: #4f46e5;
+  box-shadow: 0 0 30px rgba(56, 189, 248, 0.55);
+}
+
+.freeze-fx-stamp.big {
+  font-size: clamp(2rem, 6vw, 3.6rem);
+  text-shadow: 0 0 18px rgba(56, 189, 248, 0.8);
+}
+
+.freeze-fx-ice {
+  position: absolute;
+  border-radius: 8px;
+  overflow: hidden;
+  background: linear-gradient(120deg, rgba(240, 249, 255, 0.94), rgba(186, 230, 253, 0.88) 60%, rgba(224, 231, 255, 0.92));
+  box-shadow:
+    inset 0 0 0 1px #bae6fd,
+    0 0 18px rgba(56, 189, 248, 0.35);
+}
+
+.freeze-fx-ice svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.freeze-fx-ice polyline {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  filter: drop-shadow(0 0 1px rgba(2, 132, 199, 0.9));
+  animation: crack-draw 0.22s ease-out forwards;
+  animation-delay: calc(0.17s + var(--i, 0) * 35ms);
+}
+
+@keyframes crack-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.freeze-fx-glow {
+  position: absolute;
+  border-radius: var(--radius);
+  box-shadow:
+    0 0 0 5px rgba(79, 70, 229, 0.35),
+    0 0 70px rgba(56, 189, 248, 0.55);
+}
+
+.freeze-fx-vignette {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 30% 40%, rgba(255, 255, 255, 0.95) 0 1.2px, transparent 2px) 0 0 / 34px 34px,
+    radial-gradient(ellipse at center, transparent 48%, rgba(186, 230, 253, 0.6) 80%, rgba(79, 70, 229, 0.4) 100%);
+  -webkit-mask-image: radial-gradient(ellipse at center, transparent 42%, #000 82%);
+  mask-image: radial-gradient(ellipse at center, transparent 42%, #000 82%);
+}
+
+.freeze-fx-flake {
+  position: absolute;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 6px rgba(56, 189, 248, 0.9);
+}
+
+/* On a row: a Subzero thaw's shiver, an Avalanche's hit-stop, a bracket's pulse. */
+.fx-shiver {
+  animation: fx-shiver 0.12s linear 3;
+}
+
+@keyframes fx-shiver {
+  25% {
+    translate: -3px 0;
+  }
+  75% {
+    translate: 3px 0;
+  }
+}
+
+.fx-hold {
+  scale: 1.03;
+  filter: saturate(0.2) brightness(1.15);
+  transition:
+    scale 0.3s,
+    filter 0.3s;
+}
+
+.points-prefix.fx-pulse {
+  animation: fx-pulse 0.5s cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+
+@keyframes fx-pulse {
+  40% {
+    scale: var(--fx-pulse, 1.2);
+  }
 }
 
 /* A tab's lists stacked on one grid (the pinned Bounty above the rest), so the [%] column lines up. */
@@ -4682,6 +5108,164 @@ main.shop-open > .zoom-controls {
   100% {
     translate: var(--drift, 0px) 110vh;
     rotate: calc(var(--r, 0deg) * 8 + 25deg);
+  }
+}
+
+/* The frost a week's close banked: one ice-blue note, each task's frost from what it was to what it is and its
+   bar filling — Subzero stamped on one whose frost just filled. */
+.recap-note.recap-frost {
+  list-style: none;
+  margin: 0 auto;
+  padding: 18px 20px;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: linear-gradient(160deg, #f0f9ff, #dbeafe);
+}
+
+.recap-frost li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 5px;
+  font-size: 0.92rem;
+}
+
+.recap-frost li > svg {
+  color: #0284c7;
+}
+
+.recap-frost-name {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.recap-frost-run {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.recap-frost-run b {
+  color: #0284c7;
+}
+
+.recap-frost-bar {
+  grid-column: 1 / -1;
+  height: 8px;
+  border-radius: 99px;
+  background: rgba(2, 132, 199, 0.14);
+  overflow: hidden;
+}
+
+.recap-frost-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #38bdf8, #0284c7);
+}
+
+.recap-subzero {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 2px 9px;
+  border: 2px solid currentColor;
+  border-radius: 5px;
+  background: rgba(79, 70, 229, 0.09);
+  color: #4f46e5;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* The tasks a week's close froze: notes that frost over as they land (a sheet of ice sweeping in from the
+   corner), with how long each waited. */
+.recap-frozen {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 16px;
+}
+
+.recap-note.recap-frozen-note {
+  position: relative;
+  min-height: 116px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.recap-frozen-note::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 30% 40%, rgba(255, 255, 255, 0.95) 0 1.5px, transparent 2.5px) 0 0 / 26px 26px,
+    radial-gradient(circle at 70% 75%, rgba(255, 255, 255, 0.8) 0 1px, transparent 2px) 0 0 / 18px 18px,
+    linear-gradient(155deg, rgba(240, 249, 255, 0.97), rgba(186, 230, 253, 0.95));
+  clip-path: circle(0% at 0% 0%);
+  animation: frost-over 1s ease forwards;
+  animation-delay: calc(0.55s + var(--i, 0) * 0.12s);
+}
+
+@keyframes frost-over {
+  to {
+    clip-path: circle(150% at 0% 0%);
+  }
+}
+
+.recap-frozen-note > * {
+  position: relative;
+  z-index: 1;
+}
+
+.recap-frozen-name {
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.recap-frozen-waited {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #475569;
+}
+
+.recap-frozen-waited svg {
+  color: #0284c7;
+}
+
+/* Bounties are on, but nothing was on ice to roll. */
+.recap-note.recap-no-bounty {
+  margin: 0 auto;
+  max-width: 420px;
+  padding: 22px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(160deg, #f0f9ff, #dbeafe);
+  color: #0369a1;
+  font-weight: 700;
+}
+
+.recap-no-bounty p {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recap-frozen-note::after {
+    animation: none;
+    clip-path: none;
   }
 }
 

@@ -54,11 +54,26 @@ export function defaultLayout(index: number, total: number = 1, top: number = PL
   };
 }
 
+const overlaps = (a: CardLayout, b: CardLayout) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
 // Where each card sits: its saved layout, or — never moved yet — the tidy default for its place in order.
+// On a board that's been arranged, a card that's new to it (a tab added since, like a Freezer) takes the first
+// slot of that tidy grid no card covers, on top, so it shows up beside the others rather than under one.
 export function placeCards(cards: { id: string }[], layouts: Record<string, CardLayout>, top?: number): Record<string, CardLayout> {
   const map: Record<string, CardLayout> = {};
+  const taken = cards.flatMap((c) => layouts[c.id] ?? []);
+  let z = taken.reduce((max, l) => Math.max(max, l.z), 0);
+  let slot = 0;
   cards.forEach((c, i) => {
-    map[c.id] = layouts[c.id] ?? defaultLayout(i, cards.length, top);
+    const saved = layouts[c.id];
+    if (saved || taken.length === 0) {
+      map[c.id] = saved ?? defaultLayout(i, cards.length, top);
+      return;
+    }
+    let place = defaultLayout(slot++, cards.length, top);
+    while (taken.some((t) => overlaps(t, place))) place = defaultLayout(slot++, cards.length, top);
+    taken.push(place);
+    map[c.id] = { ...place, z: ++z };
   });
   return map;
 }

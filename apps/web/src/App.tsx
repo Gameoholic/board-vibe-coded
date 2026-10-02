@@ -2,6 +2,8 @@ import {
   BountyStatus as BountyStatusSchema,
   DebugClockState as DebugClockStateSchema,
   DEFAULT_SETTINGS,
+  formatPercent,
+  type StatusFields,
   PeriodRecap as PeriodRecapSchema,
   PeriodStatus as PeriodStatusSchema,
   RolledBounty as RolledBountySchema,
@@ -32,7 +34,8 @@ import SettingsView from "./SettingsView";
 import ShopView from "./ShopView";
 import type { StreakPayload } from "./StreakForm";
 import WindDownOverlay from "./WindDownOverlay";
-import { behaviorOf, boostOf, doneFromPieces, isRetired, releasedFrom, statusChange, taskPointValue } from "./types";
+import { finishFx, thawFx } from "./freezeFx";
+import { behaviorOf, doneFromPieces, frostFill, frostShare, isRetired, modifiersOf, onWholeTask, payout, releasedFrom, statusChange, taskPointValue, wholeWorth } from "./types";
 import type { BountyStatus, FormulaPreview, Group, PeriodRecap, PeriodStatus, PointsFormula, Reward, RolledBounty, Section, Settings, StreakView, Task, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
 import { BoardClockProvider } from "./useBoardClock";
 import { useLocalConfig } from "./useLocalConfig";
@@ -533,13 +536,21 @@ function App() {
   // optimistic update records before the server's reply lands.
   const stampNow = () => debugNow ?? new Date().toISOString();
 
-  // Moving a task to a Status band is optimistic, through the same rule the server folds (statusChange).
-  // The server can refuse a blocker (the task it waits on is already done, say), so a refused write puts
-  // the task back; an accepted one adopts the server's stamp of since when.
+  // Moving a task to a Status band is optimistic, through the same rule the server folds (statusChange) —
+  // its wait (In progress pauses it) and a thaw bonus only In progress keeps move with it. The server can
+  // refuse a blocker (the task it waits on is already done, say), so a refused write puts the task back; an
+  // accepted one adopts the server's stamps.
   function setTaskStatus(task: Task, status: TaskStatus, why: { note?: string; taskId?: string } = {}) {
-    const patchTask = (fields: Pick<Task, "status" | "statusSince" | "blocker">) =>
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, ...fields } : t)));
-    const previous = { status: task.status, statusSince: task.statusSince, blocker: task.blocker };
+    const patchTask = (fields: StatusFields) => setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, ...fields } : t)));
+    const statusFields = (t: Task): StatusFields => ({
+      status: t.status,
+      statusSince: t.statusSince,
+      blocker: t.blocker,
+      waitMs: t.waitMs,
+      waitingSince: t.waitingSince,
+      thawBonus: t.thawBonus,
+    });
+    const previous = statusFields(task);
     const blocker = status === "blocked" ? { ...(why.note ? { note: why.note } : {}), ...(why.taskId ? { taskId: why.taskId } : {}) } : undefined;
     patchTask(statusChange(task, status, blocker ?? {}, stampNow()));
     fetch(`/api/tasks/${task.id}`, {
@@ -548,9 +559,69 @@ function App() {
       body: JSON.stringify({ status, ...(blocker ? { blocker } : {}) }),
     }).then(async (res) => {
       if (!res.ok) return patchTask(previous);
-      const saved = TaskSchema.parse(await res.json());
-      patchTask({ status: saved.status, statusSince: saved.statusSince, blocker: saved.blocker });
+      patchTask(statusFields(TaskSchema.parse(await res.json())));
     });
+  }
+
+  // What a completion of `task` would be paid at right now — its modifiers, as the server pays it (its
+  // Bounty's and frost or its task's, Subzero) — read from `list`, the board as it will be. `paying` is for
+  // its completion itself: a broken-down task's floor then counts what its pieces paid.
+  function modifiersNow(task: Task, list: Task[], paying = false) {
+    const parent = task.parentId ? list.find((t) => t.id === task.parentId) : undefined;
+    const pieces = list.filter((t) => t.parentId === task.id);
+    return modifiersOf(task, {
+      settings: settings ?? DEFAULT_SETTINGS,
+      section: sections.find((s) => s.id === task.sectionId),
+      ...(parent ? { parent } : {}),
+      hasPieces: pieces.length > 0,
+      ...(paying ? { piecesPaid: pieces.reduce((sum, p) => sum + taskPointValue(p), 0) } : {}),
+    });
+  }
+
+  // Freezing and thawing move a task (and its pieces) between its tab and the tab's Freezer — optimistic, the
+  // server's fold mirrored: frozen, it leaves its group and its status, a thaw bonus goes, and its wait starts
+  // again; thawed, it's started at the top of its tab, its wait paused, paid the thaw bonus if it has frost.
+  // Then the board reads back (the server knows the order and the pieces for certain). Thawing lets the frost
+  // out — an effect sized by how full it was — and the bonus flies to the counter.
+  function setTaskFrozen(task: Task, frozen: boolean) {
+    const home = sections.find((s) => s.id === task.sectionId);
+    const to = frozen ? sections.find((s) => s.freezerFor === task.sectionId)?.id : home?.freezerFor;
+    if (!to) return;
+    const s = settings ?? DEFAULT_SETTINGS;
+    const at = stampNow();
+    const bonus = !frozen && frostShare(task, s) > 0 ? s.freezer.thawBonus : 0;
+    const bracket = document.querySelector(`[data-task-id="${CSS.escape(task.id)}"] .points-prefix`)?.getBoundingClientRect();
+    // All of it, pieces and all, as its bracket shows it.
+    const worth = wholeWorth(task, tasks.filter((t) => t.parentId === task.id));
+    const paidOnIce = payout(worth, modifiersNow(task, tasks));
+    const moving = new Set([task.id, ...tasks.filter((t) => t.parentId === task.id).map((t) => t.id)]);
+    setTasks((prev) => {
+      const moved = prev.map((t) => {
+        if (!moving.has(t.id)) return t;
+        const base = { ...t, sectionId: to, tabSince: at, waitMs: 0 };
+        if (frozen) return { ...base, groupId: undefined, status: undefined, statusSince: undefined, blocker: undefined, thawBonus: undefined, waitingSince: at };
+        return t.id === task.id
+          ? { ...base, status: "in-progress" as const, statusSince: at, waitingSince: undefined, thawBonus: bonus || undefined }
+          : { ...base, waitingSince: undefined };
+      });
+      // Frozen, it's last on ice; thawed, first in its tab.
+      const others = moved.filter((t) => t.sectionId === to && !t.parentId && t.id !== task.id).sort(byOrder).map((t) => t.id);
+      return withOrder(moved, frozen ? [...others, task.id] : [task.id, ...others]);
+    });
+    fetch(`/api/tasks/${task.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ frozen }),
+    }).then(() => reloadTasks());
+    if (frozen) return cancelFlyersFor(task.id);
+    if (bonus > 0 && bracket) spawnFlyer(`thaw:${task.id}`, bonus, { rect: bracket, percents: [bonus] });
+    const out = { ...task, sectionId: to };
+    thawFx(
+      task.id,
+      frostFill(task, s),
+      { frost: Math.round(worth * frostShare(task, s)), from: paidOnIce, to: payout(worth, modifiersNow(out, tasks)) },
+      formatPercent,
+    );
   }
 
   // Whatever waits on `taskId` goes back to its band once that task is done or deleted — the server's
@@ -580,10 +651,10 @@ function App() {
     const b = behaviorOf(task);
     const patch = b.patchForLevel(task, level);
     const finishes = b.isDone({ ...task, ...patch });
-    // Paid at its boost (its Bounty's, or its parent's) while ticked — kept if it already was, as the
-    // server freezes it on the completion — and none once unticked.
-    const boost = !finishes ? 1 : b.isDone(task) ? (task.boost ?? 1) : boostOf(task, list.find((t) => t.id === task.parentId));
-    const changed = list.map((t) => (t.id === task.id ? { ...t, ...patch, boost: boost !== 1 ? boost : undefined } : t));
+    // Paid at its modifiers while ticked — kept if it already was, as the server freezes them on the
+    // completion — and none once unticked.
+    const paid = !finishes ? undefined : b.isDone(task) ? task.paidWith : modifiersNow(task, list, true);
+    const changed = list.map((t) => (t.id === task.id ? { ...t, ...patch, paidWith: paid?.length ? paid : undefined } : t));
     const next = finishes ? releaseWaitingOn(changed, task.id) : changed;
     if (!b.retiresWhenDone) return next;
     return withTrailing(finishes ? withMembership(next, [task.id], undefined) : next, task.sectionId, isRetired);
@@ -635,14 +706,25 @@ function App() {
       .then(() => {
         if (wonBounty && settings?.bounty.rollOnWin) revealRolledAfterWin(knownBounties);
       });
-    // What the tick won — the board's total after it, less before: a Bounty's boost and a finished task's
+    // What the tick won — the board's total after it, less before: its modifiers and a finished task's
     // own points included. Finishing a broken-down task, or winning a Bounty, is the bigger celebration.
     const delta = computeTotalPoints(after) - computeTotalPoints(tasks);
     const finale = finished(parent?.id) || wonBounty;
     // A flyer carries what was won, which can be more than the one bracket it leaves from (a broken-down
-    // task's whole tick, a boosted piece, a task finished along with its last piece).
-    const boostedTick = (after.find((t) => t.id === task.id)?.boost ?? 1) !== 1;
-    const shown = origin && (pieces.length > 0 || finale || boostedTick) ? { ...origin, percents: [delta] } : origin;
+    // task's whole tick, a piece paid at its modifiers, a task finished along with its last piece).
+    const modifiedTick = (after.find((t) => t.id === task.id)?.paidWith?.length ?? 0) > 0;
+    const shown = origin && (pieces.length > 0 || finale || modifiedTick) ? { ...origin, percents: [delta] } : origin;
+    // Finishing a task that froze cracks, shatters or brings the avalanche (by how full its frost was), and
+    // winning a Bounty throws embers — played off its row while it's still there. A broken-down task's is
+    // its whole finish (its last piece, or its own box), never a piece on the way.
+    const whole = parent && finished(parent.id) ? parent : !task.parentId && finished(task.id) ? task : undefined;
+    const fill = whole ? frostFill(whole, settings ?? DEFAULT_SETTINGS) : 0;
+    if (delta > 0 && whole && (fill > 0 || wonBounty)) {
+      // What the whole task paid, as its bracket says it — a broken-down one's pieces included.
+      const done = after.find((t) => t.id === whole.id) ?? whole;
+      const paid = payout(wholeWorth(done, after.filter((t) => t.parentId === done.id)), onWholeTask(done.paidWith ?? []));
+      finishFx(whole.id, fill, wonBounty, formatPercent(paid));
+    }
     if (delta > 0) spawnFlyer(task.id, delta, shown, finale);
     else changes.forEach((c) => cancelFlyersFor(c.task.id));
   }
@@ -944,6 +1026,7 @@ function App() {
                     onDuplicateTask={duplicateTask}
                     onSetPruned={setPruned}
                     onSetStatus={setTaskStatus}
+                    onSetFrozen={setTaskFrozen}
                     onBreakDown={breakDown}
                     onSetParent={setTaskParent}
                     rerollsLeft={bountyStatus?.rerollsLeft ?? 0}

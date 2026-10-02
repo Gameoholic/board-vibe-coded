@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  AppliedModifier,
   HexColor,
   SectionKind,
   SectionPeriod,
@@ -100,6 +101,8 @@ export const BoardEvent = z.discriminatedUnion("type", [
     // Recurrence cadence (see domain SectionPeriod); optional — absent ≡ no cadence (daily default).
     period: SectionPeriod.optional(),
     allowedTypes: StoredAllowedTypes,
+    // The tab this one is the Freezer of (see domain Section.freezerFor); absent on every other tab.
+    freezerFor: z.string().optional(),
   }),
   z.object({ type: z.literal("SectionRecolored"), sectionId: z.string(), color: HexColor }),
   // Sets a section's recurrence cadence. Not exposed in the UI (sections are static by design) — used
@@ -138,9 +141,17 @@ export const BoardEvent = z.discriminatedUnion("type", [
     // tab. Absent on a task of the tab's own list.
     parentId: z.string().optional(),
   }),
-  // `boost` is the factor the completion was paid at (a Bounty's ×2) — frozen here, with the award it
-  // produced, so a Bounty ending later never re-prices it. Absent ≡ ×1.
-  z.object({ type: z.literal("TaskCompleted"), taskId: z.string(), pointsAwarded: Points, boost: z.number().optional() }),
+  // `modifiers` are what the completion was paid at (a Bounty's ×2, its frost, …) — frozen here, with the
+  // award they produced, so a Bounty ending or a setting changing later never re-prices it. Absent ≡ none.
+  // `boost` is how a completion recorded its Bounty's factor before modifiers; kept so those still parse
+  // (the fold reads it as a Bounty modifier — see fromBoost).
+  z.object({
+    type: z.literal("TaskCompleted"),
+    taskId: z.string(),
+    pointsAwarded: Points,
+    modifiers: z.array(AppliedModifier).optional(),
+    boost: z.number().optional(),
+  }),
   z.object({ type: z.literal("TaskUncompleted"), taskId: z.string() }),
   z.object({
     type: z.literal("TaskTierSet"),
@@ -215,6 +226,26 @@ export const BoardEvent = z.discriminatedUnion("type", [
   }),
   // Reorders one task's pieces (the counterpart of TasksReordered for the list under a task).
   z.object({ type: z.literal("PiecesReordered"), taskId: z.string(), orderedIds: z.array(z.string()) }),
+  // A task moved into its tab's Freezer (`sectionId`) — by the owner, or by a week close because it waited
+  // longer than Settings allow (`waited`: the whole days it had waited). Its pieces go with it; it leaves its
+  // group and its status, and a thaw bonus it held is gone.
+  z.object({
+    type: z.literal("TaskFrozen"),
+    taskId: z.string(),
+    sectionId: z.string(),
+    waited: z.number().int().nonnegative().optional(),
+  }),
+  // A task thawed out of the Freezer into its tab (`sectionId`), started: In progress, at the top. Its frost
+  // stays (and stops growing). `thawBonus` freezes what it was paid for thawing — none without frost.
+  z.object({ type: z.literal("TaskThawed"), taskId: z.string(), sectionId: z.string(), thawBonus: Points.optional() }),
+  // A week close banked frost: the whole days each task in a Freezer spent there since its last bank, up to
+  // and including `through` (the closing week's last day) — recorded, so a rebuild never counts them again.
+  z.object({
+    type: z.literal("FrostBanked"),
+    periodKey: z.string(),
+    through: z.string(),
+    tasks: z.array(z.object({ taskId: z.string(), days: z.number().int().nonnegative() })),
+  }),
   // The owner moved a task to another Status band (or re-said why it's blocked). A blocked one may
   // carry a note and/or the task it waits on; when that task is done the fold releases it back to where
   // it was, with no event of its own. `previousStatus` keeps the log self-describing (cf. TaskEdited).

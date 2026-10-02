@@ -4,10 +4,10 @@ import { setDebugNow } from "../dist/clock.js";
 import { openEventStore } from "../dist/db.js";
 import { BoardStore } from "../dist/projection.js";
 
-// A daily or weekly streak counts only tasks that reset on its beat — a daily streak a daily tab's, a
-// weekly one a weekly tab's (a weekly task would count every day, a daily one never for its week, a
-// one-time one for ever). A counter counts ticks, so it takes anything.
-test("a streak only links tasks on its beat; a counter links any", (t) => {
+// A streak counts only tasks that reset — a daily streak a daily tab's, a weekly one a weekly tab's (a weekly
+// task would count every day, a daily one never for its week). A counter counts ticks, so it takes any task
+// that resets. None takes a one-time task (Tasks, the Freezer): it would count for ever once ticked.
+test("a streak only links tasks on its beat; a counter any that resets; none a one-time task", (t) => {
   t.after(() => setDebugNow(null));
   setDebugNow("2026-09-27T09:00:00.000Z");
   const store = new BoardStore(openEventStore(":memory:"));
@@ -26,12 +26,13 @@ test("a streak only links tasks on its beat; a counter links any", (t) => {
       matcher: { kind: "tasks", conditions: [{ taskId: task.id, required: 1 }] },
     });
 
-  const fine = [make("daily", daily), make("weekly", weekly), ...[daily, weekly, once].map((task) => make("counter", task))];
-  assert.equal(fine.length, 5);
-  assert.throws(() => make("daily", weekly), { status: 400, message: "daily streaks only take daily tasks" });
-  assert.throws(() => make("weekly", daily), { status: 400, message: "weekly streaks only take weekly tasks" });
-  assert.throws(() => make("daily", once), { status: 400 });
-  assert.throws(() => make("weekly", once), { status: 400 });
+  const fine = [make("daily", daily), make("weekly", weekly), ...[daily, weekly].map((task) => make("counter", task))];
+  assert.equal(fine.length, 4);
+  assert.throws(() => make("daily", weekly), { status: 400, message: "Daily streaks only take daily tasks" });
+  assert.throws(() => make("weekly", daily), { status: 400, message: "Weekly streaks only take weekly tasks" });
+  for (const type of ["daily", "weekly", "counter"]) {
+    assert.throws(() => make(type, once), { status: 400, message: "Streaks don't take one-time tasks" });
+  }
 
   // Switching a streak's type re-checks what it counts; a rename doesn't.
   assert.throws(() => store.editStreak(fine[0].id, { type: "weekly" }), { status: 400 });

@@ -97,8 +97,22 @@ export const Section = z.object({
   kind: SectionKind.default("tasks"),
   period: SectionPeriod.optional(),
   allowedTypes: z.array(AllowedType).min(1),
+  // Seed-authored, like `kind`: this tab is the Freezer of that tab — where its tasks freeze when they've
+  // waited too long, and thaw back from (see freezer.ts). The code knows the pairing, never a tab's name.
+  freezerFor: z.string().optional(),
 });
 export type Section = z.infer<typeof Section>;
+
+// A modifier as it applied to a task (see modifiers.ts): which one, its kind, and its value — a share of
+// the task's own points (0.4 ≡ +40%), a flat amount or a floor (in points), or a factor (2 ≡ ×2). Frozen on
+// a completion so it's paid at what applied then. The id is a plain string here, so an event naming a
+// modifier that's since been retired still parses.
+export const ModifierKind = z.enum(["share", "flat", "factor", "floor"]);
+export type ModifierKind = z.infer<typeof ModifierKind>;
+// `piecesPaid` is on a floor of a broken-down task's own completion: a floor is on the whole task, so it
+// counts what the pieces had paid, and the task's own completion pays the rest.
+export const AppliedModifier = z.object({ id: z.string(), kind: ModifierKind, value: z.number(), piecesPaid: Points.optional() });
+export type AppliedModifier = z.infer<typeof AppliedModifier>;
 
 // The task read-model (a projection of the event log). Scoring fields (points/tiers) are the task's
 // *current* config; the frozen award for any given completion lives on the event, not here.
@@ -153,9 +167,21 @@ export const Task = z.object({
   // This week's Bounty, while it's on this task: its multiplier and the week it was rolled for. Derived
   // on read (it ends with that week) — absent ≡ not the Bounty.
   bounty: z.object({ multiplier: z.number(), periodKey: z.string() }).optional(),
-  // The factor its current completion was paid at (a Bounty's ×2), frozen on its TaskCompleted so the
-  // Bounty ending later never re-prices it. Absent ≡ ×1.
-  boost: z.number().optional(),
+  // The modifiers its current completion was paid at (a Bounty's ×2, its frost, …), frozen on its
+  // TaskCompleted so a Bounty ending or a setting changing later never re-prices it. Absent ≡ none.
+  paidWith: z.array(AppliedModifier).optional(),
+  // Frost: the whole days it has spent in the Freezer, banked at each week's end (see freezer.ts). It stays
+  // when the task thaws and carries on from there if it freezes again. Absent ≡ none.
+  frostDays: z.number().int().nonnegative().optional(),
+  // When it last froze or thawed — since when it's been in its tab. Absent ≡ never: since it was created.
+  tabSince: z.string().optional(),
+  // How long it has waited (see waitDays): the stretches already over, in ms, and when the current one
+  // began — absent while In progress pauses it. Freezing or thawing starts it again from nothing.
+  waitMs: z.number().nonnegative().optional(),
+  waitingSince: z.string().optional(),
+  // The thaw bonus it was paid when it thawed with frost — part of its points while it stays In progress
+  // or is done, taken back for good once it leaves In progress. Absent ≡ none.
+  thawBonus: Points.optional(),
   // Data-silo timestamps, server-authored. Additive — the UI may ignore them.
   createdAt: z.string(),
   updatedAt: z.string(),

@@ -343,3 +343,53 @@ export function OutdentIcon({ size = 14 }: IconProps) {
     </svg>
   );
 }
+
+// The Freezer and frost: a six-armed snowflake. Also "Freeze" in a task's menu and frost's line.
+export function SnowflakeIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 1.5v13M2.4 4.75l11.2 6.5M2.4 11.25l11.2-6.5" />
+      <path d="M6.3 2.6 8 4.1l1.7-1.5M6.3 13.4 8 11.9l1.7 1.5" />
+    </svg>
+  );
+}
+
+// A drop of meltwater — "Thaw": out of the Freezer and started.
+export function ThawIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <path d="M8 2s4.2 4.6 4.2 7.7a4.2 4.2 0 0 1-8.4 0C3.8 6.6 8 2 8 2Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// Cross-hairs on a mark — the Bounty's line.
+export function TargetIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
+      <circle cx="8" cy="8" r="4.6" />
+      <circle cx="8" cy="8" r="1.4" />
+      <path d="M8 1.5v2.6M8 11.9v2.6M1.5 8h2.6M11.9 8h2.6" />
+    </svg>
+  );
+}
+
+// A cut crystal — Subzero's line.
+export function CrystalIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round">
+      <path d="M4.8 2.5h6.4L14 6.2 8 13.8 2 6.2Z" />
+      <path d="M2 6.2h12M8 13.8 5.8 6.2 7 2.5M8 13.8l2.2-7.6L9 2.5" />
+    </svg>
+  );
+}
+
+// A calendar page — the Age Display toggle (how long a task has waited).
+export function AgeIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2.5" y="3.5" width="11" height="10" rx="1.5" />
+      <path d="M2.5 6.5h11M5.5 2v3M10.5 2v3" />
+    </svg>
+  );
+}

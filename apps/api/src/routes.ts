@@ -104,6 +104,7 @@ export function buildRouter(store: BoardStore, backups: Backups): Router {
     if (body.pruned !== undefined) task = store.setPruned(id, body.pruned, idemKey(req, "prune"));
     if (body.status !== undefined) task = store.setStatus(id, body.status, body.blocker, idemKey(req, "status"));
     if (body.parentId !== undefined) task = store.setParent(id, body.parentId, idemKey(req, "parent"));
+    if (body.frozen !== undefined) task = store.setFrozen(id, body.frozen, idemKey(req, "frozen"));
 
     res.json(task ?? store.getTask(id));
   });

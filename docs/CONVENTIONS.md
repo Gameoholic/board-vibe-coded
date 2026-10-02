@@ -33,6 +33,33 @@ Duplication means something was modelled wrong. One concept, one component, one 
 - **Buttons: there is NO global `<button>` reset.** A bare `<button>` renders as the ugly browser default and will not match the app. Every actionable button must carry a style class: **`.btn-primary`** for the filled/dark affirmative action (a form's `button[type="submit"]` gets the same styling automatically), **`.ghost-btn`** for a secondary/cancel action, `.danger-btn` for destructive. Never ship a classless `<button>` for a user action. (`App.css`, near `.btn-primary`.)
 - When a rule or magic number needs to exist, give it **one home** (e.g. every flyer magnitude lives in `flyerTiers.ts`, nothing else). Retuning should mean editing one object, not hunting through components.
 
+## In-app text
+
+Every string the owner sees (labels, hints, setting notes, confirms, recap lines) is product copy: it says what the thing *is* or *does for them*, in the board's own words. This is the owner's standing rule, flagged because Claude keeps breaking it.
+
+- **Never echo the request.** The prompt that asked for a feature describes a change; the UI describes the product. Asked to "make the week recap close all the streaks and clear all tasks", the button says "End the week", not "Ends this week, closes all streaks and clears your tasks". The owner knows what ending a week does.
+- **Don't narrate the mechanism** ("will prompt the user to…", "recomputes as if…", "rebuilding them fresh"), and never say "the user" or "the app".
+- **A hint has to earn its place.** Keep one only if it tells the owner something the label doesn't; a label that's clear on its own gets no hint.
+
+## Modifiers — every point-changing mechanic is one
+
+Anything that changes what a task pays is a **modifier**: the Bounty, frost, and every boost, bonus, penalty or buff the owner adds later. The owner wants these to grow like stats in an MMO (their reference is Hypixel Skyblock), so they have to stack by construction, never by special case.
+
+- **A new mechanic is one entry in the modifier registry**, never its own payout branch, task column, bracket colour or row badge. The entry declares when a task has it, its effect, and how it shows. Nothing else in the code knows a modifier by name.
+- **Four kinds of effect, always composed in the same order.**
+  - A *share* adds a fraction of the task's own points (frost: +40%).
+  - A *flat* adds a fixed amount (none yet).
+  - A *factor* multiplies (Bounty: ×2).
+  - A *floor* is the least the task pays (Subzero: at least 100%) — the whole task: a broken-down one's pieces pay toward it, and its finish pays the rest.
+
+  `pays = max((points × (1 + Σ shares) + Σ flats) × Π factors, highest floor)`, as one composed result, rounded once, half-up (see "History & data discipline"). That's how a Bounty sits on top of frost, and Subzero lifts a task to 100% without lowering one already worth more, with none of them knowing about the others. A new modifier picks one of these kinds; a new kind is a design change to raise with the owner first.
+- **Every modifier shows itself the same way:** a tag after the task's name, one line under it in its own colour and icon ("×2 bounty", "+0.12% frost", "=100% subzero"), and a bracket showing what the task pays — black with no modifiers, the modifier's colour with one, a blend of their colours with several. Where a tag would say nothing (frost's in the Freezer, where everything is frozen), the modifier's own entry hides it there; the row never special-cases one. A modifier can also name an **aura**, an always-on look on its row, like a game's enchanted glint (Bounty's embers, Subzero's drifting snow); the row just applies whatever auras its modifiers name.
+- **A completion freezes its resolved modifiers and the composed result**, so retuning a modifier never reprices the past (`ARCHITECTURE.md`, ADR 3).
+- **Tests cover the composition, not just each modifier:** every kind alone, every pair (a Bounty doubles frost; a floor lifts but never lowers), the single rounding, and that a rebuild from the event log gives identical numbers.
+- **Not a modifier:** a payout that doesn't change a task's points, like the thaw bonus (a flat amount paid when a task thaws) or a shop purchase.
+
+**Built** with the Freezer: the registry, when a task has each modifier and its effect, is `packages/contracts/src/modifiers.ts` (what the server pays with), and how each one shows is `apps/web/src/modifierLooks.ts`. A new modifier is one entry in each, plus its tests. The shape is in `ARCHITECTURE.md` → "Modifiers".
+
 ## Dependencies
 
 Few and justified. Supply chain is the realistic security risk (see below), so every dependency is a liability. `framer-motion` was added deliberately for real drag physics and enter/exit animation — **don't reach for a second animation library alongside it.** Prefer the platform (native DnD, CSS, `Intl`, `crypto.randomUUID`) and already-installed deps before adding anything.
@@ -51,7 +78,7 @@ Security is not a phase — see `ARCHITECTURE.md` for the containment architectu
 
 - Under the target model: writes are *events appended*, not rows mutated; deletes are soft. State is a projection that must rebuild to identical numbers — protect that invariant.
 - **Points will be integer thousandths of a percent** (`1% === 1000`) once persistence lands — never floats. Float addition isn't associative and the rebuild-parity check would fail randomly. `%` is the only unit the user sees.
-- Multipliers (when they exist) **compose into one factor, applied once, rounded once (half-up)** — never stepped one at a time.
+- Modifiers **compose into one payout, rounded once (half-up)** — never stepped one at a time (see "Modifiers").
 
 ## How we work together
 

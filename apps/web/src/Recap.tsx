@@ -2,14 +2,14 @@ import { formatPercent } from "@board/contracts";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useState, type CSSProperties } from "react";
 import { BountyExplain, BountyRoll } from "./BountyRoll";
-import { FlameIcon } from "./Icons";
+import { FlameIcon, SnowflakeIcon } from "./Icons";
 import { dayLabel, labelFor } from "./periodLabels";
-import type { PeriodRecap, RecapDay, RecapStreak, RecapTab, RolledBounty } from "./types";
+import type { PeriodRecap, RecapDay, RecapFrost, RecapFrozen, RecapStreak, RecapTab, RolledBounty } from "./types";
 
 // The recap of a just-closed period, like a mobile game's daily log-in: a week opens on its days, each with
 // what you cleared in every tab (in the tab's colour, with the % it earned), what the day earned and lost,
-// and each purchase; then its streaks from the week's start to its end; then the next week's Bounty roll.
-// Pages you flip, so nothing scrolls.
+// and each purchase; then its streaks from the week's start to its end; then the frost its close banked and
+// the tasks it froze; then the next week's Bounty roll. Pages you flip, so nothing scrolls.
 // A week's takes over the screen as sticky notes on the board (NoteWall); a day's is a floating card over a
 // soft (never fully dark) scrim, in keeping with the no-heavy-modal rule.
 
@@ -92,7 +92,11 @@ function RecapBody({ recap, onReroll, onDone }: { recap: PeriodRecap; onReroll: 
       ? [
           { key: "days", label: "Your week" },
           ...(recap.streaks.length > 0 ? [{ key: "streaks", label: "Streaks" }] : []),
-          ...(recap.bounties.length > 0 ? [{ key: "bounty", label: recap.bounties.length > 1 ? "Bounties" : "Bounty" }] : []),
+          ...(recap.frost.length > 0 ? [{ key: "frost", label: "Frost" }] : []),
+          ...(recap.frozen.length > 0 ? [{ key: "frozen", label: "Frozen" }] : []),
+          ...(recap.bounties.length > 0 || recap.bountyEmpty
+            ? [{ key: "bounty", label: recap.bounties.length > 1 ? "Bounties" : "Bounty" }]
+            : []),
         ]
       : [{ key: "day", label: "Your day" }];
   const [page, setPage] = useState(0);
@@ -126,7 +130,10 @@ function RecapBody({ recap, onReroll, onDone }: { recap: PeriodRecap; onReroll: 
             {current.key === "day" && <DayPage day={recap.days[0]} />}
             {current.key === "days" && <WeekDaysPage recap={recap} />}
             {current.key === "streaks" && <StreaksPage streaks={recap.streaks} />}
-            {current.key === "bounty" && <BountiesPage bounties={recap.bounties} onReroll={onReroll} />}
+            {current.key === "frost" && <FrostPage frost={recap.frost} />}
+            {current.key === "frozen" && <FrozenPage frozen={recap.frozen} />}
+            {current.key === "bounty" &&
+              (recap.bounties.length > 0 ? <BountiesPage bounties={recap.bounties} onReroll={onReroll} /> : <NoBountyPage />)}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -314,6 +321,68 @@ function StreaksPage({ streaks }: { streaks: RecapStreak[] }) {
         );
       })}
     </motion.ul>
+  );
+}
+
+// The frost the week's close banked, on one ice-blue note: each task's frost from what it was to what it is
+// (what it adds to its points), its bar filling up — and a task whose frost just filled gets Subzero stamped on.
+function FrostPage({ frost }: { frost: RecapFrost[] }) {
+  return (
+    <motion.ul className="recap-frost recap-note recap-drop" style={dropStyle(2)} {...slap(2)}>
+      {frost.map((f, i) => (
+        <motion.li key={f.taskId} {...pop(i + 2)}>
+          <SnowflakeIcon size={13} />
+          <span className="recap-frost-name">{f.name}</span>
+          <span className="recap-frost-run">
+            +{formatPercent(f.from)} → <b>+{formatPercent(f.to)}</b>
+          </span>
+          <span className="recap-frost-bar" aria-hidden="true">
+            <motion.i
+              initial={{ width: `${f.fillFrom * 100}%` }}
+              animate={{ width: `${f.fillTo * 100}%` }}
+              transition={{ delay: 0.55 + i * SPAWN_STEP, duration: 1.1, ease: [0.22, 1, 0.36, 1] }}
+            />
+          </span>
+          {f.subzero && (
+            <motion.span
+              className="recap-subzero"
+              initial={f.subzeroNow ? { opacity: 0, scale: 2.6, rotate: -16 } : false}
+              animate={{ opacity: 1, scale: 1, rotate: -5 }}
+              transition={{ delay: 1.4 + i * SPAWN_STEP, type: "spring", stiffness: 420, damping: 14 }}
+            >
+              Subzero
+            </motion.span>
+          )}
+        </motion.li>
+      ))}
+    </motion.ul>
+  );
+}
+
+// The tasks the week's close froze, each a note that frosts over as it lands, with how long it had waited.
+function FrozenPage({ frozen }: { frozen: RecapFrozen[] }) {
+  return (
+    <ol className="recap-frozen">
+      {frozen.map((f, i) => (
+        <motion.li key={f.taskId} className="recap-frozen-note recap-note recap-drop" style={dropStyle(i)} {...slap(i)}>
+          <span className="recap-frozen-name">{f.name}</span>
+          <span className="recap-frozen-waited">
+            <SnowflakeIcon size={13} />
+            Waited {f.waited} {f.waited === 1 ? "day" : "days"}
+          </span>
+        </motion.li>
+      ))}
+    </ol>
+  );
+}
+
+// Bounties are on, but nothing was on ice to roll.
+function NoBountyPage() {
+  return (
+    <motion.div className="recap-no-bounty recap-note recap-drop" style={dropStyle(1)} {...slap(1)}>
+      <SnowflakeIcon size={18} />
+      <p>Nothing's on ice, so there's no Bounty this week.</p>
+    </motion.div>
   );
 }
 

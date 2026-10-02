@@ -1,5 +1,5 @@
 import type { Section, Task, TaskType } from "./domain.js";
-import { boosted } from "./points.js";
+import { payout } from "./modifiers.js";
 
 // One behaviour per task type, so no consumer ever branches on `task.type` itself — they read
 // through `behaviorOf(task)`. Adding a task type means adding one entry to TASK_BEHAVIORS; the row
@@ -152,9 +152,11 @@ export function behaviorOfType(type: TaskType): TaskBehavior {
   return TASK_BEHAVIORS[type];
 }
 
-/** Live point contribution of a task to the running total — at the factor its completion was paid at
- *  (`boost`, frozen when it was ticked: a Bounty's ×2 stays after the Bounty ends). */
+/** Live point contribution of a task to the running total — at the modifiers its completion was paid at
+ *  (`paidWith`, frozen when it was ticked: a Bounty's ×2 stays after the Bounty ends), plus the thaw bonus
+ *  it holds, if any. */
 export function taskPointValue(task: Task): number {
   const b = behaviorOf(task);
-  return boosted(b.valueAt(task, b.filled(task)), task.boost ?? 1);
+  const value = b.valueAt(task, b.filled(task));
+  return (task.paidWith ? payout(value, task.paidWith) : value) + (task.thawBonus ?? 0);
 }

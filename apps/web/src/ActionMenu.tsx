@@ -20,6 +20,10 @@ export interface RowAction {
   danger?: boolean;
   // A cost worth knowing before picking it, shown under the label ("Breaks “Morning routine”").
   warning?: string;
+  // What it gains, shown under the label the same way ("Start now for +0.5%").
+  note?: string;
+  // Shown but not pickable — `warning` then says why ("A Bounty can't be frozen").
+  disabled?: boolean;
   // One of a set of choices (a task's Status): ticked when it's the current one, in place of a shortcut.
   checked?: boolean;
   // The name of the set it belongs to ("Status"), captioned above the set's first item — so a set reads as
@@ -97,6 +101,7 @@ function MenuPanel({ at, groups, onClose }: { at: MenuPoint; groups: RowAction[]
   }, [onClose]);
 
   function select(action: RowAction) {
+    if (action.disabled) return;
     onClose();
     action.onSelect();
   }
@@ -116,7 +121,7 @@ function MenuPanel({ at, groups, onClose }: { at: MenuPoint; groups: RowAction[]
       e.preventDefault();
       onClose();
     } else {
-      const hit = groups.flat().find((a) => a.shortcut?.toLowerCase() === e.key.toLowerCase());
+      const hit = groups.flat().find((a) => !a.disabled && a.shortcut?.toLowerCase() === e.key.toLowerCase());
       if (hit) {
         e.preventDefault();
         select(hit);
@@ -161,8 +166,9 @@ function MenuPanel({ at, groups, onClose }: { at: MenuPoint; groups: RowAction[]
                 type="button"
                 role={action.checked === undefined ? "menuitem" : "menuitemradio"}
                 aria-checked={action.checked}
+                aria-disabled={action.disabled || undefined}
                 tabIndex={-1}
-                className={`action-menu-item${action.danger ? " danger" : ""}`}
+                className={`action-menu-item${action.danger ? " danger" : ""}${action.disabled ? " disabled" : ""}`}
                 // Hover moves focus, so the keyboard and the mouse share one highlight.
                 onMouseEnter={(e) => e.currentTarget.focus()}
                 onClick={() => select(action)}
@@ -172,6 +178,7 @@ function MenuPanel({ at, groups, onClose }: { at: MenuPoint; groups: RowAction[]
                   <span>
                     {action.label}
                     {action.warning && <span className="action-menu-warning">{action.warning}</span>}
+                    {action.note && <span className="action-menu-note">{action.note}</span>}
                   </span>
                 </span>
                 {action.checked ? (
@@ -179,7 +186,7 @@ function MenuPanel({ at, groups, onClose }: { at: MenuPoint; groups: RowAction[]
                     <CheckIcon />
                   </span>
                 ) : (
-                  action.shortcut && <kbd className="action-menu-key">{shortcutLabel(action.shortcut)}</kbd>
+                  action.shortcut && !action.disabled && <kbd className="action-menu-key">{shortcutLabel(action.shortcut)}</kbd>
                 )}
               </button>
             </Fragment>

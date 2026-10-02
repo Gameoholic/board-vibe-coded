@@ -1,8 +1,9 @@
-import { behaviorOf, parsePercent } from "@board/contracts";
+import { behaviorOf, formatPercent, parsePercent } from "@board/contracts";
 import { useCallback, useMemo, useState } from "react";
 import CanvasCard, { CardAdd, CardTitle, type CardFrame } from "./CanvasCard";
 import ColorPicker from "./ColorPicker";
 import {
+  AgeIcon,
   ArrowDownIcon,
   ArrowUpIcon,
   CircleCheckIcon,
@@ -32,12 +33,12 @@ import type { FlyOrigin } from "./FlyingPoints";
 import type { RowPieces } from "./Pieces";
 import { useBoardClock } from "./useBoardClock";
 import type { TabPrefs } from "./useLocalConfig";
-import { behaviorOfType, boostOf, canBreakDown, canPrune, isBoxLocked, isRetired, statusOf } from "./types";
+import { behaviorOfType, canBreakDown, canPrune, freezeRefusal, freezerOf, frostShare, isBoxLocked, isRetired, modifiersOf, payout, statusOf, wholeWorth } from "./types";
 import { runBetween, withUnlistedKept } from "./listOps";
 import { pruneUntil, streaksBrokenByPruning } from "./pruning";
 import { IN_PROGRESS_NUDGE_ABOVE, STATUS_BANDS, statusLabel } from "./taskStatus";
 import { uid } from "./uid";
-import type { Group, Section, Settings, StreakView, Task, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
+import type { AppliedModifier, Group, Section, Settings, StreakView, Task, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
 
 // A board tab: the shared tab base (CanvasCard — move/resize, header, sort/display controls, add
 // button) around a board list. A "tasks" tab lists tasks on the shared list base (ItemList — reorder
@@ -95,6 +96,10 @@ const STATUS_DISPLAY: DisplayOption = { key: "status", label: "Status", icon: In
 // tab; off by default where tasks are done once (a to-do list rarely wants it), read off the allowed types.
 const GROUPING_DISPLAY: DisplayOption = { key: "grouping", label: "Grouping", icon: GroupBracketIcon };
 
+// How long each task has waited, beside its name (AgeChip). Offered where tasks are done once — a to-do list
+// and its Freezer — and on by default there.
+const AGE_DISPLAY: DisplayOption = { key: "age", label: "Age", icon: AgeIcon, defaultOn: true };
+
 const ADD_TASK_BUTTON = addButtonOption("task");
 
 // A streak tab's one Display option.
@@ -139,6 +144,8 @@ interface SectionCardProps {
   onDuplicateTask: (id: string) => void;
   onSetPruned: (task: Task, pruned: boolean) => void;
   onSetStatus: (task: Task, status: TaskStatus, why?: BlockReason) => void;
+  // Freeze a task into its tab's Freezer, or thaw it back out.
+  onSetFrozen: (task: Task, frozen: boolean) => void;
   // Break down: pieces typed under a task, a task tucked into another (or, with null, a piece taken out
   // into the list), and a task's pieces reordered.
   onBreakDown: (task: Task, texts: string[]) => void;
@@ -191,6 +198,7 @@ function SectionCard({
   onDuplicateTask,
   onSetPruned,
   onSetStatus,
+  onSetFrozen,
   onBreakDown,
   onSetParent,
   onReorderPieces,
@@ -216,6 +224,10 @@ function SectionCard({
   onTogglePin,
 }: SectionCardProps) {
   const isStreaks = section.kind === "streaks";
+  // A Freezer holds what froze out of its tab: no statuses, nothing done or added there — only thawed out.
+  const isFreezer = !!section.freezerFor;
+  // This tab's own Freezer, if it has one — its tasks can be frozen into it.
+  const freezer = freezerOf(allSections, section.id);
   // Scheduled-box cadence inferred from the tab's recurrence: a "week" section schedules by weekday,
   // everything else by time-of-day. This is what makes daily/weekly automatic (not a per-task option).
   const scheduleCadence: Cadence = section.period === "week" ? "weekly" : "daily";
@@ -226,25 +238,31 @@ function SectionCard({
   const retiresTasks = section.allowedTypes.some((a) => behaviorOfType(a.type).retiresWhenDone);
   // Likewise "Pruned tasks": only on a tab that recurs and allows a prunable type (see canPrune).
   const prunesTasks = section.period != null && section.allowedTypes.some((a) => behaviorOfType(a.type).prunable);
-  const taskDisplay = [
-    { ...STATUS_DISPLAY, defaultOn: retiresTasks },
-    ...TASK_DISPLAY,
-    { ...GROUPING_DISPLAY, defaultOn: !retiresTasks },
-    ...(retiresTasks ? [COMPLETED_DISPLAY] : []),
-    ...(prunesTasks ? [PRUNED_DISPLAY] : []),
-    // Shown by default on a to-do list of one-time tasks, where adding is the main thing you do.
-    { ...ADD_TASK_BUTTON, defaultOn: retiresTasks },
-  ];
+  const taskDisplay = isFreezer
+    ? [...TASK_DISPLAY, { ...GROUPING_DISPLAY, defaultOn: false }, AGE_DISPLAY]
+    : [
+        { ...STATUS_DISPLAY, defaultOn: retiresTasks },
+        ...TASK_DISPLAY,
+        { ...GROUPING_DISPLAY, defaultOn: !retiresTasks },
+        ...(retiresTasks ? [COMPLETED_DISPLAY, AGE_DISPLAY] : []),
+        ...(prunesTasks ? [PRUNED_DISPLAY] : []),
+        // Shown by default on a to-do list of one-time tasks, where adding is the main thing you do.
+        { ...ADD_TASK_BUTTON, defaultOn: retiresTasks },
+      ];
   const displayOptions = isStreaks ? STREAK_DISPLAY : taskDisplay;
   const view = tabView(prefs, onPrefsChange, displayOptions);
   const sortMode = view.sortMode as AnySortMode;
   const showEstimate = view.shown("estimate");
   const showTimer = view.shown("timer");
   const showAddButton = view.shown(ADD_BUTTON_KEY);
-  const showCompleted = retiresTasks && view.shown("completed");
+  const showCompleted = retiresTasks && !isFreezer && view.shown("completed");
   const showPruned = prunesTasks && view.shown("pruned");
-  const showStatus = !isStreaks && view.shown("status");
+  const showStatus = !isStreaks && !isFreezer && view.shown("status");
+  const showAge = retiresTasks && view.shown("age");
   const grouping = view.shown("grouping");
+  // Board clock (ticks ~1/min) — read to lock-aware-sort "Get done quick", and for what tasks pay (frost is
+  // in Settings); a tick re-renders the card, which is cheap and lets a task slide up the moment it unlocks.
+  const { now, settings: boardSettings, openDay } = useBoardClock();
   // The Blocked band folds to its count until opened; which row's Blocked form is open (a drop on the
   // Blocked band opens it as well as the row's own menu and pill, so the tab holds it).
   const [blockedOpen, setBlockedOpen] = useState(false);
@@ -264,11 +282,23 @@ function SectionCard({
 
   // This week's Bounty, while it's an open task of this tab: pinned to the top of its list (taskList).
   const bountyId = topTasks.find((t) => t.bounty && !isRetired(t))?.id;
-  // What a row's completion is paid at, when not ×1: what it was paid at once ticked, or — while it's
-  // open — what it would be (its Bounty's, or its parent's).
-  const multiplierOf = (task: Task): number | undefined => {
-    const m = isTaskDone(task) ? (task.boost ?? 1) : boostOf(task, tasks.find((t) => t.id === task.parentId));
-    return m !== 1 ? m : undefined;
+  // What a row's completion is paid at: what it was paid at once ticked, or — while it's open — the
+  // modifiers on it now (its Bounty's or its task's, its frost, Subzero), as the server would pay it.
+  const modsOf = (task: Task, inSection: Pick<Section, "freezerFor"> = section): AppliedModifier[] => {
+    if (isTaskDone(task)) return task.paidWith ?? [];
+    const parent = task.parentId ? tasks.find((t) => t.id === task.parentId) : undefined;
+    return modifiersOf(task, { settings: boardSettings, section: inSection, ...(parent ? { parent } : {}), hasPieces: piecesOf.has(task.id) });
+  };
+  // What thawing a frozen task gains, said on its thaw button and menu: the thaw bonus if it has frost, and
+  // what it will pay once it's out, when that's more than now (full frost: Subzero) — all of it, pieces and all.
+  const thawGains = (task: Task): string | undefined => {
+    const gains: string[] = [];
+    if (frostShare(task, boardSettings) > 0) gains.push(`Start now for +${formatPercent(boardSettings.freezer.thawBonus)}`);
+    const worth = wholeWorth(task, piecesOf.get(task.id) ?? []);
+    const paysNow = payout(worth, modsOf(task));
+    const paysOut = payout(worth, modsOf(task, {}));
+    if (paysOut > paysNow) gains.push(`pays ${formatPercent(paysOut)}`);
+    return gains.length > 0 ? gains.join(" · ") : undefined;
   };
 
   // Finished one-time tasks leave the list (they stay done and keep their points), and pruned tasks
@@ -309,10 +339,6 @@ function SectionCard({
     const adjacent = run.every((id) => !listedIds.has(id) || members.includes(id) || ids.includes(id));
     onExtendGroup(groupId, adjacent ? run.filter((id) => !members.includes(id)) : ids);
   }
-
-  // Board clock (ticks ~1/min) — only read to lock-aware-sort "Get done quick"; a tick re-renders the
-  // card, which is cheap and lets a task slide up the moment it unlocks.
-  const { now, settings: boardSettings, openDay } = useBoardClock();
 
   const displayedTasks = useMemo(() => {
     const list = listedTasks;
@@ -395,8 +421,15 @@ function SectionCard({
           onBreakDown: (texts) => onBreakDown(task, texts),
           onTuck: (taskId) => onSetParent(taskId, task.id),
           allTasks,
+          modifiersOf: (piece) => modsOf(piece),
         }
       : undefined;
+
+  // A frozen row's way out: thawing its task (a piece's is the task it sits in), saying what that gains.
+  const frozenRow = (task: Task) => {
+    const whole = (task.parentId && tasks.find((t) => t.id === task.parentId)) || task;
+    return { onThaw: () => onSetFrozen(whole, false), gains: thawGains(whole) };
+  };
 
   // A task's row — a piece's too (under its task, whose tick handler it's given so the task sees the tick
   // that finishes it).
@@ -412,8 +445,11 @@ function SectionCard({
       pointsHidden={flyingTaskIds.has(task.id)}
       onSetLevel={setLevel}
       pieces={piecesFor(task)}
-      multiplier={multiplierOf(task)}
+      modifiers={modsOf(task)}
       reroll={task.bounty && rerollsLeft > 0 ? { left: rerollsLeft, onReroll: () => onRerollBounty(task.id) } : undefined}
+      onIce={isFreezer ? frozenRow(task) : undefined}
+      freeze={freezer ? { onFreeze: () => onSetFrozen(task, true), refusal: freezeRefusal(task) } : undefined}
+      showAge={showAge && !task.parentId}
       onMakeOwn={task.parentId ? () => onSetParent(task.id, null) : undefined}
       onRemove={onRemoveTask}
       onEdit={(patch) => onEditTask(task.id, patch)}
@@ -537,6 +573,7 @@ function SectionCard({
   return (
     <CanvasCard
       frame={frame}
+      className={isFreezer ? "freezer-card" : undefined}
       title={
         <CardTitle name={section.name} color={section.color} popoverTitle="Color" popoverWidth={172}>
           <ColorPicker value={section.color} onChange={(color) => onRecolor(section.id, color)} />
@@ -556,6 +593,8 @@ function SectionCard({
         </>
       }
       footer={
+        // Nothing is added to a Freezer: tasks freeze into it.
+        isFreezer ? undefined : (
         <CardAdd label={isStreaks ? "Add streak" : "Add task"} shown={showAddButton}>
           {(open, close) =>
             isStreaks ? (
@@ -585,6 +624,7 @@ function SectionCard({
             )
           }
         </CardAdd>
+        )
       }
     >
       {isStreaks ? (
@@ -617,7 +657,7 @@ function SectionCard({
       ) : showStatus ? (
         statusBands()
       ) : (
-        <div className="list-stack">{taskList(listedTasks, shownTasks)}</div>
+        <div className="list-stack">{taskList(listedTasks, shownTasks, isFreezer ? { emptyLabel: "Nothing on ice" } : {})}</div>
       )}
     </CanvasCard>
   );

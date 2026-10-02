@@ -5,7 +5,8 @@ import { ChevronDownIcon, PickWhipIcon } from "./Icons";
 import type { RowContext } from "./ItemRow";
 import PointsBracket from "./PointsBracket";
 import { usePickWhip, type WhipTarget } from "./pickWhip";
-import { behaviorOf, boostOf, newPiecePoints, statusOf } from "./types";
+import { behaviorOf, newPiecePoints, statusOf } from "./types";
+import type { AppliedModifier } from "./types";
 import type { Task } from "./types";
 import { useClickOutside } from "./useClickOutside";
 
@@ -27,6 +28,8 @@ export interface RowPieces {
   onBreakDown: (texts: string[]) => void;
   onTuck: (taskId: string) => void;
   allTasks: Task[]; // what the entry's pick-whip may tuck in
+  // What a piece of it would be paid at (its task's Bounty pays its pieces) — for the pieces still being typed.
+  modifiersOf: (piece: Task) => AppliedModifier[];
 }
 
 const isDone = (t: Task) => behaviorOf(t).isDone(t);
@@ -124,8 +127,8 @@ function BreakDownEntry({ task, pieces, onDone }: BreakDownEntryProps) {
   const finish = useCallback(() => onDone(drafts), [onDone, drafts]);
   useClickOutside(ref, finish, true);
   const worth = drafts.length > 0 ? newPiecePoints(task, pieces.items, drafts.length) : [];
-  // Pieces of a Bounty are paid at its multiplier — shown on the drafts too.
-  const boost = boostOf(task);
+  // What a piece will be paid at (a Bounty's pieces at its multiplier) — shown on the drafts too.
+  const draftModifiers = pieces.modifiersOf({ ...task, id: "draft", parentId: task.id, bounty: undefined, frostDays: undefined });
 
   // Another one-time task of this tab that holds no pieces of its own (pieces go one level deep).
   function resolve(x: number, y: number): WhipTarget | null {
@@ -152,7 +155,7 @@ function BreakDownEntry({ task, pieces, onDone }: BreakDownEntryProps) {
             <li key={i}>
               <span className="break-down-box" />
               <span className="points-prefix">
-                <PointsBracket percents={[worth[i]]} multiplier={boost !== 1 ? boost : undefined} />
+                <PointsBracket percents={[worth[i]]} modifiers={draftModifiers} />
               </span>
               <span className="break-down-name">{draft}</span>
             </li>

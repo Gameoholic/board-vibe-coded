@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { PickWhipIcon } from "./Icons";
 import { usePickWhip, type WhipTarget } from "./pickWhip";
-import { behaviorOf, streakCanCount } from "./types";
+import { behaviorOf, streakRefusal } from "./types";
 import type { Section, StreakMatcher, StreakMode, StreakSince, StreakType, Task, TaskCondition, TaskRequirement } from "./types";
 
 export interface StreakPayload {
@@ -15,7 +15,7 @@ export interface StreakPayload {
 
 interface StreakFormProps {
   allTasks: Task[];
-  // Every board tab — what a task resets with decides which streaks can count it (streakCanCount).
+  // Every board tab — what a task resets with decides which streaks can count it (streakRefusal).
   allSections: Section[];
   // Display-only accent (the Streaks tab's color) for the condition dots and whip handle — streaks
   // no longer carry their own color, they inherit their section's.
@@ -67,15 +67,17 @@ function StreakForm({ allTasks, allSections, accentColor, initial, submitLabel, 
   const isCounter = type === "counter";
   const connector = isCounter ? "+" : mode === "all" ? "and" : "or";
 
-  // A daily streak counts only daily tasks, a weekly one only weekly ones (a counter, anything) — the whip
-  // won't link another, and one already linked that the type no longer fits is marked to remove.
-  const fits = (taskId: string): boolean => {
+  // A daily streak counts only daily tasks, a weekly one only weekly ones, a counter any that resets — never
+  // a one-time task. The whip won't link another (saying why), and one already linked that the type no
+  // longer fits is marked to remove.
+  const refusalFor = (taskId: string): string | null => {
     const task = allTasks.find((t) => t.id === taskId);
     const section = task && allSections.find((s) => s.id === task.sectionId);
-    return !section || streakCanCount(type, section);
+    return section ? streakRefusal(type, section) : null;
   };
-  const refusal = `${type === "daily" ? "Daily" : "Weekly"} streaks only take ${type} tasks`;
-  const misfits = conditions.some((c) => !fits(c.taskId));
+  const fits = (taskId: string): boolean => refusalFor(taskId) === null;
+  const misfit = conditions.map((c) => refusalFor(c.taskId)).find((r) => r !== null);
+  const misfits = misfit !== undefined;
 
   // How many completions a condition demands, as a short label — only for tasks with more than one
   // box (a plain checkbox's "once" is implicit, so it stays unlabelled to avoid clutter).
@@ -96,9 +98,10 @@ function StreakForm({ allTasks, allSections, accentColor, initial, submitLabel, 
     if (!row) return null;
     const id = row.dataset.taskId as string;
     const task = allTasks.find((t) => t.id === id);
-    if (!fits(id)) {
+    const refused = refusalFor(id);
+    if (refused) {
       const r = (row.querySelector<HTMLElement>('input[type="checkbox"]') ?? row).getBoundingClientRect();
-      return { id, cx: r.left + r.width / 2, cy: r.top + r.height / 2, required: 1, refused: refusal };
+      return { id, cx: r.left + r.width / 2, cy: r.top + r.height / 2, required: 1, refused };
     }
     const quantity = task ? behaviorOf(task).supportsQuantity : false;
     let box = el?.closest<HTMLElement>("[data-box-index]") ?? null;
@@ -158,7 +161,7 @@ function StreakForm({ allTasks, allSections, accentColor, initial, submitLabel, 
     const errs: { name?: string; conditions?: string } = {};
     if (!trimmed) errs.name = "Name is required";
     if (conditions.length === 0) errs.conditions = "Link at least one task";
-    else if (misfits) errs.conditions = `${refusal} — remove the marked ones or change the type`;
+    else if (misfits) errs.conditions = `${misfit} — remove the marked ones or change the type`;
     if (Object.keys(errs).length) { setErrors(errs); return; }
     const matcher: StreakMatcher = { kind: "tasks", conditions };
     onSubmit({ name: trimmed, type, mode, since, matcher });
@@ -244,7 +247,7 @@ function StreakForm({ allTasks, allSections, accentColor, initial, submitLabel, 
                 <div
                   className={fits(cond.taskId) ? "cond-row" : "cond-row misfit"}
                   style={{ "--cond-color": accentColor } as React.CSSProperties}
-                  title={fits(cond.taskId) ? undefined : refusal}
+                  title={refusalFor(cond.taskId) ?? undefined}
                 >
                   <span className="cond-dot" />
                   <span className="cond-name">{taskName(cond.taskId)}</span>

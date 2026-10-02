@@ -64,6 +64,19 @@ export const BountySettings = z.object({
 });
 export type BountySettings = z.infer<typeof BountySettings>;
 
+// The Freezer's knobs (Settings → Freezer; see freezer.ts): how long a Backlog task may wait before a week
+// close freezes it, how fast frost grows on a frozen one (a share of its points per week on ice, counted by
+// the day) and where it stops, the least a task whose frost is full (Subzero) pays once thawed, and the
+// bonus for thawing a task that has frost. Shares are in % of the task's points; amounts in points.
+export const FreezerSettings = z.object({
+  freezeAfterDays: z.number().int().min(1).max(365).default(7),
+  frostPerWeek: z.number().min(0).max(1000).default(20),
+  frostCap: z.number().min(1).max(10_000).default(200),
+  subzeroMin: Points.default(100_000),
+  thawBonus: Points.default(500),
+});
+export type FreezerSettings = z.infer<typeof FreezerSettings>;
+
 // The rolling database snapshots' knobs (Settings → Backups; see apps/api/src/backup.ts): whether they're
 // taken on their own, how often, and how many are kept — the oldest is dropped to make room.
 export const BackupSettings = z.object({
@@ -93,6 +106,8 @@ export const Settings = z.object({
   pointsFormula: PointsFormula,
   // The weekly Bounty (see bounty.ts). Defaulted, so a board predating it parses unchanged.
   bounty: BountySettings.default({}),
+  // The Freezer (see freezer.ts). Defaulted, so a board predating it parses unchanged.
+  freezer: FreezerSettings.default({}),
   // Database backups. Defaulted to how they ran before they were settings (every 2 days, 5 kept).
   backup: BackupSettings.default({}),
 });

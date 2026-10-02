@@ -1,3 +1,4 @@
+import { behaviorOfType } from "@board/contracts";
 import type { BoardStore } from "./projection.js";
 
 // Placeholder content for a fresh board — arbitrary, obviously-a-placeholder entries so a new tab
@@ -20,6 +21,26 @@ const TASKS = [["First task", 1000]] as const;
 export function ensureStreaksTab(store: BoardStore): void {
   if (store.listSections().some((s) => s.kind === "streaks")) return;
   store.seedSection("Streaks", "#ef4444", [{ type: "checkbox" }], "streaks");
+}
+
+// The Freezer's ice blue, and what it holds: the one-time tasks that froze out of its tab.
+const FREEZER_COLOR = "#0ea5e9";
+
+// The tab a Freezer belongs beside: the to-do list of one-time tasks — a tasks tab that never resets and
+// allows a type that's done once — read off the tab's settings, never its name. None after a reset to an
+// empty board.
+function oneTimeTab(store: BoardStore) {
+  return store
+    .listSections()
+    .find((s) => s.kind === "tasks" && !s.period && !s.freezerFor && s.allowedTypes.some((a) => behaviorOfType(a.type).retiresWhenDone));
+}
+
+// Non-destructive migration for boards created before the Freezer: add one beside the one-time tasks tab if
+// that tab has none, touching nothing else. Idempotent. (A fresh board gets it via seedIfEmpty.)
+export function ensureFreezerTab(store: BoardStore): void {
+  const tab = oneTimeTab(store);
+  if (!tab || store.listSections().some((s) => s.freezerFor === tab.id)) return;
+  store.seedSection("Freezer", FREEZER_COLOR, [{ type: "once" }], "tasks", undefined, tab.id);
 }
 
 // Non-destructive migration: the Tasks tab is one-time tasks by design (check it, it's gone), so it
@@ -83,6 +104,8 @@ export function initializeBoard(store: BoardStore): void {
   ensureTasksTabOnceType(store);
   ensureRegistryTypes(store);
   ensureSectionPeriods(store);
+  // After the Tasks tab is one-time only and the recurring tabs carry their period — what it reads.
+  ensureFreezerTab(store);
   initializeInfra(store);
 }
 
@@ -93,6 +116,7 @@ export function seedIfEmpty(store: BoardStore): void {
   const weekly = store.seedSection("Weekly", "#3b82f6", [{ type: "checkbox" }], "tasks", "week");
   const registry = store.seedSection("Registry", "#f59e0b", [{ type: "tiered" }, { type: "repeatable" }], "tasks", "day");
   const tasks = store.seedSection("Tasks", "#1e293b", [{ type: "once" }]);
+  store.seedSection("Freezer", FREEZER_COLOR, [{ type: "once" }], "tasks", undefined, tasks.id);
   // The streaks tab holds streaks, not tasks; allowedTypes is unused for it but the schema wants one.
   const streaks = store.seedSection("Streaks", "#ef4444", [{ type: "checkbox" }], "streaks");
 

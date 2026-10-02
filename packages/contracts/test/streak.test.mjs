@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { computeCounter, computeStreak } from "../dist/streak.js";
+import { computeCounter, computeStreak, streakRefusal } from "../dist/streak.js";
+
+test("a streak takes only tasks that reset — a daily or weekly one on its beat — never a one-time task", () => {
+  assert.equal(streakRefusal("daily", { period: "day" }), null);
+  assert.equal(streakRefusal("weekly", { period: "week" }), null);
+  assert.equal(streakRefusal("counter", { period: "day" }), null);
+  assert.equal(streakRefusal("daily", { period: "week" }), "Daily streaks only take daily tasks");
+  assert.equal(streakRefusal("weekly", { period: "day" }), "Weekly streaks only take weekly tasks");
+  for (const type of ["daily", "weekly", "counter"]) assert.equal(streakRefusal(type, {}), "Streaks don't take one-time tasks");
+});
 
 // Israel time. A UTC ISO whose local date (Asia/Jerusalem) is the given day at ~10:00 local.
 // Sept 2026 is DST (+3), so 07:00Z == 10:00 local — comfortably inside the civil day.

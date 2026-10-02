@@ -21,7 +21,7 @@ import {
   TierDef,
   Timer,
 } from "./domain.js";
-import { BackupSettings, BountySettings, PeriodKindSchema, TaskSchedule, WindDown } from "./period.js";
+import { BackupSettings, BountySettings, FreezerSettings, PeriodKindSchema, TaskSchedule, WindDown } from "./period.js";
 import { PIECES_MAX } from "./pieces.js";
 import { Points } from "./points.js";
 import { PointsFormula, PointsSource } from "./pointsFormula.js";
@@ -96,6 +96,8 @@ export const PatchTaskBody = z.object({
     .optional(),
   // Tuck it inside another task as a piece, or (null) take a piece out into its tab's list again.
   parentId: z.string().min(1).nullable().optional(),
+  // Freeze it into its tab's Freezer (true), or thaw it back out (false) — see BoardStore.setFrozen.
+  frozen: z.boolean().optional(),
 }).refine((b) => b.blocker === undefined || b.status === "blocked", {
   message: "a blocker only goes with status blocked",
   path: ["blocker"],
@@ -169,8 +171,9 @@ export const PatchSettingsBody = z.object({
   // Whole formula object (patchSettings shallow-merges the top-level patch, so a partial would drop the
   // untouched half); its own defaults fill anything omitted.
   pointsFormula: PointsFormula.optional(),
-  // Whole object, like windDown.
+  // Whole objects, like windDown.
   bounty: BountySettings.optional(),
+  freezer: FreezerSettings.optional(),
   backup: BackupSettings.optional(),
 });
 export type PatchSettingsBody = z.infer<typeof PatchSettingsBody>;
@@ -292,8 +295,27 @@ export const RecapStreak = z.object({
 });
 export type RecapStreak = z.infer<typeof RecapStreak>;
 
+// A task whose frost grew at the week's close: its frost before and after (in points — what it adds), how
+// full it now is and was (0 to 1), and whether it's Subzero — `subzeroNow` when this close made it so.
+export const RecapFrost = z.object({
+  taskId: z.string(),
+  name: z.string(),
+  from: Points,
+  to: Points,
+  fillFrom: z.number(),
+  fillTo: z.number(),
+  subzero: z.boolean(),
+  subzeroNow: z.boolean(),
+});
+export type RecapFrost = z.infer<typeof RecapFrost>;
+
+// A task the week's close froze, and the whole days it had waited.
+export const RecapFrozen = z.object({ taskId: z.string(), name: z.string(), waited: z.number().int().nonnegative() });
+export type RecapFrozen = z.infer<typeof RecapFrozen>;
+
 // Recap returned after a roll: the closed period day by day (one day for a day; each day of a week),
-// its totals, and — for a week — its streaks from start to end and the next week's Bounties.
+// its totals, and — for a week — its streaks from start to end, the frost its close banked, the tasks it
+// froze, and the next week's Bounties.
 export const PeriodRecap = z.object({
   kind: PeriodKindSchema,
   periodKey: z.string(),
@@ -301,9 +323,12 @@ export const PeriodRecap = z.object({
   earned: z.number().int(),
   lost: Points,
   streaks: z.array(RecapStreak),
+  frost: z.array(RecapFrost).default([]),
+  frozen: z.array(RecapFrozen).default([]),
   // A week close rolls the next week's Bounties (none when they're off or nothing could be rolled, and
-  // for a day).
+  // for a day). `bountyEmpty`: they're on, but nothing was on ice to roll.
   bounties: z.array(RolledBounty).default([]),
+  bountyEmpty: z.boolean().default(false),
 });
 export type PeriodRecap = z.infer<typeof PeriodRecap>;
 

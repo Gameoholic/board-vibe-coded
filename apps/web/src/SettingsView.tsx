@@ -1,3 +1,4 @@
+import { POINTS_PER_PERCENT } from "@board/contracts";
 import { useEffect, useRef, useState } from "react";
 import BackupSlots from "./BackupSlots";
 import ConfirmPopover from "./ConfirmPopover";
@@ -198,6 +199,7 @@ function SettingsView({
   // Send the whole windDown object each time (the server shallow-merges the top-level patch).
   const patchWind = (patch: Partial<WindDown>) => onSave({ windDown: { ...settings.windDown, ...patch } });
   const patchBounty = (patch: Partial<Settings["bounty"]>) => onSave({ bounty: { ...settings.bounty, ...patch } });
+  const patchFreezer = (patch: Partial<Settings["freezer"]>) => onSave({ freezer: { ...settings.freezer, ...patch } });
   const patchBackup = (patch: Partial<Settings["backup"]>) => onSave({ backup: { ...settings.backup, ...patch } });
   const [triggerDraft, setTriggerDraft] = useState("10");
 
@@ -355,10 +357,70 @@ function SettingsView({
       </section>
 
       <section className="settings-group">
+        <h2 className="settings-heading">Freezer</h2>
+        <p className="settings-note">
+          Every week close moves a task that's waited in the Backlog longer than this into the Freezer. On ice it
+          gathers frost — a share of its points for each day there, counted at each week's end — up to a cap, and
+          a task whose frost is full is Subzero. Thawing a task starts it, and pays the thaw bonus if it has frost.
+        </p>
+
+        <label className="field">
+          <span className="field-label">Days a task may wait before it freezes</span>
+          <WholeField
+            value={settings.freezer.freezeAfterDays}
+            min={1}
+            max={365}
+            onChange={(freezeAfterDays) => patchFreezer({ freezeAfterDays })}
+          />
+        </label>
+
+        <label className="field">
+          <span className="field-label">Frost per week on ice (% of its points)</span>
+          <FloatField
+            value={settings.freezer.frostPerWeek}
+            onChange={(n) => {
+              if (n >= 0 && n <= 1000) patchFreezer({ frostPerWeek: n });
+            }}
+          />
+        </label>
+
+        <label className="field">
+          <span className="field-label">Frost stops at (% of its points)</span>
+          <FloatField
+            value={settings.freezer.frostCap}
+            onChange={(n) => {
+              if (n >= 1 && n <= 10_000) patchFreezer({ frostCap: n });
+            }}
+          />
+        </label>
+
+        <label className="field">
+          <span className="field-label">A Subzero task pays at least (%)</span>
+          <FloatField
+            value={settings.freezer.subzeroMin / POINTS_PER_PERCENT}
+            onChange={(n) => {
+              if (n >= 0) patchFreezer({ subzeroMin: Math.round(n * POINTS_PER_PERCENT) });
+            }}
+          />
+        </label>
+
+        <label className="field">
+          <span className="field-label">Thaw bonus (%)</span>
+          <FloatField
+            value={settings.freezer.thawBonus / POINTS_PER_PERCENT}
+            onChange={(n) => {
+              if (n >= 0) patchFreezer({ thawBonus: Math.round(n * POINTS_PER_PERCENT) });
+            }}
+          />
+        </label>
+      </section>
+
+      <section className="settings-group">
         <h2 className="settings-heading">Bounty</h2>
         <p className="settings-note">
-          Every week close rolls open tasks as Bounties — the longer one's sat there, the likelier — each worth
-          more until the next close. A Bounty you finish keeps what it paid.
+          Every week close rolls tasks from the Freezer as Bounties — the longer one's been on ice, the likelier —
+          each worth more until the next close. A Bounty stays frozen until you thaw it; one you finish keeps what
+          it paid.
         </p>
 
         <label className="field field-toggle">

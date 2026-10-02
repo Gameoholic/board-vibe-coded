@@ -1,11 +1,15 @@
-import { boosted, formatPercent } from "@board/contracts";
+import { formatPercent } from "@board/contracts";
+import { modifierInk } from "./modifierLooks";
+import { payout } from "./types";
+import type { AppliedModifier } from "./types";
 
 interface PointsBracketProps {
   // Point values as integer thousandths-of-a-percent (see @board/contracts points.ts).
   percents: number[];
-  // What a completion is (or was) paid at, when not ×1 — a Bounty's ×2. The bracket then shows what it
-  // pays, marked as boosted ("[10%]" pulls harder than "[5% ×2]"); the factor is on the Bounty stamp.
-  multiplier?: number;
+  // What a completion is (or was) paid at — its modifiers (a Bounty's ×2, its frost, Subzero). The bracket
+  // then shows what it pays, inked in their colours ("[10%]" pulls harder than "[5% ×2]"); each one's own
+  // line under the task says what it does.
+  modifiers?: readonly AppliedModifier[];
 }
 
 // Deliberately shared by the task row and by the flying-points copy: the flyer is supposed to
@@ -17,18 +21,24 @@ interface PointsBracketProps {
 // Plain wrapping (even overflow-wrap: anywhere) split values like "2.4%" into "2" / ".4%" on a
 // squeezed card. Before the "/" rather than after each segment also means there's never a break
 // opportunity in front of the closing "]" — a single-value bracket can't wrap to "[0.5%" / "]".
-function PointsBracket({ percents, multiplier }: PointsBracketProps) {
+function PointsBracket({ percents, modifiers = [] }: PointsBracketProps) {
+  const ink = modifierInk(modifiers);
   return (
     <>
       [
       {percents.map((p, i) => (
-        <span key={i} className={multiplier ? "points-boosted" : undefined} title={multiplier ? `${formatPercent(p)} × ${multiplier}` : undefined}>
+        <span
+          key={i}
+          className={ink ? "points-modified" : undefined}
+          style={ink ? ({ "--ink": ink } as React.CSSProperties) : undefined}
+          title={ink ? `${formatPercent(p)} → ${formatPercent(payout(p, modifiers))}` : undefined}
+        >
           {i > 0 && (
             <>
               <wbr />/
             </>
           )}
-          {formatPercent(multiplier ? boosted(p, multiplier) : p)}
+          {formatPercent(ink ? payout(p, modifiers) : p)}
         </span>
       ))}
       ]
