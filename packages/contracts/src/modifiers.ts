@@ -8,7 +8,7 @@ import type { Settings } from "./period.js";
 // they stack by construction and none knows about the others. How each one *looks* (its tag, colour, line)
 // is the web's (modifierLooks.ts), keyed by these ids — nothing else in the code knows a modifier by name.
 
-export type ModifierId = "bounty" | "frost" | "subzero";
+export type ModifierId = "bounty" | "frost" | "subzero" | "booster";
 
 export interface ModifierContext {
   settings: Settings;
@@ -55,6 +55,12 @@ const MODIFIERS: Modifier[] = [
     id: "subzero",
     kind: "floor",
     valueOn: (task, ctx) => (!ctx.section?.freezerFor && isFullFrost(task, ctx.settings) ? ctx.settings.freezer.subzeroMin : null),
+  },
+  // The week's Booster: a flat amount on each completion of its task — every tick of a tally, its tier.
+  {
+    id: "booster",
+    kind: "flat",
+    valueOn: (task) => task.booster?.amount ?? null,
   },
 ];
 

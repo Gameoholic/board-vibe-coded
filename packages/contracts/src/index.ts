@@ -10,5 +10,6 @@ export * from "./taskStatus.js";
 export * from "./listOrder.js";
 export * from "./pieces.js";
 export * from "./bounty.js";
+export * from "./booster.js";
 export * from "./freezer.js";
 export * from "./modifiers.js";

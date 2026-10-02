@@ -1,4 +1,4 @@
-import type { Section, Task, TaskType } from "./domain.js";
+import type { AppliedModifier, Section, Task, TaskType } from "./domain.js";
 import { payout } from "./modifiers.js";
 
 // One behaviour per task type, so no consumer ever branches on `task.type` itself — they read
@@ -51,6 +51,12 @@ export interface TaskBehavior {
   /** Whether a task of this type can be broken down into pieces (see pieces.ts). Its pieces are tasks of
    *  the same type, so a type that breaks down is also one a piece can be. */
   readonly breaksDown: boolean;
+  /** Whether each ticked box is a completion of its own (a count's boxes, a tally's ticks) — paid at its
+   *  modifiers one by one — rather than the levels of one (a tier is one completion, whichever it is). */
+  readonly eachBoxCompletes: boolean;
+  /** Whether a task of this type can be the weekly Booster: a habit you level up (a tier, a tally), never a
+   *  to-do — see booster.ts. */
+  readonly boostable: boolean;
 }
 
 // count>1 ⇒ a row of `progress`-driven boxes; count≤1 ⇒ a plain `done` checkbox. `filled` reads
@@ -78,6 +84,8 @@ const checkbox: TaskBehavior = {
   retiresWhenDone: false,
   prunable: true,
   breaksDown: false,
+  eachBoxCompletes: true,
+  boostable: false,
 };
 
 const tiered: TaskBehavior = {
@@ -97,6 +105,8 @@ const tiered: TaskBehavior = {
   retiresWhenDone: false,
   prunable: false,
   breaksDown: false,
+  eachBoxCompletes: false,
+  boostable: true,
 };
 
 // A single box you tick again and again — the whiteboard tally. Its completion count lives in
@@ -120,6 +130,8 @@ const repeatable: TaskBehavior = {
   retiresWhenDone: false,
   prunable: false,
   breaksDown: false,
+  eachBoxCompletes: true,
+  boostable: true,
 };
 
 // A single "do it once" checkbox — the Tasks tab's kind: check it and it's gone. Scores exactly like
@@ -152,11 +164,19 @@ export function behaviorOfType(type: TaskType): TaskBehavior {
   return TASK_BEHAVIORS[type];
 }
 
+/** What `filled` boxes of `task` pay at `modifiers`: each ticked box is a completion paid at them (so a
+ *  Booster's +0.5% lands on every tick of a tally), or — for a type whose boxes are levels — the one level
+ *  reached is (a tier). */
+export function paidAt(task: Task, filled: number, modifiers: readonly AppliedModifier[]): number {
+  const b = behaviorOf(task);
+  if (filled === 0 || modifiers.length === 0) return b.valueAt(task, filled);
+  return b.eachBoxCompletes ? filled * payout(b.valueAt(task, 1), modifiers) : payout(b.valueAt(task, filled), modifiers);
+}
+
 /** Live point contribution of a task to the running total — at the modifiers its completion was paid at
  *  (`paidWith`, frozen when it was ticked: a Bounty's ×2 stays after the Bounty ends), plus the thaw bonus
  *  it holds, if any. */
 export function taskPointValue(task: Task): number {
   const b = behaviorOf(task);
-  const value = b.valueAt(task, b.filled(task));
-  return (task.paidWith ? payout(value, task.paidWith) : value) + (task.thawBonus ?? 0);
+  return paidAt(task, b.filled(task), task.paidWith ?? []) + (task.thawBonus ?? 0);
 }

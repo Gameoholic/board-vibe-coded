@@ -153,19 +153,23 @@ export const BoardEvent = z.discriminatedUnion("type", [
     boost: z.number().optional(),
   }),
   z.object({ type: z.literal("TaskUncompleted"), taskId: z.string() }),
+  // `modifiers` here and on TaskProgressSet are what the ticks are paid at, like TaskCompleted's (a Booster's
+  // +0.5%, …) — the ones its first tick of the day was paid at, so a later tick never re-prices an earlier one.
   z.object({
     type: z.literal("TaskTierSet"),
     taskId: z.string(),
     activeTier: z.number().int().nullable(),
     pointsAwarded: Points,
+    modifiers: z.array(AppliedModifier).optional(),
   }),
   // A count task's ticked-box count moved to `progress` (0..target); pointsAwarded freezes the value
-  // reached at that moment (points × progress). Its own event, mirroring TaskTierSet.
+  // reached at that moment (each box paid at the modifiers). Its own event, mirroring TaskTierSet.
   z.object({
     type: z.literal("TaskProgressSet"),
     taskId: z.string(),
     progress: z.number().int().nonnegative(),
     pointsAwarded: Points,
+    modifiers: z.array(AppliedModifier).optional(),
   }),
   z.object({
     type: z.literal("TaskEdited"),
@@ -223,6 +227,19 @@ export const BoardEvent = z.discriminatedUnion("type", [
     count: z.number().int().nonnegative(),
     source: z.enum(["week", "purchase"]),
     periodKey: z.string(),
+  }),
+  // A week close's Booster hand for the week `periodKey`: the tasks on its cards, face down, in the order dealt
+  // — the result of the server's shuffle, recorded so a rebuild replays it and which card holds which task is
+  // settled before any pick. The deal is the server's to know; the owner only sees a card once it's picked.
+  z.object({ type: z.literal("BoosterDealt"), periodKey: z.string(), taskIds: z.array(z.string()) }),
+  // One card of that hand picked: the task it held is a Booster until the week closes, adding `amount` (the
+  // setting's at the time) to every tick of it.
+  z.object({
+    type: z.literal("BoosterPicked"),
+    periodKey: z.string(),
+    card: z.number().int().nonnegative(),
+    taskId: z.string(),
+    amount: Points,
   }),
   // Reorders one task's pieces (the counterpart of TasksReordered for the list under a task).
   z.object({ type: z.literal("PiecesReordered"), taskId: z.string(), orderedIds: z.array(z.string()) }),

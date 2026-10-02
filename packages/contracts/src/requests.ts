@@ -21,7 +21,7 @@ import {
   TierDef,
   Timer,
 } from "./domain.js";
-import { BackupSettings, BountySettings, FreezerSettings, PeriodKindSchema, TaskSchedule, WindDown } from "./period.js";
+import { BackupSettings, BoosterSettings, BountySettings, FreezerSettings, PeriodKindSchema, TaskSchedule, WindDown } from "./period.js";
 import { PIECES_MAX } from "./pieces.js";
 import { Points } from "./points.js";
 import { PointsFormula, PointsSource } from "./pointsFormula.js";
@@ -175,6 +175,7 @@ export const PatchSettingsBody = z.object({
   bounty: BountySettings.optional(),
   freezer: FreezerSettings.optional(),
   backup: BackupSettings.optional(),
+  booster: BoosterSettings.optional(),
 });
 export type PatchSettingsBody = z.infer<typeof PatchSettingsBody>;
 
@@ -229,6 +230,35 @@ export const BountyStatus = z.object({
   rerollsLeft: z.number().int().nonnegative(),
 });
 export type BountyStatus = z.infer<typeof BountyStatus>;
+
+// A week's Booster hand as the recap and a pick show it: how many cards are face down, the tasks among them
+// (sorted by name — which card holds which stays the server's until it's picked), how many to pick, what's
+// been picked (the card, its task, what it adds), and — once every pick is made — each card's task, in the
+// order dealt, so the rest can be turned over.
+export const BoosterPick = z.object({
+  card: z.number().int().nonnegative(),
+  taskId: z.string(),
+  text: z.string(),
+  amount: Points,
+});
+export type BoosterPick = z.infer<typeof BoosterPick>;
+
+export const BoosterHand = z.object({
+  cards: z.number().int().nonnegative(),
+  names: z.array(z.string()),
+  picks: z.number().int().nonnegative(),
+  picked: z.array(BoosterPick),
+  revealed: z.array(z.string()).nullable(),
+});
+export type BoosterHand = z.infer<typeof BoosterHand>;
+
+// The open week's Booster hand (GET /api/booster) — null when none was dealt or Boosters are off.
+export const BoosterStatus = z.object({ hand: BoosterHand.nullable() });
+export type BoosterStatus = z.infer<typeof BoosterStatus>;
+
+// Pick one card of this week's Booster hand, by its place in the hand.
+export const PickBoosterBody = z.object({ card: z.number().int().nonnegative() });
+export type PickBoosterBody = z.infer<typeof PickBoosterBody>;
 
 // The saved backups (GET /api/backups), newest first — each named by its file — and when the next one
 // falls due (null while they're off). Times are the real clock's, never the debug clock's.
@@ -315,7 +345,7 @@ export type RecapFrozen = z.infer<typeof RecapFrozen>;
 
 // Recap returned after a roll: the closed period day by day (one day for a day; each day of a week),
 // its totals, and — for a week — its streaks from start to end, the frost its close banked, the tasks it
-// froze, and the next week's Bounties.
+// froze, the next week's Bounties, and its Booster hand.
 export const PeriodRecap = z.object({
   kind: PeriodKindSchema,
   periodKey: z.string(),
@@ -329,6 +359,8 @@ export const PeriodRecap = z.object({
   // for a day). `bountyEmpty`: they're on, but nothing was on ice to roll.
   bounties: z.array(RolledBounty).default([]),
   bountyEmpty: z.boolean().default(false),
+  // A week close deals the next week's Booster hand (none when they're off or there's nothing to deal).
+  booster: BoosterHand.nullable().default(null),
 });
 export type PeriodRecap = z.infer<typeof PeriodRecap>;
 

@@ -90,3 +90,20 @@ test("a done task is worth what it was paid at, plus a thaw bonus it holds; an u
   assert.equal(fromBoost(1), undefined);
   assert.equal(fromBoost(undefined), undefined);
 });
+
+test("the Booster: a flat amount on its task, paid on every tick of a tally or a count and once on a tier", () => {
+  const task = (over = {}) => ({ id: "t", sectionId: "s", type: "repeatable", text: "x", done: false, points: 200, createdAt: "", updatedAt: "", completedAt: null, ...over });
+  const ctx = { settings: DEFAULT_SETTINGS, section: {} };
+  const booster = { amount: 500, periodKey: "w" };
+  assert.deepEqual(modifiersOf(task(), ctx), []);
+  assert.deepEqual(modifiersOf(task({ booster }), ctx), [{ id: "booster", kind: "flat", value: 500 }]);
+
+  const boosted = [{ id: "booster", kind: "flat", value: 500 }];
+  assert.equal(taskPointValue(task({ progress: 3, paidWith: boosted })), 3 * 700, "each tick of a tally is a completion");
+  assert.equal(taskPointValue(task({ type: "checkbox", count: 4, progress: 2, paidWith: boosted })), 2 * 700, "each box of a count");
+  const tiers = [{ label: "1", points: 1000 }, { label: "2", points: 2000 }];
+  assert.equal(taskPointValue(task({ type: "tiered", tiers, activeTier: 1, paidWith: boosted })), 2500, "a tier is one, whichever");
+  assert.equal(taskPointValue(task({ progress: 0 })), 0);
+  assert.equal(taskPointValue(task({ progress: 3 })), 600, "no modifiers: just its points");
+  assert.equal(payout(1000, [flat(500), floor(100000)]), 100000, "a floor lifts a flat too");
+});

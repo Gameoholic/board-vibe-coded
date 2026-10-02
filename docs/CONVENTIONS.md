@@ -48,7 +48,7 @@ Anything that changes what a task pays is a **modifier**: the Bounty, frost, and
 - **A new mechanic is one entry in the modifier registry**, never its own payout branch, task column, bracket colour or row badge. The entry declares when a task has it, its effect, and how it shows. Nothing else in the code knows a modifier by name.
 - **Four kinds of effect, always composed in the same order.**
   - A *share* adds a fraction of the task's own points (frost: +40%).
-  - A *flat* adds a fixed amount (none yet).
+  - A *flat* adds a fixed amount (the Booster: +0.5% on each tick).
   - A *factor* multiplies (Bounty: ×2).
   - A *floor* is the least the task pays (Subzero: at least 100%) — the whole task: a broken-down one's pieces pay toward it, and its finish pays the rest.
 

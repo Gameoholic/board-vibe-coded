@@ -384,6 +384,15 @@ export function CrystalIcon({ size = 14 }: IconProps) {
   );
 }
 
+// Two chevrons climbing — the Booster's line, and the back of its cards.
+export function BoostIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3.5 8.5 8 4l4.5 4.5M3.5 13 8 8.5l4.5 4.5" />
+    </svg>
+  );
+}
+
 // A calendar page — the Age Display toggle (how long a task has waited).
 export function AgeIcon({ size = 14 }: IconProps) {
   return (

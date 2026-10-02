@@ -101,7 +101,7 @@ export default function BackupSlots({ settings, timeZone, realNow, layouts }: Ba
   const next = list.nextAt === null
     ? "Automatic backups are off."
     : list.nextAt <= realNow
-      ? "Next backup in the next few minutes."
+      ? "Next backup in a few minutes."
       : `Next backup around ${when(list.nextAt)}.`;
   const preview = shown ? previews[shown.name] : undefined;
 

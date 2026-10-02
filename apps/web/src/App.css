@@ -1625,6 +1625,10 @@ main {
 .tooltip-top {
   bottom: calc(100% + 6px);
 }
+.tooltip-start {
+  left: 0;
+  transform: none;
+}
 .tooltip-bottom {
   top: calc(100% + 6px);
 }
@@ -2966,6 +2970,10 @@ body.whip-dragging {
 .trigger-add .backfill-input {
   width: 72px;
 }
+.trigger-unit {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
 
 /* ---- Period roll prompt (a large centered overlay covering the board when a day/week rolls) ---- */
 /* A soft scrim over the board area (not the whole screen — nav/header stay), with a big centred card,
@@ -3454,11 +3462,30 @@ body.whip-dragging {
   padding: 4px 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
   max-height: 42vh;
   overflow-y: auto;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
+}
+
+.rebalance-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rebalance-tab {
+  display: block;
+  margin: 4px 0 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
 }
 
 .rebalance-row {
@@ -3486,7 +3513,15 @@ body.whip-dragging {
   font-weight: 600;
 }
 
-.rebalance-arrow {
+.rebalance-change.up {
+  color: #16a34a;
+}
+
+.rebalance-change.down {
+  color: #dc2626;
+}
+
+.rebalance-old {
   color: var(--text-dim);
   font-weight: 400;
 }
@@ -4645,7 +4680,8 @@ main.shop-open > .zoom-controls {
   }
 }
 
-.task-item[class*="aura-"] > .points-prefix .points-modified {
+/* Every aura but the Booster's: its row stays calm (no white glint). */
+.task-item[class*="aura-"]:not(.aura-boost) > .points-prefix .points-modified {
   background-image: linear-gradient(100deg, transparent 0 42%, rgba(255, 255, 255, 0.95) 50%, transparent 58% 100%), var(--ink);
   background-size: 300% 100%, 100% 100%;
   background-repeat: no-repeat;
@@ -4721,6 +4757,11 @@ main.shop-open > .zoom-controls {
   }
 }
 
+/* A Booster's row: just a purple border — nothing moving, glowing or flashing. */
+.task-item.aura-boost {
+  box-shadow: inset 0 0 0 1px rgba(147, 51, 234, 0.55);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .modifier-tag.glow,
   .task-item[class*="aura-"] > .points-prefix .points-modified,
@@ -4748,8 +4789,11 @@ main.shop-open > .zoom-controls {
   background: rgba(2, 132, 199, 0.06);
 }
 
-.thaw-btn {
+.thaw-cell {
   justify-self: start;
+}
+
+.thaw-btn {
   display: grid;
   place-items: center;
   width: 17px;
@@ -4772,6 +4816,11 @@ main.shop-open > .zoom-controls {
   border-color: #f97316;
   background: #fff7ed;
   color: #ea580c;
+}
+
+/* Under a frosted task's frost: the thaw bonus it would pay, in the thaw button's warm orange. */
+.modifier-line.thaw-line {
+  --c: #ea580c;
 }
 
 /* A task's age beside its name (AgeChip): days, then weeks, then months; amber in the week it'll freeze. */
@@ -5079,14 +5128,16 @@ main.shop-open > .zoom-controls {
 .recap-wall .recap-head,
 .recap-wall .recap-foot,
 .recap-wall .recap-legend,
-.recap-wall .bounty-page-head {
+.recap-wall .bounty-page-head,
+.recap-wall .booster-page-head {
   transition: opacity 0.25s;
 }
 
 .recap-wall.leaving .recap-head,
 .recap-wall.leaving .recap-foot,
 .recap-wall.leaving .recap-legend,
-.recap-wall.leaving .bounty-page-head {
+.recap-wall.leaving .bounty-page-head,
+.recap-wall.leaving .booster-page-head {
   opacity: 0;
 }
 
@@ -5372,7 +5423,10 @@ main.shop-open > .zoom-controls {
   text-align: center;
 }
 
+/* Above the reels' rays, which reach up behind it. */
 .bounty-page-head {
+  position: relative;
+  z-index: 1;
   font-size: clamp(1.3rem, 3.5vw, 1.8rem);
   font-weight: 800;
 }
@@ -5399,25 +5453,35 @@ main.shop-open > .zoom-controls {
   padding: 16px 0;
 }
 
-/* The payoff stays close around the reel: clipped here, it never scrolls the page or the card. */
+/* The payoff around the reel: a box tall enough for the rays' whole circle (they fade out by themselves before
+   its edge, so nothing is cut off in a straight line), as wide as the reel — its sides fading, so a narrow
+   screen softens the rays rather than cutting them. */
 .bounty-burst {
   position: absolute;
-  inset: -60px 0;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 520px;
+  margin-top: -260px;
   overflow: hidden;
   pointer-events: none;
+  mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
 }
 
+/* Faded out by 44% of its size from the middle (closest-side, so it's exact), and no wider than the screen. */
 .bounty-rays {
+  --rays: min(560px, 100vw - 32px);
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 560px;
-  height: 560px;
-  margin: -280px 0 0 -280px;
+  width: var(--rays);
+  height: var(--rays);
+  margin: calc(var(--rays) / -2) 0 0 calc(var(--rays) / -2);
   border-radius: 50%;
   background: repeating-conic-gradient(rgba(251, 191, 36, 0.32) 0deg 9deg, transparent 9deg 22.5deg);
-  mask-image: radial-gradient(circle, #000 12%, transparent 62%);
-  -webkit-mask-image: radial-gradient(circle, #000 12%, transparent 62%);
+  mask-image: radial-gradient(circle closest-side, #000 17%, transparent 88%);
+  -webkit-mask-image: radial-gradient(circle closest-side, #000 17%, transparent 88%);
   animation: bounty-rays-in 0.6s ease-out both, bounty-rays-spin 16s linear infinite;
 }
 
@@ -5611,6 +5675,261 @@ main.shop-open > .zoom-controls {
 .recap-card.bounty-reveal {
   max-width: 520px;
   overflow: hidden;
+}
+
+/* ---- The Booster's deal (BoosterDeal) ----
+   Sticky notes on a stage: face up as they're dealt, a purple back once over. A card you can pick lifts and
+   glows under the pointer; the picked one rises, turned over in the Booster's lilac, with the boost stamped on. */
+.booster-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  text-align: center;
+}
+
+.booster-page > .recap-drop {
+  width: 100%;
+}
+
+/* Above the picked card's rays, which reach up behind it. */
+.booster-page-head {
+  position: relative;
+  z-index: 1;
+  font-size: clamp(1.3rem, 3.5vw, 1.8rem);
+  font-weight: 800;
+}
+
+.booster-deal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.booster-stage {
+  position: relative;
+  width: 100%;
+  height: clamp(300px, 46vh, 400px);
+}
+
+/* A landing's payoff, behind the cards: clipped at the stage's sides, but reaching above its top far enough
+   for the rays' whole circle around a picked card (they fade out by themselves), so nothing is cut off. */
+.booster-burst {
+  --reach: 130px;
+  position: absolute;
+  inset: calc(-1 * var(--reach)) 0 0;
+  overflow: hidden;
+  pointer-events: none;
+  mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+}
+
+/* At the stage's middle, where the slots are measured from (this box starts --reach above it). */
+.booster-burst-at {
+  position: absolute;
+  top: calc(50% + var(--reach) / 2);
+  left: 50%;
+}
+
+.booster-rays {
+  --rays: min(460px, 100vw - 32px);
+  position: absolute;
+  width: var(--rays);
+  height: var(--rays);
+  margin: calc(var(--rays) / -2) 0 0 calc(var(--rays) / -2);
+  border-radius: 50%;
+  background: repeating-conic-gradient(rgba(168, 85, 247, 0.28) 0deg 9deg, transparent 9deg 22.5deg);
+  mask-image: radial-gradient(circle closest-side, #000 17%, transparent 88%);
+  -webkit-mask-image: radial-gradient(circle closest-side, #000 17%, transparent 88%);
+  animation: bounty-rays-in 0.6s ease-out both, bounty-rays-spin 16s linear infinite;
+}
+
+.booster-burst-at span {
+  position: absolute;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+}
+
+.booster-card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: var(--z, 1);
+  width: var(--s);
+  height: var(--s);
+  margin: calc(var(--s) / -2) 0 0 calc(var(--s) / -2);
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  perspective: 700px;
+  cursor: default;
+}
+
+.booster-card.can-pick {
+  cursor: pointer;
+}
+
+.booster-card.can-pick:hover,
+.booster-card.can-pick:focus-visible {
+  z-index: 60;
+  outline: none;
+}
+
+.booster-lift {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.18s cubic-bezier(0.3, 1.4, 0.5, 1);
+}
+
+.booster-card.can-pick:hover .booster-lift,
+.booster-card.can-pick:focus-visible .booster-lift {
+  transform: translateY(-16px) scale(1.05);
+}
+
+.booster-flip {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+}
+
+.booster-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px;
+  overflow: hidden;
+  border-radius: 3px;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.16), 0 2px 3px rgba(15, 23, 42, 0.08);
+}
+
+.booster-face.front {
+  background: #fef08a;
+}
+
+.booster-card.won .booster-face.front {
+  background: #f3e8ff;
+  box-shadow: 0 0 0 2px #a855f7, 0 14px 30px rgba(126, 34, 206, 0.35);
+}
+
+.booster-face.back {
+  transform: rotateY(180deg);
+  background: repeating-linear-gradient(135deg, #7e22ce 0 8px, #9333ea 8px 16px);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.booster-card.can-pick:hover .booster-face.back,
+.booster-card.can-pick:focus-visible .booster-face.back {
+  box-shadow: 0 0 0 3px #d8b4fe, 0 0 22px 6px rgba(168, 85, 247, 0.55);
+}
+
+.booster-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: calc(var(--s) * 0.13);
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.booster-plus {
+  color: #7e22ce;
+  font-size: calc(var(--s) * 0.12);
+  font-weight: 800;
+}
+
+/* A foil shine across the picked card as it turns over — lilac, once. */
+.booster-shine {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(100deg, transparent 35%, rgba(233, 213, 255, 0.85) 50%, transparent 65%);
+  transform: translateX(-120%);
+  animation: booster-shine 0.9s ease-in-out 0.1s both;
+}
+
+@keyframes booster-shine {
+  to {
+    transform: translateX(120%);
+  }
+}
+
+.booster-stamp {
+  position: absolute;
+  z-index: 90;
+  translate: -50% -50%;
+  padding: 0 12px;
+  border: 3px solid #fff;
+  border-radius: 10px;
+  background: #9333ea;
+  color: #fff;
+  font-size: clamp(1.3rem, 4vw, 1.9rem);
+  font-weight: 900;
+  line-height: 1.15;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 8px 22px rgba(88, 28, 135, 0.35);
+}
+
+.booster-under {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 3.2em;
+}
+
+.booster-prompt {
+  margin: 0;
+  color: #7e22ce;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.booster-prompt.failed {
+  color: #dc2626;
+}
+
+.booster-explain {
+  margin: 0;
+  color: #475569;
+  font-size: 1rem;
+}
+
+.booster-explain b {
+  color: var(--text);
+}
+
+/* A pick left over, dealt again over the board. */
+.recap-card.booster-reveal {
+  max-width: 640px;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .booster-rays,
+  .booster-shine {
+    animation: none;
+  }
+
+  .booster-lift {
+    transition: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

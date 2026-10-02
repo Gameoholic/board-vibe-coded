@@ -15,6 +15,7 @@ import {
   PatchShopSectionBody,
   PatchStreakBody,
   PatchTaskBody,
+  PickBoosterBody,
   RerollBountyBody,
   RecolorSectionBody,
   ReorderBody,
@@ -302,6 +303,17 @@ export function buildRouter(store: BoardStore, backups: Backups): Router {
   router.post("/bounty/reroll", (req, res) => {
     const { taskId } = RerollBountyBody.parse(req.body);
     res.json(store.rerollBounty(taskId, idemKey(req, "bounty-reroll")));
+  });
+
+  // The open week's Booster hand: face down until picked, turned over once every pick is made.
+  router.get("/booster", (_req, res) => {
+    res.json(store.boosterStatus());
+  });
+
+  // Pick a card of this week's Booster hand (while picks are left). Returns the hand, the pick turned over.
+  router.post("/booster/pick", (req, res) => {
+    const { card } = PickBoosterBody.parse(req.body);
+    res.json(store.pickBooster(card, idemKey(req, "booster-pick")));
   });
 
   // ---- backups ----

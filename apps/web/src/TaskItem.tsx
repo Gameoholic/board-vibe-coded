@@ -70,8 +70,9 @@ interface TaskItemProps {
   modifiers: readonly AppliedModifier[];
   // Only on a Bounty still to win, while rerolls are left: its menu's Reroll, and how many are left.
   reroll?: { left: number; onReroll: () => void };
-  // Only in a Freezer: thawing it (the button in its box's place, and its menu) and what that gains.
-  onIce?: { onThaw: () => void; gains?: string };
+  // Only in a Freezer: thawing it (the button in its box's place, and its menu) and what that gains — and the
+  // thaw bonus it would pay, said under its frost.
+  onIce?: { onThaw: () => void; gains?: string; thawBonus?: number };
   // Only in a tab with a Freezer: freezing it, or why it can't be.
   freeze?: { onFreeze: () => void; refusal: string | null };
   // The tab's Age Display toggle: how long it has waited, beside its name.
@@ -492,13 +493,15 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
         const look = lookOf(m);
         if (!look || (onIce && !look.tagOnIce)) return [];
         return [
-          <span key={m.id} className={`modifier-tag${look.aura?.(task, settings, place) ? " glow" : ""}`} style={{ "--c": look.color } as React.CSSProperties}>
+          <span key={m.id} className={`modifier-tag${!look.plainTag && look.aura?.(task, settings, place) ? " glow" : ""}`} style={{ "--c": look.color } as React.CSSProperties}>
             {look.tag}
           </span>,
         ];
       });
+  // The thaw bonus thawing it would pay, said under its frost — on the task, not on each of its pieces.
+  const thawLine = !task.parentId ? (onIce?.thawBonus ?? 0) : 0;
   const modifierLines =
-    shownDone || modifiers.length === 0 ? null : (
+    shownDone || (modifiers.length === 0 && !thawLine) ? null : (
       <span className="modifier-lines">
         {modifiers.map((m) => {
           const look = lookOf(m);
@@ -519,6 +522,12 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
             </span>
           );
         })}
+        {thawLine ? (
+          <span className="modifier-line thaw-line">
+            <ThawIcon size={12} />
+            <span>+{formatPercent(thawLine)} thaw bonus</span>
+          </span>
+        ) : null}
       </span>
     );
   const ageChip = showAge && !shownDone ? <AgeChip task={task} onIce={!!onIce} freezes={!!freeze} /> : null;
@@ -741,16 +750,13 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
       {(() => {
         // On ice it can't be done: its box is the way out — thawing it, which starts it.
         if (onIce) {
+          const tip = onIce.thawBonus ? `Thaw now and get +${formatPercent(onIce.thawBonus)} for starting it` : "Thaw";
           return (
-            <button
-              type="button"
-              className="thaw-btn"
-              aria-label={`Thaw “${task.text}”`}
-              title={onIce.gains ? `Thaw · ${onIce.gains}` : "Thaw"}
-              onClick={onIce.onThaw}
-            >
-              <ThawIcon size={12} />
-            </button>
+            <Tooltip className="thaw-cell" label={tip} align="start">
+              <button type="button" className="thaw-btn" aria-label={`Thaw “${task.text}”`} onClick={onIce.onThaw}>
+                <ThawIcon size={12} />
+              </button>
+            </Tooltip>
           );
         }
         const locked = !shownDone && boxLocked(0);

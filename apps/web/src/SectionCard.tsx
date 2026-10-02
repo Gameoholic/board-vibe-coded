@@ -425,10 +425,12 @@ function SectionCard({
         }
       : undefined;
 
-  // A frozen row's way out: thawing its task (a piece's is the task it sits in), saying what that gains.
+  // A frozen row's way out: thawing its task (a piece's is the task it sits in), saying what that gains — and the
+  // thaw bonus it would pay, if it has frost.
   const frozenRow = (task: Task) => {
     const whole = (task.parentId && tasks.find((t) => t.id === task.parentId)) || task;
-    return { onThaw: () => onSetFrozen(whole, false), gains: thawGains(whole) };
+    const bonus = frostShare(whole, boardSettings) > 0 ? boardSettings.freezer.thawBonus : 0;
+    return { onThaw: () => onSetFrozen(whole, false), gains: thawGains(whole), ...(bonus > 0 ? { thawBonus: bonus } : {}) };
   };
 
   // A task's row — a piece's too (under its task, whose tick handler it's given so the task sees the tick

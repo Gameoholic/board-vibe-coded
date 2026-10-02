@@ -1,10 +1,15 @@
 import { randomUUID } from "node:crypto";
 import {
   type AllowedType,
+  type AppliedModifier,
   behaviorOf,
   behaviorOfType,
   type BoardEvent,
+  BOOSTER_HAND_MAX,
+  type BoosterHand,
+  type BoosterStatus,
   bountyWeight,
+  canBoost,
   canBounty,
   canBreakDown,
   canPrune,
@@ -39,6 +44,7 @@ import {
   type Group,
   isRetired,
   newPiecePoints,
+  paidAt,
   type PatchSettingsBody,
   type PointsFormula,
   pointsFromMinutes,
@@ -64,6 +70,7 @@ import {
   type Shop,
   type ShopSection,
   type ShopSectionEditFields,
+  shuffled,
   type StoredEvent,
   type Streak,
   type StreakEditFields,
@@ -184,6 +191,10 @@ export class BoardStore {
   // until used.
   private freeRerolls = new Map<string, { granted: number | null; used: number }>();
   private bankedRerolls = 0;
+  // Each week's Booster hand, per week key: the tasks on its cards in the order dealt, and the cards picked so
+  // far — each one's task a Booster, adding what it was picked at. On while its week is the open one (see
+  // boosterOn), so a week close ends them with no event.
+  private boosterHands = new Map<string, { taskIds: string[]; picked: { card: number; taskId: string; amount: number }[] }>();
   // What each open period has seen so far, for its recap, day by day: per task, the net points its ticks
   // gained (at the boost each was paid at), and each purchase. Started afresh with each period.
   private tallies: Record<PeriodKind, PeriodTally> = { day: newTally(), week: newTally() };
@@ -194,7 +205,7 @@ export class BoardStore {
   // that week's days on ice.
   private frostFrom = new Map<string, string>();
 
-  // `random` is the Bounty roll's randomness (its result is recorded; a rebuild never calls it) —
+  // `random` is the Bounty roll's and the Booster deal's randomness (recorded; a rebuild never calls it) —
   // injectable so tests can roll deterministically.
   constructor(
     private readonly store: EventStore,
@@ -318,6 +329,7 @@ export class BoardStore {
     }));
     const pruned = this.isPruned(task);
     const bounty = this.bountyOn(task);
+    const booster = this.boosterOn(task);
     return {
       ...task,
       ...(tiers ? { tiers } : {}),
@@ -326,6 +338,7 @@ export class BoardStore {
       ...(timer ? { timer } : {}),
       ...(pruned ? { pruned } : {}),
       ...(bounty ? { bounty } : {}),
+      ...(booster ? { booster } : {}),
     };
   }
 
@@ -335,6 +348,14 @@ export class BoardStore {
     if (!week || !this.settings.bounty.enabled) return undefined;
     const bounty = this.bounties.get(week)?.find((b) => b.taskId === task.id);
     return bounty ? { multiplier: bounty.multiplier, periodKey: week } : undefined;
+  }
+
+  // A Booster on `task`, if it has one: picked for the week that's still open, while Boosters are on.
+  private boosterOn(task: Pick<Task, "id">): Task["booster"] {
+    const week = this.openPeriods.week?.key;
+    if (!week || !this.settings.booster.enabled) return undefined;
+    const pick = this.boosterHands.get(week)?.picked.find((p) => p.taskId === task.id);
+    return pick ? { amount: pick.amount, periodKey: week } : undefined;
   }
 
   // The open week's Bounties still to win, in the order rolled.
@@ -768,8 +789,9 @@ export class BoardStore {
   setTier(id: string, activeTier: number | null, idempotencyKey?: string | null): Task {
     const task = this.requireTask(id);
     if (activeTier !== null && !task.tiers?.[activeTier]) throw badRequest("invalid activeTier");
-    const pointsAwarded = activeTier !== null ? (task.tiers?.[activeTier]?.points ?? 0) : 0;
-    this.commit({ type: "TaskTierSet", taskId: id, activeTier, pointsAwarded }, idempotencyKey);
+    const modifiers = this.tickModifiers(task, activeTier !== null);
+    const pointsAwarded = paidAt(task, activeTier === null ? 0 : activeTier + 1, modifiers);
+    this.commit({ type: "TaskTierSet", taskId: id, activeTier, pointsAwarded, ...(modifiers.length > 0 ? { modifiers } : {}) }, idempotencyKey);
     return this.readTask(this.requireTask(id));
   }
 
@@ -779,10 +801,19 @@ export class BoardStore {
     // a multi-box checkbox caps at its box count.
     const max = behaviorOf(task).unbounded ? (task.count ?? Infinity) : (task.count ?? 1);
     if (progress < 0 || progress > max) throw badRequest("invalid progress");
-    // Uniform boxes: each ticked box is worth `points`, so the value reached is points × progress.
-    const pointsAwarded = (task.points ?? 0) * progress;
-    this.commit({ type: "TaskProgressSet", taskId: id, progress, pointsAwarded }, idempotencyKey);
+    // Uniform boxes: each ticked box is a completion worth `points`, paid at the modifiers.
+    const modifiers = this.tickModifiers(task, progress > 0);
+    const pointsAwarded = paidAt(task, progress, modifiers);
+    this.commit({ type: "TaskProgressSet", taskId: id, progress, pointsAwarded, ...(modifiers.length > 0 ? { modifiers } : {}) }, idempotencyKey);
     return this.readTask(this.requireTask(id));
+  }
+
+  // What a tier's or a count's ticks are paid at: the modifiers on it now when its first box is ticked, kept
+  // while any stays ticked (so a later tick never re-prices an earlier one), and none once it's back to none.
+  private tickModifiers(task: Task, ticked: boolean): AppliedModifier[] {
+    if (!ticked) return [];
+    if (behaviorOf(task).filled(task) > 0) return task.paidWith ?? [];
+    return modifiersOf(this.readTask(task), { settings: this.settings, section: this.sections.find((s) => s.id === task.sectionId) });
   }
 
   editTask(id: string, changes: TaskEditFields, idempotencyKey?: string | null): Task {
@@ -1167,12 +1198,14 @@ export class BoardStore {
           this.commit({ type: "TasksReset", taskIds: reset.map((t) => t.id), pointsBanked });
         }
         start();
-        // A week close banks the frost the Freezer gathered, freezes what has waited too long, then rolls the
-        // new week's Bounties from the Freezer (a first start closes nothing, so it does none of it).
+        // A week close banks the frost the Freezer gathered, freezes what has waited too long, rolls the new
+        // week's Bounties from the Freezer and deals its Booster hand (a first start closes nothing, so it does
+        // none of it).
         if (kind === "week") {
           frost = this.bankFrost(open.key);
           frozen = this.freezeWaiting(now);
           this.startWeekBounties(currentKey, now);
+          this.dealBooster(currentKey);
         }
       }
     } else {
@@ -1186,7 +1219,7 @@ export class BoardStore {
             .sort()
             .map((dayKey) => this.recapDay(dayKey, tally.has(dayKey) ? [tally.get(dayKey)!] : []))
         : [this.recapDay(closedKey, [...tally.values()])];
-    const recap: Omit<PeriodRecap, "bounties" | "bountyEmpty"> = {
+    const recap: Omit<PeriodRecap, "bounties" | "bountyEmpty" | "booster"> = {
       kind,
       periodKey: closedKey,
       days,
@@ -1206,15 +1239,16 @@ export class BoardStore {
     const bounties = weekClosed ? this.bountiesView(now) : [];
     // Bounties are on, but there was nothing on ice to roll — the recap says so.
     const bountyEmpty = weekClosed && this.settings.bounty.enabled && bounties.length === 0;
+    const booster = weekClosed ? this.boosterHand() : null;
     // The week ends with the day that ends it: once the week a day was in is over, ending the day ends the
     // week too — a follow-up of the owner's one answer, so a week is never asked about. Its recap comes
     // along (a first week only starts, with nothing to recap).
     if (kind === "day" && this.periodStatus(now).week.due) {
       const weekWasOpen = this.openPeriods.week !== undefined;
       const week = this.rollPeriod("week", now);
-      return { recap: { ...recap, bounties, bountyEmpty }, streaks: week.streaks, ...(weekWasOpen ? { week: week.recap } : {}) };
+      return { recap: { ...recap, bounties, bountyEmpty, booster }, streaks: week.streaks, ...(weekWasOpen ? { week: week.recap } : {}) };
     }
-    return { recap: { ...recap, bounties, bountyEmpty }, streaks: this.listStreaks() };
+    return { recap: { ...recap, bounties, bountyEmpty, booster }, streaks: this.listStreaks() };
   }
 
   // A week close's frost: every task in a Freezer banks the whole days it spent there since its last bank,
@@ -1287,6 +1321,54 @@ export class BoardStore {
     if (!enabled) return;
     this.commit({ type: "BountyRerollsGranted", count: rerolls, source: "week", periodKey });
     for (let i = 0; i < max; i++) if (!this.rollBounty(periodKey, now)) break;
+  }
+
+  // A new week's Booster hand, while Boosters are on: the Registry's habits shuffled and dealt face down (a
+  // random handful of a big Registry), recorded with which card holds which task — so a pick is a real draw.
+  private dealBooster(periodKey: string): void {
+    if (!this.settings.booster.enabled) return;
+    const candidates = this.tasks.filter((t) => {
+      const section = this.sections.find((s) => s.id === t.sectionId);
+      return !!section && canBoost(t, section);
+    });
+    if (candidates.length === 0) return;
+    const taskIds = shuffled(candidates.map((t) => t.id), this.random).slice(0, BOOSTER_HAND_MAX);
+    this.commit({ type: "BoosterDealt", periodKey, taskIds });
+  }
+
+  // The open week's Booster hand as the owner sees it: face down until picked, and every card turned over once
+  // the last pick is made. Null when none was dealt, or Boosters are off.
+  private boosterHand(): BoosterHand | null {
+    const week = this.openPeriods.week?.key;
+    const hand = week && this.settings.booster.enabled ? this.boosterHands.get(week) : undefined;
+    if (!hand) return null;
+    const textOf = (taskId: string) => this.tasks.find((t) => t.id === taskId)?.text ?? "";
+    const picks = Math.min(this.settings.booster.max, hand.taskIds.length);
+    return {
+      cards: hand.taskIds.length,
+      names: hand.taskIds.map(textOf).sort((a, b) => a.localeCompare(b)),
+      picks,
+      picked: hand.picked.map((p) => ({ ...p, text: textOf(p.taskId) })),
+      revealed: hand.picked.length >= picks ? hand.taskIds.map(textOf) : null,
+    };
+  }
+
+  // The open week's Booster hand.
+  boosterStatus(): BoosterStatus {
+    return { hand: this.boosterHand() };
+  }
+
+  // Pick a card of this week's Booster hand: the task the deal put there is a Booster for the rest of the week,
+  // adding the setting's amount now. Only while picks are left, and only a card not picked yet.
+  pickBooster(card: number, idempotencyKey?: string | null): BoosterHand {
+    const week = this.openPeriods.week?.key;
+    const hand = week && this.settings.booster.enabled ? this.boosterHands.get(week) : undefined;
+    if (!week || !hand) throw badRequest("there's no Booster to pick this week");
+    if (hand.picked.length >= Math.min(this.settings.booster.max, hand.taskIds.length)) throw badRequest("this week's Booster is already picked");
+    const taskId = hand.taskIds[card];
+    if (taskId === undefined || hand.picked.some((p) => p.card === card)) throw badRequest("that card can't be picked");
+    this.commit({ type: "BoosterPicked", periodKey: week, card, taskId, amount: this.settings.booster.amount }, idempotencyKey);
+    return this.boosterHand()!;
   }
 
   // Winning a Bounty rolls another when Settings say so (rollOnWin) — up to the most that may be on at
@@ -1508,6 +1590,7 @@ export class BoardStore {
     this.bountiedIn.clear();
     this.freeRerolls.clear();
     this.bankedRerolls = 0;
+    this.boosterHands.clear();
     this.tallies = { day: newTally(), week: newTally() };
     this.weekStartStreaks = null;
     this.frostFrom.clear();
@@ -1691,6 +1774,8 @@ export class BoardStore {
         this.mutateTask(event.taskId, occurredAt, (t) => {
           t.activeTier = event.activeTier;
           t.completedAt = event.activeTier !== null ? occurredAt : null;
+          if (event.activeTier !== null && event.modifiers?.length) t.paidWith = event.modifiers;
+          else delete t.paidWith;
         });
         this.releaseDependents(event.taskId, occurredAt);
         return;
@@ -1701,6 +1786,8 @@ export class BoardStore {
         this.mutateTask(event.taskId, occurredAt, (t) => {
           t.progress = event.progress;
           t.completedAt = t.count != null && event.progress >= t.count ? occurredAt : null;
+          if (event.progress > 0 && event.modifiers?.length) t.paidWith = event.modifiers;
+          else delete t.paidWith;
         });
         this.releaseDependents(event.taskId, occurredAt);
         return;
@@ -1808,6 +1895,12 @@ export class BoardStore {
         else this.freeRerolls.set(event.periodKey, { granted: event.count, used: this.freeRerolls.get(event.periodKey)?.used ?? 0 });
         return;
       }
+      case "BoosterDealt":
+        this.boosterHands.set(event.periodKey, { taskIds: event.taskIds, picked: [] });
+        return;
+      case "BoosterPicked":
+        this.boosterHands.get(event.periodKey)?.picked.push({ card: event.card, taskId: event.taskId, amount: event.amount });
+        return;
       case "PiecesReordered":
         this.itemOrder.set(event.taskId, orderBy(this.orderList(event.taskId), (id) => id, event.orderedIds));
         return;
@@ -1954,12 +2047,13 @@ export class BoardStore {
         return;
       case "PeriodStarted":
         this.openPeriods[event.kind] = { key: event.periodKey, startedAt: occurredAt };
-        // A week starting starts its Bounties and free rerolls afresh — the debug clock can reopen a week,
-        // and whatever an earlier run of it held ended when that run closed.
+        // A week starting starts its Bounties, free rerolls and Booster hand afresh — the debug clock can reopen
+        // a week, and whatever an earlier run of it held ended when that run closed.
         if (event.kind === "week") {
           this.bounties.delete(event.periodKey);
           this.bountiedIn.delete(event.periodKey);
           this.freeRerolls.delete(event.periodKey);
+          this.boosterHands.delete(event.periodKey);
         }
         return;
       case "PeriodClosed":

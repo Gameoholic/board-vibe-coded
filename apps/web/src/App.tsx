@@ -1,4 +1,6 @@
 import {
+  BoosterHand as BoosterHandSchema,
+  BoosterStatus as BoosterStatusSchema,
   BountyStatus as BountyStatusSchema,
   DebugClockState as DebugClockStateSchema,
   DEFAULT_SETTINGS,
@@ -26,6 +28,7 @@ import { PeriodPrompt } from "./PeriodClose";
 import { skippedSince } from "./periodLabels";
 import { PeriodRecapCard } from "./Recap";
 import { BountyReveal } from "./BountyReveal";
+import { BoosterReveal } from "./BoosterReveal";
 import PointsCounter, { type PointsCounterHandle } from "./PointsCounter";
 import Poof, { type PoofBurst } from "./Poof";
 import RebalanceConfirm from "./RebalanceConfirm";
@@ -36,7 +39,7 @@ import type { StreakPayload } from "./StreakForm";
 import WindDownOverlay from "./WindDownOverlay";
 import { finishFx, thawFx } from "./freezeFx";
 import { behaviorOf, doneFromPieces, frostFill, frostShare, isRetired, modifiersOf, onWholeTask, payout, releasedFrom, statusChange, taskPointValue, wholeWorth } from "./types";
-import type { BountyStatus, FormulaPreview, Group, PeriodRecap, PeriodStatus, PointsFormula, Reward, RolledBounty, Section, Settings, StreakView, Task, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
+import type { BoosterHand, BountyStatus, FormulaPreview, Group, PeriodRecap, PeriodStatus, PointsFormula, Reward, RolledBounty, Section, Settings, StreakView, Task, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
 import { BoardClockProvider } from "./useBoardClock";
 import { useLocalConfig } from "./useLocalConfig";
 import { useShop } from "./useShop";
@@ -46,6 +49,8 @@ import { useSuppressPasswordManagers } from "./useSuppressPasswordManagers";
 const byOrder = (a: Task, b: Task) => (a.order ?? 0) - (b.order ?? 0);
 // A Bounty rolled by a win is revealed once the win's points have landed, after the counter's count-up (ms).
 const WIN_REVEAL_SETTLE_MS = 700;
+// A Booster hand with a pick still to make (else null).
+const pickLeft = (hand: BoosterHand | null) => (hand && hand.picked.length < hand.picks ? hand : null);
 
 function computeTotalPoints(tasks: Task[]): number {
   return tasks.reduce((sum, t) => sum + taskPointValue(t), 0);
@@ -75,6 +80,9 @@ function App() {
   const [reveal, setReveal] = useState<RolledBounty | null>(null);
   // One rolled by a win, waiting for that win's celebration to land before it's revealed.
   const [revealNext, setRevealNext] = useState<RolledBounty | null>(null);
+  // This week's Booster hand when a pick is still to be made (the board was left before the recap's pick):
+  // dealt again over the board.
+  const [boosterLeft, setBoosterLeft] = useState<BoosterHand | null>(null);
   // Whether the owner put off ending the day this session ("Not yet") — re-offered on the next load.
   const [dayDeferred, setDayDeferred] = useState(false);
   const [view, setView] = useState<AppView>("board");
@@ -106,10 +114,11 @@ function App() {
       fetch("/api/periods/status").then((res) => res.json()),
       fetch("/api/debug/clock").then((res) => res.json()),
       fetch("/api/bounty").then((res) => res.json()),
+      fetch("/api/booster").then((res) => res.json()),
     ])
       // Validate the API's responses at the trust boundary rather than casting blindly — a shape
       // drift or a bad payload fails loudly here instead of surfacing as a mystery render bug.
-      .then(([sectionsData, tasksData, groupsData, streaksData, settingsData, statusData, clockData, bountyData]) => {
+      .then(([sectionsData, tasksData, groupsData, streaksData, settingsData, statusData, clockData, bountyData, boosterData]) => {
         setSections(SectionSchema.array().parse(sectionsData));
         setTasks(TaskSchema.array().parse(tasksData));
         setGroups(GroupSchema.array().parse(groupsData));
@@ -120,6 +129,7 @@ function App() {
         setDebugNow(clock.now);
         setRealNow(clock.real);
         setBountyStatus(BountyStatusSchema.parse(bountyData));
+        setBoosterLeft(pickLeft(BoosterStatusSchema.parse(boosterData).hand));
       })
       .finally(() => setLoading(false));
   }, []);
@@ -135,6 +145,8 @@ function App() {
   // Whether to ask if the day has ended. Only the day is ever asked about — its week ends with it (the
   // server's follow-up once the week is over).
   const askDay = !!status?.day.due && !dayDeferred;
+  // A Booster pick left over is dealt once nothing else is up — never before a day that may end its week.
+  const boosterShown = !!boosterLeft && !askDay && !recap && !reveal;
 
   function refreshStatus() {
     fetch("/api/periods/status")
@@ -172,19 +184,22 @@ function App() {
           setRecap(recaps[0]);
           await closed;
         }
-        // Read back once it's closed: a reroll in the recap may have moved a Bounty since the roll.
+        // Read back once it's closed: a reroll in the recap may have moved a Bounty since the roll, and a pick
+        // made the Booster.
         return Promise.all([
           nextStreaks,
           fetch("/api/tasks").then((res) => res.json()),
           fetch("/api/periods/status").then((res) => res.json()),
           refreshBounty(),
+          fetch("/api/booster").then((res) => res.json()),
         ]);
       })
       // The unchecked tasks and the banked points land in the same render, so the counter never dips.
-      .then(([nextStreaks, tasksData, statusData]) => {
+      .then(([nextStreaks, tasksData, statusData, , boosterData]) => {
         setStreaks(nextStreaks);
         setTasks(TaskSchema.array().parse(tasksData));
         setStatus(PeriodStatusSchema.parse(statusData));
+        setBoosterLeft(pickLeft(BoosterStatusSchema.parse(boosterData).hand));
       });
   }
 
@@ -228,6 +243,31 @@ function App() {
         r ? { ...r, bounties: r.bounties.map((b) => (b.taskId === taskId ? bounty : { ...b, rerollsLeft: bounty.rerollsLeft })) } : r,
       );
     });
+  }
+
+  // Take a card of this week's Booster hand; the hand with it turned over (null when the server refused).
+  function postBoosterPick(card: number): Promise<BoosterHand | null> {
+    return fetch("/api/booster/pick", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ card }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => (data ? BoosterHandSchema.parse(data) : null));
+  }
+
+  // From the recap: the card's turned over, and the recap holds the hand as it now is.
+  function pickInRecap(card: number) {
+    return postBoosterPick(card).then((hand) => {
+      if (hand) setRecap((r) => (r ? { ...r, booster: hand } : r));
+      return hand;
+    });
+  }
+
+  // From a pick left over (BoosterReveal): closed, the board reads back its Booster.
+  function closeBoosterLeft() {
+    setBoosterLeft(null);
+    reloadTasks();
   }
 
   // From a Bounty's row (or the reveal's own Reroll): the new one is revealed on its reel.
@@ -651,9 +691,10 @@ function App() {
     const b = behaviorOf(task);
     const patch = b.patchForLevel(task, level);
     const finishes = b.isDone({ ...task, ...patch });
-    // Paid at its modifiers while ticked — kept if it already was, as the server freezes them on the
-    // completion — and none once unticked.
-    const paid = !finishes ? undefined : b.isDone(task) ? task.paidWith : modifiersNow(task, list, true);
+    // Paid at its modifiers while any box is ticked — kept if one already was, as the server freezes them on
+    // the first tick — and none once nothing is.
+    const ticked = b.filled({ ...task, ...patch }) > 0;
+    const paid = !ticked ? undefined : b.filled(task) > 0 ? task.paidWith : modifiersNow(task, list, true);
     const changed = list.map((t) => (t.id === task.id ? { ...t, ...patch, paidWith: paid?.length ? paid : undefined } : t));
     const next = finishes ? releaseWaitingOn(changed, task.id) : changed;
     if (!b.retiresWhenDone) return next;
@@ -897,7 +938,7 @@ function App() {
       {/* The HUD floats over the whole screen; while a period prompt or recap overlay is up it would
           sit on top of that focus surface (overlapping the score), so hide it until they're dismissed.
           In shop mode the same counter docks top-centre. */}
-      {view !== "settings" && !askDay && !recap && !reveal && (
+      {view !== "settings" && !askDay && !recap && !reveal && !boosterShown && (
         <>
           <PointsCounter ref={counterRef} total={points} docked={shopOpen} />
           <FlyingPoints flyers={flyers} getTarget={counterTarget} onLand={landFlyer} />
@@ -907,9 +948,16 @@ function App() {
 
       <AnimatePresence>
         {recap && (
-          <PeriodRecapCard key={`${recap.kind}-${recap.periodKey}`} recap={recap} onReroll={rerollInRecap} onClose={closeRecap} />
+          <PeriodRecapCard
+            key={`${recap.kind}-${recap.periodKey}`}
+            recap={recap}
+            onReroll={rerollInRecap}
+            onPickBooster={pickInRecap}
+            onClose={closeRecap}
+          />
         )}
         {reveal && <BountyReveal key="reveal" bounty={reveal} onReroll={() => rerollRevealed(reveal.taskId)} onClose={closeReveal} />}
+        {boosterShown && boosterLeft && <BoosterReveal key="booster" hand={boosterLeft} onPick={postBoosterPick} onClose={closeBoosterLeft} />}
       </AnimatePresence>
 
       {/* Screen-off wind-down nudge — mounted above the views so it pressures in every place, driven by
@@ -923,6 +971,8 @@ function App() {
       {formulaChange && (
         <RebalanceConfirm
           preview={formulaChange.preview}
+          sections={sections}
+          tasks={tasks}
           onYes={() => applyFormulaChange(true)}
           onNo={() => applyFormulaChange(false)}
           onCancel={() => setFormulaChange(null)}

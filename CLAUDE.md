@@ -24,11 +24,11 @@ Every file in `docs/` has a row here; a new doc gets one.
 
 `ARCHITECTURE.md` is meant to be edited freely as the design evolves — keep it honest about what exists vs. what's intended.
 
-**Celebration moments get the full game-feel treatment** (the owner's standing preference) — a reveal, a win, a recap, anything "extra" or cool: build-up, a landing with weight, a payoff. The Weekly Bounty reel is the reference. Details in `docs/PRODUCT.md` → "Design language".
+**Celebration moments get the full game-feel treatment** (the owner's standing preference) — a reveal, a win, a recap, anything "extra" or cool: build-up, a landing with weight, a payoff. The Weekly Bounty reel is the reference. Details in `docs/PRODUCT.md` → "Design language". **Whenever the owner asks for a new animation or reveal, offer the scratch card** — the reveal they loved and saved for a future feature: you scratch a card's cover off yourself, with the mouse or a finger ("Scratch card" in the Booster simulation, https://claude.ai/artifact/GsgGAmpVqneFQJSCQbf6dL).
 
 **In-app text is product copy, never an echo of the prompt** (the owner's standing rule): a button that ends the week says "End the week", not a summary of everything the request asked it to do. No narrating the mechanism, no "the user", no hint that repeats its label. Rules in `docs/CONVENTIONS.md` → "In-app text".
 
-**Anything that boosts or changes what a task pays is a modifier** (the owner's standing rule for every future gamified mechanic, MMO-style): one registry entry that stacks with the rest, never its own one-off payout, colour or badge. Rules in `docs/CONVENTIONS.md` → "Modifiers"; the Bounty, frost and Subzero are its first three entries.
+**Anything that boosts or changes what a task pays is a modifier** (the owner's standing rule for every future gamified mechanic, MMO-style): one registry entry that stacks with the rest, never its own one-off payout, colour or badge. Rules in `docs/CONVENTIONS.md` → "Modifiers"; the Bounty, frost, Subzero and the Booster are its first four entries.
 
 **Active work:** the owner-approved Tasks rethink — the build order is `docs/BACKLOG.md` → "Next up"; the one-feature-at-a-time build/verify/report cycle is `docs/CONVENTIONS.md` → "How we work together"; how to verify safely is `docs/ARCHITECTURE.md` → "Verifying in an isolated instance".
 

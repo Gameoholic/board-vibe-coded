@@ -64,6 +64,15 @@ export const BountySettings = z.object({
 });
 export type BountySettings = z.infer<typeof BountySettings>;
 
+// The weekly Booster's knobs (Settings → Booster; see booster.ts): whether a week close deals a hand at all,
+// how many of its cards are picked (each a Booster), and what a Booster adds to every tick of its task.
+export const BoosterSettings = z.object({
+  enabled: z.boolean().default(true),
+  max: z.number().int().min(1).max(3).default(1),
+  amount: Points.min(1).max(10_000).default(500),
+});
+export type BoosterSettings = z.infer<typeof BoosterSettings>;
+
 // The Freezer's knobs (Settings → Freezer; see freezer.ts): how long a Backlog task may wait before a week
 // close freezes it, how fast frost grows on a frozen one (a share of its points per week on ice, counted by
 // the day) and where it stops, the least a task whose frost is full (Subzero) pays once thawed, and the
@@ -108,6 +117,8 @@ export const Settings = z.object({
   bounty: BountySettings.default({}),
   // The Freezer (see freezer.ts). Defaulted, so a board predating it parses unchanged.
   freezer: FreezerSettings.default({}),
+  // The weekly Booster (see booster.ts). Defaulted, so a board predating it parses unchanged.
+  booster: BoosterSettings.default({}),
   // Database backups. Defaulted to how they ran before they were settings (every 2 days, 5 kept).
   backup: BackupSettings.default({}),
 });

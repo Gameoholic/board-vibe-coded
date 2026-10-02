@@ -1,15 +1,17 @@
 import { formatPercent } from "@board/contracts";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useState, type CSSProperties } from "react";
+import { BoosterDeal } from "./BoosterDeal";
 import { BountyExplain, BountyRoll } from "./BountyRoll";
 import { FlameIcon, SnowflakeIcon } from "./Icons";
 import { dayLabel, labelFor } from "./periodLabels";
-import type { PeriodRecap, RecapDay, RecapFrost, RecapFrozen, RecapStreak, RecapTab, RolledBounty } from "./types";
+import type { BoosterHand, PeriodRecap, RecapDay, RecapFrost, RecapFrozen, RecapStreak, RecapTab, RolledBounty } from "./types";
 
 // The recap of a just-closed period, like a mobile game's daily log-in: a week opens on its days, each with
 // what you cleared in every tab (in the tab's colour, with the % it earned), what the day earned and lost,
 // and each purchase; then its streaks from the week's start to its end; then the frost its close banked and
-// the tasks it froze; then the next week's Bounty roll. Pages you flip, so nothing scrolls.
+// the tasks it froze; then the next week's Bounty roll, and its Booster hand to pick from. Pages you flip, so
+// nothing scrolls.
 // A week's takes over the screen as sticky notes on the board (NoteWall); a day's is a floating card over a
 // soft (never fully dark) scrim, in keeping with the no-heavy-modal rule.
 
@@ -43,11 +45,13 @@ type Page = { key: string; label: string };
 interface PeriodRecapCardProps {
   recap: PeriodRecap;
   onReroll: (taskId: string) => void;
+  // Take a card of the week's Booster hand: the hand with it turned over, or null when the server refused.
+  onPickBooster: (card: number) => Promise<BoosterHand | null>;
   onClose: () => void;
 }
 
-export function PeriodRecapCard({ recap, onReroll, onClose }: PeriodRecapCardProps) {
-  if (recap.kind === "week") return <NoteWall recap={recap} onReroll={onReroll} onClose={onClose} />;
+export function PeriodRecapCard({ recap, onReroll, onPickBooster, onClose }: PeriodRecapCardProps) {
+  if (recap.kind === "week") return <NoteWall recap={recap} onReroll={onReroll} onPickBooster={onPickBooster} onClose={onClose} />;
   return (
     <div className="recap-scrim" onClick={onClose}>
       <motion.div
@@ -58,7 +62,7 @@ export function PeriodRecapCard({ recap, onReroll, onClose }: PeriodRecapCardPro
         exit={{ opacity: 0, scale: 0.96 }}
         transition={{ type: "spring", stiffness: 380, damping: 30 }}
       >
-        <RecapBody recap={recap} onReroll={onReroll} onDone={onClose} />
+        <RecapBody recap={recap} onReroll={onReroll} onPickBooster={onPickBooster} onDone={onClose} />
       </motion.div>
     </div>
   );
@@ -67,7 +71,7 @@ export function PeriodRecapCard({ recap, onReroll, onClose }: PeriodRecapCardPro
 // The week's recap: the board fades back behind a frosted wash and the week is stuck onto it as notes
 // (App holds the board's new week until it's closed, so nothing is given away early). Done peels the notes
 // off and drops them, then it closes and the wash clears.
-function NoteWall({ recap, onReroll, onClose }: PeriodRecapCardProps) {
+function NoteWall({ recap, onReroll, onPickBooster, onClose }: PeriodRecapCardProps) {
   const reduce = useReducedMotion();
   const [leaving, setLeaving] = useState(false);
   const leave = () => {
@@ -79,14 +83,25 @@ function NoteWall({ recap, onReroll, onClose }: PeriodRecapCardProps) {
     <div className={`recap-wall${leaving ? " leaving" : ""}`} role="dialog" aria-modal="true" aria-label="Week recap">
       <motion.div className="recap-wash" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.35 }} />
       <motion.div className="recap-screen" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.15 }}>
-        <RecapBody recap={recap} onReroll={onReroll} onDone={leave} />
+        <RecapBody recap={recap} onReroll={onReroll} onPickBooster={onPickBooster} onDone={leave} />
       </motion.div>
     </div>
   );
 }
 
 // The recap itself, the same in the card and on the wall: its date, the page you're on, and the way through.
-function RecapBody({ recap, onReroll, onDone }: { recap: PeriodRecap; onReroll: (taskId: string) => void; onDone: () => void }) {
+// The Booster's page holds Done back until its pick has landed, so the week's Booster is never skipped.
+function RecapBody({
+  recap,
+  onReroll,
+  onPickBooster,
+  onDone,
+}: {
+  recap: PeriodRecap;
+  onReroll: (taskId: string) => void;
+  onPickBooster: (card: number) => Promise<BoosterHand | null>;
+  onDone: () => void;
+}) {
   const pages: Page[] =
     recap.kind === "week"
       ? [
@@ -97,6 +112,7 @@ function RecapBody({ recap, onReroll, onDone }: { recap: PeriodRecap; onReroll: 
           ...(recap.bounties.length > 0 || recap.bountyEmpty
             ? [{ key: "bounty", label: recap.bounties.length > 1 ? "Bounties" : "Bounty" }]
             : []),
+          ...(recap.booster ? [{ key: "booster", label: recap.booster.picks > 1 ? "Boosters" : "Booster" }] : []),
         ]
       : [{ key: "day", label: "Your day" }];
   const [page, setPage] = useState(0);
@@ -107,6 +123,8 @@ function RecapBody({ recap, onReroll, onDone }: { recap: PeriodRecap; onReroll: 
   };
   const current = pages[page];
   const last = page === pages.length - 1;
+  const [boosterLanded, setBoosterLanded] = useState(false);
+  const picking = current.key === "booster" && !boosterLanded;
 
   return (
     <>
@@ -134,6 +152,9 @@ function RecapBody({ recap, onReroll, onDone }: { recap: PeriodRecap; onReroll: 
             {current.key === "frozen" && <FrozenPage frozen={recap.frozen} />}
             {current.key === "bounty" &&
               (recap.bounties.length > 0 ? <BountiesPage bounties={recap.bounties} onReroll={onReroll} /> : <NoBountyPage />)}
+            {current.key === "booster" && recap.booster && (
+              <BoosterPage hand={recap.booster} onPick={onPickBooster} onLanded={() => setBoosterLanded(true)} />
+            )}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -160,7 +181,7 @@ function RecapBody({ recap, onReroll, onDone }: { recap: PeriodRecap; onReroll: 
             </button>
           )}
           {last ? (
-            <button type="button" className="btn-primary" onClick={onDone}>
+            <button type="button" className="btn-primary" disabled={picking} onClick={onDone}>
               Done
             </button>
           ) : (
@@ -383,6 +404,18 @@ function NoBountyPage() {
       <SnowflakeIcon size={18} />
       <p>Nothing's on ice, so there's no Bounty this week.</p>
     </motion.div>
+  );
+}
+
+// The new week's Booster hand, dealt for you to pick from.
+function BoosterPage({ hand, onPick, onLanded }: { hand: BoosterHand; onPick: (card: number) => Promise<BoosterHand | null>; onLanded: () => void }) {
+  return (
+    <div className="booster-page">
+      <div className="booster-page-head">{hand.picks > 1 ? "This week's Boosters" : "This week's Booster"}</div>
+      <div className="recap-drop" style={dropStyle(0)}>
+        <BoosterDeal hand={hand} onPick={onPick} onLanded={onLanded} />
+      </div>
+    </div>
   );
 }
 

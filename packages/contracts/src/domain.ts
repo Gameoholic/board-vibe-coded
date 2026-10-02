@@ -167,8 +167,12 @@ export const Task = z.object({
   // This week's Bounty, while it's on this task: its multiplier and the week it was rolled for. Derived
   // on read (it ends with that week) — absent ≡ not the Bounty.
   bounty: z.object({ multiplier: z.number(), periodKey: z.string() }).optional(),
-  // The modifiers its current completion was paid at (a Bounty's ×2, its frost, …), frozen on its
-  // TaskCompleted so a Bounty ending or a setting changing later never re-prices it. Absent ≡ none.
+  // This week's Booster, while it's on this task: what it adds to each tick and the week it was picked for.
+  // Derived on read (it ends with that week) — absent ≡ not a Booster.
+  booster: z.object({ amount: Points, periodKey: z.string() }).optional(),
+  // The modifiers its current completion was paid at (a Bounty's ×2, its frost, a Booster's +0.5%, …), frozen
+  // on the event that ticked it so a Bounty ending or a setting changing later never re-prices it. Absent ≡
+  // none.
   paidWith: z.array(AppliedModifier).optional(),
   // Frost: the whole days it has spent in the Freezer, banked at each week's end (see freezer.ts). It stays
   // when the task thaws and carries on from there if it freezes again. Absent ≡ none.

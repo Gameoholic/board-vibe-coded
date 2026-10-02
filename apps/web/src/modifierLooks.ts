@@ -1,5 +1,5 @@
 import { formatPercent } from "@board/contracts";
-import { CrystalIcon, SnowflakeIcon, TargetIcon } from "./Icons";
+import { BoostIcon, CrystalIcon, SnowflakeIcon, TargetIcon } from "./Icons";
 import type { AppliedModifier, ModifierId, Settings, Task } from "./types";
 import { frostFill } from "./types";
 
@@ -27,6 +27,8 @@ export interface ModifierLook {
   fill?: (task: Task, settings: Settings) => number;
   // Its always-on look on the row (an `aura-…` class in App.css), like a game's enchanted glint.
   aura?: (task: Task, settings: Settings, place: RowPlace) => string | undefined;
+  // A plain tag: it stays still, with no glow, even while its aura is on.
+  plainTag?: boolean;
 }
 
 export const MODIFIER_LOOKS: Record<ModifierId, ModifierLook> = {
@@ -55,6 +57,15 @@ export const MODIFIER_LOOKS: Record<ModifierId, ModifierLook> = {
     line: (m) => `=${formatPercent(m.value)} subzero`,
     tagOnIce: true,
     aura: () => "subzero",
+  },
+  booster: {
+    tag: "Boosted",
+    color: "#9333ea",
+    icon: BoostIcon,
+    line: (m) => `+${formatPercent(m.value)} boost`,
+    tagOnIce: true,
+    aura: () => "boost",
+    plainTag: true,
   },
 };
 

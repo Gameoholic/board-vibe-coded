@@ -200,6 +200,7 @@ function SettingsView({
   const patchWind = (patch: Partial<WindDown>) => onSave({ windDown: { ...settings.windDown, ...patch } });
   const patchBounty = (patch: Partial<Settings["bounty"]>) => onSave({ bounty: { ...settings.bounty, ...patch } });
   const patchFreezer = (patch: Partial<Settings["freezer"]>) => onSave({ freezer: { ...settings.freezer, ...patch } });
+  const patchBooster = (patch: Partial<Settings["booster"]>) => onSave({ booster: { ...settings.booster, ...patch } });
   const patchBackup = (patch: Partial<Settings["backup"]>) => onSave({ backup: { ...settings.backup, ...patch } });
   const [triggerDraft, setTriggerDraft] = useState("10");
 
@@ -217,28 +218,21 @@ function SettingsView({
     setFormulaDraft((f) => ({ ...f, effortLevels: f.effortLevels.map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
 
   // Prefill the debug input with the current effective time (pinned or real). `dirty` tracks whether
-  // the user has edited it since load — we can't compare against `realNow` (it re-stamps each minute,
-  // which would flip dirty on its own). Refresh/Reset reload the page, so dirty resets naturally then.
+  // the owner has edited it since load — we can't compare against `realNow` (it re-stamps each minute,
+  // which would flip dirty on its own). Go and Back to now reload the page, so dirty resets naturally then.
   const [when, setWhen] = useState(() => toLocalInput(debugNow ?? realNow));
   const [dirty, setDirty] = useState(false);
   const isPinned = debugNow !== null;
-  // Status shown at the left of the actions row: a pending edit awaits a refresh, else whether we're
-  // pretending or synced to the real machine clock.
-  const clockStatus = dirty
-    ? "Refresh to take effect"
-    : isPinned
-      ? "Pretending to be another time"
-      : "Synced to your computer's clock";
+  // Status shown at the left of the actions row: a pending edit awaits Go, else whether we're pretending
+  // or on the real clock.
+  const clockStatus = dirty ? "Press Go to jump there" : isPinned ? "Showing another time" : "Showing now";
 
   return (
     <div className="settings-view">
       <h1 className="settings-title">Settings</h1>
 
       <section className="settings-group">
-        <h2 className="settings-heading">Time</h2>
-        <p className="settings-note">
-          Used to know when the days and weeks end.
-        </p>
+        <h2 className="settings-heading">Days & weeks</h2>
 
         <label className="field">
           <span className="field-label">Timezone</span>
@@ -258,10 +252,7 @@ function SettingsView({
             />
           )}
         </label>
-      </section>
 
-      <section className="settings-group">
-        <h2 className="settings-heading">Day</h2>
         <label className="field">
           <span className="field-label">A new day starts at</span>
           <input
@@ -272,14 +263,9 @@ function SettingsView({
               if (m !== null) onSave({ dayStartMinutes: m });
             }}
           />
-          <span className="field-hint">
-           If the board is opened past this time, will prompt the user to start a new day.
-          </span>
+          <span className="field-hint">Up late? Set it to when your day really ends.</span>
         </label>
-      </section>
 
-      <section className="settings-group">
-        <h2 className="settings-heading">Week</h2>
         <label className="field">
           <span className="field-label">A new week starts on</span>
           <select
@@ -304,19 +290,12 @@ function SettingsView({
               if (m !== null) onSave({ weekStartMinutes: m });
             }}
           />
-          <span className="field-hint">
-           If the board is opened past this time, will prompt the user to start a new week.
-          </span>
         </label>
       </section>
 
       <section className="settings-group">
         <h2 className="settings-heading">Points</h2>
-        <p className="settings-note">
-          How the builder turns a task's time into a % score: <em>% = hours × rate × effort</em>. Changing
-          this lets you rebalance every task whose % came from the builder — tasks with a hand-typed % or
-          no time estimate are left alone, and points already earned on past completions never change.
-        </p>
+        <p className="settings-note">A task's points are its hours × % per hour × its effort.</p>
 
         <label className="field">
           <span className="field-label">% per hour</span>
@@ -351,7 +330,7 @@ function SettingsView({
             disabled={!formulaDirty || !formulaValid}
             onClick={() => onApplyFormula(formulaDraft)}
           >
-            Save & rebalance…
+            Save…
           </button>
         </div>
       </section>
@@ -359,33 +338,33 @@ function SettingsView({
       <section className="settings-group">
         <h2 className="settings-heading">Freezer</h2>
         <p className="settings-note">
-          Every week close moves a task that's waited in the Backlog longer than this into the Freezer. On ice it
-          gathers frost — a share of its points for each day there, counted at each week's end — up to a cap, and
-          a task whose frost is full is Subzero. Thawing a task starts it, and pays the thaw bonus if it has frost.
+          At the end of each week, tasks that have waited too long freeze, and frozen tasks gather frost.
         </p>
 
         <label className="field">
-          <span className="field-label">Days a task may wait before it freezes</span>
+          <span className="field-label">Days before a task freezes</span>
           <WholeField
             value={settings.freezer.freezeAfterDays}
             min={1}
             max={365}
             onChange={(freezeAfterDays) => patchFreezer({ freezeAfterDays })}
           />
+          <span className="field-hint">Counted while it waits in the Backlog or Blocked.</span>
         </label>
 
         <label className="field">
-          <span className="field-label">Frost per week on ice (% of its points)</span>
+          <span className="field-label">Frost a week (% of its points)</span>
           <FloatField
             value={settings.freezer.frostPerWeek}
             onChange={(n) => {
               if (n >= 0 && n <= 1000) patchFreezer({ frostPerWeek: n });
             }}
           />
+          <span className="field-hint">Each day on ice earns a seventh of it.</span>
         </label>
 
         <label className="field">
-          <span className="field-label">Frost stops at (% of its points)</span>
+          <span className="field-label">Frost maxes at (% of its points)</span>
           <FloatField
             value={settings.freezer.frostCap}
             onChange={(n) => {
@@ -395,13 +374,14 @@ function SettingsView({
         </label>
 
         <label className="field">
-          <span className="field-label">A Subzero task pays at least (%)</span>
+          <span className="field-label">A Subzero task pays (%)</span>
           <FloatField
             value={settings.freezer.subzeroMin / POINTS_PER_PERCENT}
             onChange={(n) => {
               if (n >= 0) patchFreezer({ subzeroMin: Math.round(n * POINTS_PER_PERCENT) });
             }}
           />
+          <span className="field-hint">A task turns Subzero once its frost maxes out.</span>
         </label>
 
         <label className="field">
@@ -412,19 +392,22 @@ function SettingsView({
               if (n >= 0) patchFreezer({ thawBonus: Math.round(n * POINTS_PER_PERCENT) });
             }}
           />
+          <span className="field-hint">
+            Thawing a task moves it to In progress, and it keeps its frost. A frosted task earns this when thawed,
+            unless it leaves In progress before it's done.
+          </span>
         </label>
       </section>
 
       <section className="settings-group">
         <h2 className="settings-heading">Bounty</h2>
         <p className="settings-note">
-          Every week close rolls tasks from the Freezer as Bounties — the longer one's been on ice, the likelier —
-          each worth more until the next close. A Bounty stays frozen until you thaw it; one you finish keeps what
-          it paid.
+          Each week, a Bounty is rolled from your frozen tasks; the longer one's been on ice, the likelier it is.
+          It's worth more until the week ends.
         </p>
 
         <label className="field field-toggle">
-          <span className="field-label">Roll Bounties each week</span>
+          <span className="field-label">Enable Bounties</span>
           <input
             type="checkbox"
             className="settings-switch"
@@ -441,7 +424,7 @@ function SettingsView({
             </label>
 
             <label className="field">
-              <span className="field-label">A Bounty multiplies its task's points by</span>
+              <span className="field-label">Bounty point multiplier (×)</span>
               <FloatField
                 value={settings.bounty.multiplier}
                 onChange={(n) => {
@@ -456,7 +439,7 @@ function SettingsView({
             </label>
 
             <label className="field field-toggle">
-              <span className="field-label">Roll a new Bounty when you win one</span>
+              <span className="field-label">Roll a new Bounty if you finish one mid-week</span>
               <input
                 type="checkbox"
                 className="settings-switch"
@@ -469,14 +452,49 @@ function SettingsView({
       </section>
 
       <section className="settings-group">
-        <h2 className="settings-heading">Wind-down</h2>
+        <h2 className="settings-heading">Booster</h2>
         <p className="settings-note">
-          As a chosen time nears, an alert grows on screen — small at first, then taking over the whole
-          screen — to push you to shut your screens off. You can snooze or dismiss it any time.
+          Each week, you draw a Booster from your Registry. It's worth more until the week ends.
         </p>
 
         <label className="field field-toggle">
-          <span className="field-label">Enable the wind-down nudge</span>
+          <span className="field-label">Enable Booster</span>
+          <input
+            type="checkbox"
+            className="settings-switch"
+            checked={settings.booster.enabled}
+            onChange={(e) => patchBooster({ enabled: e.target.checked })}
+          />
+        </label>
+
+        {settings.booster.enabled && (
+          <>
+            <label className="field">
+              <span className="field-label">Boosters at a time</span>
+              <WholeField value={settings.booster.max} min={1} max={3} onChange={(max) => patchBooster({ max })} />
+            </label>
+
+            <label className="field">
+              <span className="field-label">Booster point bonus (%)</span>
+              <FloatField
+                value={settings.booster.amount / POINTS_PER_PERCENT}
+                onChange={(n) => {
+                  const amount = Math.round(n * POINTS_PER_PERCENT);
+                  if (amount >= 1 && amount <= 10_000) patchBooster({ amount });
+                }}
+              />
+              <span className="field-hint">Added every time you tick its task.</span>
+            </label>
+          </>
+        )}
+      </section>
+
+      <section className="settings-group">
+        <h2 className="settings-heading">Wind-down</h2>
+        <p className="settings-note">A reminder to get off your screens. It grows as the time gets closer.</p>
+
+        <label className="field field-toggle">
+          <span className="field-label">Enable wind-down</span>
           <input
             type="checkbox"
             className="settings-switch"
@@ -500,11 +518,11 @@ function SettingsView({
             </label>
 
             <div className="field">
-              <span className="field-label">When to show the message on screen</span>
+              <span className="field-label">When it pops up</span>
               <div className="trigger-list">
                 {sortedTriggers(settings.windDown.displayTriggers).map((t) => (
                   <span className="trigger-chip" key={t.kind === "refresh" ? "refresh" : `b${t.minutes}`}>
-                    {t.kind === "refresh" ? "On refresh" : `${t.minutes} min before`}
+                    {t.kind === "refresh" ? "When I open the board" : `${t.minutes} min before`}
                     <button
                       type="button"
                       aria-label="Remove"
@@ -515,7 +533,7 @@ function SettingsView({
                   </span>
                 ))}
                 {settings.windDown.displayTriggers.length === 0 && (
-                  <span className="field-hint">Never shows the full message — only the candle.</span>
+                  <span className="field-hint">With no times, it never pops up. Only the candle shows.</span>
                 )}
               </div>
               <div className="trigger-add">
@@ -527,6 +545,7 @@ function SettingsView({
                   value={triggerDraft}
                   onChange={(e) => setTriggerDraft(e.target.value)}
                 />
+                <span className="trigger-unit">min before</span>
                 <button
                   type="button"
                   className="ghost-btn"
@@ -537,7 +556,7 @@ function SettingsView({
                     }
                   }}
                 >
-                  Add “min before”
+                  Add
                 </button>
                 {!settings.windDown.displayTriggers.some((t) => t.kind === "refresh") && (
                   <button
@@ -547,14 +566,13 @@ function SettingsView({
                       patchWind({ displayTriggers: [...settings.windDown.displayTriggers, { kind: "refresh" }] })
                     }
                   >
-                    Add “on refresh”
+                    Add “When I open the board”
                   </button>
                 )}
               </div>
-              <span className="field-hint">
-                Each “min before” pops the full message at that point; “on refresh” pops it on any page
-                load once you're already inside the window. Between pops it stays as the candle.
-              </span>
+              {settings.windDown.displayTriggers.length > 0 && (
+                <span className="field-hint">In between, it waits as a candle on the board.</span>
+              )}
             </div>
 
             <label className="field">
@@ -566,20 +584,14 @@ function SettingsView({
                 value={settings.windDown.message}
                 onChange={(e) => patchWind({ message: e.target.value })}
               />
-              <span className="field-hint">Optional — blank uses the default headline.</span>
             </label>
           </>
         )}
       </section>
 
       <section className="settings-group">
-        <h2 className="settings-heading">Backfill</h2>
-        <p className="settings-note">
-          Carry values over from before the app — e.g. a run you kept on the physical whiteboard.{" "}
-          <strong>Start</strong> is <em>added on top</em> of the current count (only when the streak
-          counts from All time). <strong>Best</strong> is a static record floor — the shown best is the
-          higher of it and what you've actually reached in the app (daily/weekly only).
-        </p>
+        <h2 className="settings-heading">Streak data backfill</h2>
+        <p className="settings-note">Streak data you kept before using this app.</p>
         {streaks.length === 0 ? (
           <p className="settings-note">No streaks yet.</p>
         ) : (
@@ -605,10 +617,7 @@ function SettingsView({
 
       <section className="settings-group">
         <h2 className="settings-heading">Debug</h2>
-        <p className="settings-note">
-          Simulate opening the app at another moment. Pick a date and time, then hit Refresh — the
-          day/week prompts and streaks recompute as if it were then.
-        </p>
+        <p className="settings-note">See the board as it would be at another time.</p>
         <label className="field">
           <span className="field-label">Pretend it's</span>
           <input
@@ -624,7 +633,7 @@ function SettingsView({
           <span className="settings-status">{clockStatus}</span>
           {(isPinned || dirty) && (
             <button type="button" className="ghost-btn" onClick={() => onSetDebugClock(null)}>
-              Reset to real time
+              Back to now
             </button>
           )}
           <button
@@ -636,7 +645,7 @@ function SettingsView({
               if (!Number.isNaN(d.getTime())) onSetDebugClock(d.toISOString());
             }}
           >
-            Refresh
+            Go
           </button>
         </div>
       </section>
@@ -644,8 +653,7 @@ function SettingsView({
       <section className="settings-group">
         <h2 className="settings-heading">Backups</h2>
         <p className="settings-note">
-          Copies of the whole board, saved beside it on this computer — the way back from a reset gone wrong.
-          Once the newest is as old as you pick here, another is taken and the oldest goes to make room.
+          A full copy of everything here: your tabs, tasks, streaks, shop, settings and all your history.
         </p>
 
         <label className="field field-toggle">
@@ -692,16 +700,16 @@ function SettingsView({
         <h2 className="settings-heading">Reset</h2>
 
         <p className="settings-note">
-          Clears all history and progress but keeps your current tabs, tasks and streaks, rebuilding
-          them fresh. This cannot be undone.
+          Clears your history, points and streak counts. Your tabs, tasks, shop and settings stay. This can't be
+          undone.
         </p>
         <div className="popover-anchor" ref={resetKeepRef}>
           <button type="button" className="danger-btn" onClick={() => setConfirmingKeep(true)}>
-            Reset progress (keep board)
+            Reset progress
           </button>
           <ConfirmPopover
             open={confirmingKeep}
-            message="Clear all history and progress, keeping your current board? This cannot be undone."
+            message="Clear your history, points and streak counts? Your tabs, tasks, shop and settings stay."
             confirmLabel="Reset progress"
             onConfirm={() => {
               setConfirmingKeep(false);
@@ -711,17 +719,15 @@ function SettingsView({
           />
         </div>
 
-        <p className="settings-note">
-          Wipes all tasks, data and history completely, leaving an empty board. This cannot be undone.
-        </p>
+        <p className="settings-note">Deletes everything and leaves an empty board. This can't be undone.</p>
         <div className="popover-anchor" ref={resetRef}>
           <button type="button" className="danger-btn" onClick={() => setConfirming(true)}>
             Reset board
           </button>
           <ConfirmPopover
             open={confirming}
-            message="Wipe all tasks, data and history completely? This cannot be undone."
-            confirmLabel="Reset everything"
+            message="Delete everything on the board?"
+            confirmLabel="Delete everything"
             onConfirm={() => {
               setConfirming(false);
               onReset();

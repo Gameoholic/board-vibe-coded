@@ -16,6 +16,9 @@ export type {
   Reward,
   RolledBounty,
   BountyStatus,
+  BoosterHand,
+  BoosterPick,
+  BoosterStatus,
   BackupList,
   BackupPreview,
   BackupSettings,
@@ -58,8 +61,8 @@ export { statusOf, statusChange, releasedFrom } from "@board/contracts";
 // Break down: which tasks can hold pieces, what new pieces are worth, and when a task with pieces is done —
 // the rules the server folds, mirrored so the optimistic state lands where the server will.
 export { canBreakDown, doneFromPieces, newPiecePoints, wholeWorth } from "@board/contracts";
-// Modifiers — what changes what a task pays (the Bounty, frost, Subzero) — and the one payout they compose
-// into, as the server pays a completion.
+// Modifiers — what changes what a task pays (the Bounty, frost, Subzero, the Booster) — and the one payout
+// they compose into, as the server pays a completion.
 export { modifiersOf, onWholeTask, payout } from "@board/contracts";
 export type { AppliedModifier, ModifierContext, ModifierId, RecapFrost, RecapFrozen, FreezerSettings } from "@board/contracts";
 // The Freezer: the wait clock, frost, and who may freeze — the rules the server folds.
