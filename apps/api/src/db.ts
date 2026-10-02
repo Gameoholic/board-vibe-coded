@@ -26,6 +26,8 @@ export interface EventStore {
   clear(): void;
   /** Write a consistent snapshot of the whole database to `target`, which must not exist yet. */
   backupTo(target: string): void;
+  /** Let go of the file (for tests; the server holds it for its whole life). */
+  close(): void;
 }
 
 interface EventRow {
@@ -39,6 +41,19 @@ interface EventRow {
 function defaultDbPath(): string {
   return fileURLToPath(new URL("../data/board.db", import.meta.url));
 }
+
+function rowToStored(row: EventRow): StoredEvent {
+  return {
+    seq: row.seq,
+    id: row.id,
+    occurredAt: row.occurred_at,
+    // Validate on read so a corrupted row fails loudly rather than silently poisoning the rebuild.
+    event: BoardEvent.parse(JSON.parse(row.payload)),
+    idempotencyKey: row.idempotency_key,
+  };
+}
+
+const SELECT_ALL = "SELECT * FROM events ORDER BY seq ASC";
 
 export function openEventStore(path: string = process.env.BOARD_DB ?? defaultDbPath()): EventStore {
   const file = path === ":memory:" ? path : resolve(path);
@@ -60,18 +75,7 @@ export function openEventStore(path: string = process.env.BOARD_DB ?? defaultDbP
     "INSERT INTO events (id, type, payload, occurred_at, idempotency_key) VALUES (?, ?, ?, ?, ?)",
   );
   const selectByKey = db.prepare("SELECT * FROM events WHERE idempotency_key = ?");
-  const selectAll = db.prepare("SELECT * FROM events ORDER BY seq ASC");
-
-  function rowToStored(row: EventRow): StoredEvent {
-    return {
-      seq: row.seq,
-      id: row.id,
-      occurredAt: row.occurred_at,
-      // Validate on read so a corrupted row fails loudly rather than silently poisoning the rebuild.
-      event: BoardEvent.parse(JSON.parse(row.payload)),
-      idempotencyKey: row.idempotency_key,
-    };
-  }
+  const selectAll = db.prepare(SELECT_ALL);
 
   return {
     file,
@@ -98,5 +102,24 @@ export function openEventStore(path: string = process.env.BOARD_DB ?? defaultDbP
       // even mid-write; a plain file copy could catch a half-applied write.
       db.prepare("VACUUM INTO ?").run(target);
     },
+    close() {
+      db.close();
+    },
   };
+}
+
+// A backup's log, to fold and look at: read whole and let go of at once — an open handle would stop the
+// rotation deleting the file on Windows — and served as a store that refuses every write.
+export function readSnapshot(file: string): EventStore {
+  const db = new DatabaseSync(file, { readOnly: true });
+  let events: StoredEvent[];
+  try {
+    events = (db.prepare(SELECT_ALL).all() as unknown as EventRow[]).map(rowToStored);
+  } finally {
+    db.close();
+  }
+  const readOnly = (): never => {
+    throw new Error("a backup is read-only");
+  };
+  return { file, append: readOnly, readAll: () => events, clear: readOnly, backupTo: readOnly, close() {} };
 }

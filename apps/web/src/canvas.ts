@@ -53,3 +53,12 @@ export function defaultLayout(index: number, total: number = 1, top: number = PL
     z: index + 1,
   };
 }
+
+// Where each card sits: its saved layout, or — never moved yet — the tidy default for its place in order.
+export function placeCards(cards: { id: string }[], layouts: Record<string, CardLayout>, top?: number): Record<string, CardLayout> {
+  const map: Record<string, CardLayout> = {};
+  cards.forEach((c, i) => {
+    map[c.id] = layouts[c.id] ?? defaultLayout(i, cards.length, top);
+  });
+  return map;
+}

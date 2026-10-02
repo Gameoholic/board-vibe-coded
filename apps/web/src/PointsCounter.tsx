@@ -3,6 +3,7 @@ import { animate, motion } from "framer-motion";
 import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import type { FlyerTier } from "./flyerTiers";
 import PointsPlate, { type PointsPlateHandle } from "./PointsPlate";
+import { uid } from "./uid";
 import { useDiegeticDepth } from "./useDiegeticDepth";
 import { useFreeSpot } from "./useFreeSpot";
 
@@ -61,14 +62,16 @@ const PointsCounter = forwardRef<PointsCounterHandle, PointsCounterProps>(({ tot
   useImperativeHandle(ref, () => ({
     getRect: () => plateRef.current?.getValueRect() ?? null,
     spend: (amount) => {
-      const id = String(Date.now());
+      const id = uid();
       setSpends((prev) => [...prev, { id, amount }]);
       setTimeout(() => setSpends((prev) => prev.filter((s) => s.id !== id)), 900);
       const box = plateRef.current?.getBox();
       if (box) shake(box, 5);
     },
     burst: (landing) => {
-      const stamp = Date.now();
+      // Not the clock: two landings in one millisecond (a broken-down task's pieces, ticked in a row)
+      // would give their particles the same keys.
+      const stamp = uid();
       plateRef.current?.pulse(landing.pulse);
 
       const count = landing.particles;

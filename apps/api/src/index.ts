@@ -12,7 +12,7 @@ import { initializeBoard } from "./seed.js";
 const events = openEventStore();
 const store = new BoardStore(events);
 initializeBoard(store);
-startBackups(events);
+const backups = startBackups(events, () => store.getSettings().backup);
 
 const app = express();
 // Trust nginx's X-Forwarded-Proto in production so `req.secure` is correct behind the reverse proxy
@@ -34,7 +34,7 @@ app.use(express.json({ limit: "64kb" }));
 // Login and status stay open; everything else under /api requires a valid session cookie — this app
 // has exactly one shared password and no user accounts (see CONVENTIONS.md).
 app.use("/api/auth", buildAuthRouter());
-app.use("/api", requireAuth, buildRouter(store));
+app.use("/api", requireAuth, buildRouter(store, backups));
 
 // Central error boundary: validation failures → 400, command errors → their status, else 500.
 // Never leak internals or stack traces to the client.

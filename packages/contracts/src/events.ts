@@ -7,6 +7,7 @@ import {
   StreakMode,
   StreakSince,
   StreakType,
+  TaskStatus,
   TierDef,
 } from "./domain.js";
 import { PeriodKindSchema, PeriodSnapshotEntry, Settings, TaskSchedule } from "./period.js";
@@ -130,8 +131,16 @@ export const BoardEvent = z.discriminatedUnion("type", [
     target: z.number().int().optional(),
     // Per-box scheduled times (see domain Task.schedule); absent ≡ nothing scheduled.
     schedule: TaskSchedule.optional(),
+    // The task this one was copied from by the "Duplicate" row action. History only — the projection
+    // doesn't read it; absent on tasks created from scratch.
+    duplicatedFrom: z.string().optional(),
+    // A piece born inside a task (Break down, or a copy of a piece): listed under that task, not in its
+    // tab. Absent on a task of the tab's own list.
+    parentId: z.string().optional(),
   }),
-  z.object({ type: z.literal("TaskCompleted"), taskId: z.string(), pointsAwarded: Points }),
+  // `boost` is the factor the completion was paid at (a Bounty's ×2) — frozen here, with the award it
+  // produced, so a Bounty ending later never re-prices it. Absent ≡ ×1.
+  z.object({ type: z.literal("TaskCompleted"), taskId: z.string(), pointsAwarded: Points, boost: z.number().optional() }),
   z.object({ type: z.literal("TaskUncompleted"), taskId: z.string() }),
   z.object({
     type: z.literal("TaskTierSet"),
@@ -166,6 +175,57 @@ export const BoardEvent = z.discriminatedUnion("type", [
   // keeps each group's members contiguous — but the event itself is just the flat task-id order.
   z.object({ type: z.literal("TasksReordered"), sectionId: z.string(), orderedIds: z.array(z.string()) }),
   z.object({ type: z.literal("TaskDeleted"), taskId: z.string() }),
+  // Prune: skip a task until its tab's period rolls over. It records the period it was pruned in, so
+  // the roll ends it with no event of its own (the task is pruned only while that period is open).
+  z.object({ type: z.literal("TaskPruned"), taskId: z.string(), periodKey: z.string() }),
+  z.object({ type: z.literal("TaskUnpruned"), taskId: z.string() }),
+  // A task was tucked inside another as a piece (`parentId`), or taken out into its tab's list again
+  // (`parentId: null` — "Make it its own task", which lands it right after the task it left). Pieces born
+  // by Break down need no such event: their TaskCreated carries the parent. `previousParentId` keeps the
+  // log self-describing (cf. TaskEdited).
+  z.object({
+    type: z.literal("TaskParentSet"),
+    taskId: z.string(),
+    parentId: z.string().nullable(),
+    previousParentId: z.string().nullable(),
+  }),
+  // A Bounty for the week `periodKey` — rolled at the week close (as many as may be on at once), when one
+  // is won (Settings' rollOnWin), or rerolled (`reroll`) — the result of the server's roll, recorded so a
+  // rebuild replays it and never rolls again. It's on until that week closes; the multiplier is the
+  // setting's at the time. A reroll `replaces` one of the week's Bounties and spends a reroll from
+  // `rerollFrom`: the week's free ones, else the bought ones banked. (A reroll from before a week could
+  // hold several has neither: it replaced the week's only Bounty, from the free ones.)
+  z.object({
+    type: z.literal("BountyRolled"),
+    taskId: z.string(),
+    periodKey: z.string(),
+    multiplier: z.number(),
+    reroll: z.boolean().optional(),
+    replaces: z.string().optional(),
+    rerollFrom: z.enum(["week", "bank"]).optional(),
+  }),
+  // Rerolls granted, frozen at the time: a week's free ones (`week`: Settings' allowance as the week
+  // starts — spent first, gone when it closes) or bought ones (`purchase`: banked until used, whatever the
+  // week). `periodKey` is the week they were granted in.
+  z.object({
+    type: z.literal("BountyRerollsGranted"),
+    count: z.number().int().nonnegative(),
+    source: z.enum(["week", "purchase"]),
+    periodKey: z.string(),
+  }),
+  // Reorders one task's pieces (the counterpart of TasksReordered for the list under a task).
+  z.object({ type: z.literal("PiecesReordered"), taskId: z.string(), orderedIds: z.array(z.string()) }),
+  // The owner moved a task to another Status band (or re-said why it's blocked). A blocked one may
+  // carry a note and/or the task it waits on; when that task is done the fold releases it back to where
+  // it was, with no event of its own. `previousStatus` keeps the log self-describing (cf. TaskEdited).
+  z.object({
+    type: z.literal("TaskStatusSet"),
+    taskId: z.string(),
+    status: TaskStatus,
+    previousStatus: TaskStatus,
+    note: z.string().optional(),
+    blockedBy: z.string().optional(),
+  }),
   // A group (a labeled bundle of a list's contiguous items) was created / relabeled / removed. Groups are
   // list structure, not task structure: the members are whatever the section lists — a board tab's
   // tasks or a shop tab's rewards. It carries no scoring, so no frozen values. `itemIds` on create is
@@ -227,7 +287,15 @@ export const BoardEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("SettingsChanged"), settings: Settings }),
   // A day/week period became the current open one. Its occurredAt is when it started; the key is the
   // day/week it represents (server-computed from settings at the time, then frozen on the event).
-  z.object({ type: z.literal("PeriodStarted"), kind: PeriodKindSchema, periodKey: z.string() }),
+  // A week's start also freezes where every streak stands as it begins (`streaks`) — a count is derived
+  // from history, so "what it was then" has to be kept, not recomputed; the week's recap compares it with
+  // the next start. Absent on a day's start and on weeks started before it was recorded.
+  z.object({
+    type: z.literal("PeriodStarted"),
+    kind: PeriodKindSchema,
+    periodKey: z.string(),
+    streaks: z.array(z.object({ streakId: z.string(), count: z.number().int().nonnegative() })).optional(),
+  }),
   // A period was closed: its snapshot freezes every task's filled level at close time — the honest
   // record a streak counts (a box unchecked before close simply isn't in it). Every task is included
   // so a streak added later can still reach back into this period.

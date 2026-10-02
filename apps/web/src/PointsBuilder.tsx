@@ -1,5 +1,5 @@
 import { effortMultOf, parsePercent, pointsFromMinutes } from "@board/contracts";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useBoardClock } from "./useBoardClock";
 
 const DURATION_PRESETS = [
@@ -153,5 +153,62 @@ export default function PointsBuilder({ points, onPointsChange, onBuilderChange,
         </div>
       </div>
     </>
+  );
+}
+
+// One tier of a tiered task in a form: a stable id (so removing a tier never shifts the wrong builder),
+// its % text, and its builder's report — minutes null ≡ no duration picked → no estimate stored.
+export interface TierRow {
+  id: string;
+  points: string;
+  est: BuilderEstimate;
+}
+
+interface TierBuilderRowProps {
+  row: TierRow;
+  index: number;
+  onPointsChange: (id: string, points: string) => void;
+  onEstimateChange: (id: string, est: BuilderEstimate) => void;
+  // The add form's remove control; the edit form passes none, since there the tier count is fixed.
+  onRemove?: (id: string) => void;
+  canRemove?: boolean;
+  // Edit form: the tier's saved duration/effort, preselected in its builder (see PointsBuilder).
+  initialMinutes?: number;
+  initialEffortIndex?: number;
+}
+
+// One tier's builder — the same PointsBuilder (Points % + Duration + Effort) a checkbox task gets, under
+// a "Tier N" head — shared by the add and edit forms. Its own component so its callbacks are stable per
+// row (the builder treats them as effect dependencies) and each tier's duration/effort stays its own.
+export function TierBuilderRow({
+  row,
+  index,
+  onPointsChange,
+  onEstimateChange,
+  onRemove,
+  canRemove = true,
+  initialMinutes,
+  initialEffortIndex,
+}: TierBuilderRowProps) {
+  const handlePoints = useCallback((v: string) => onPointsChange(row.id, v), [row.id, onPointsChange]);
+  const handleBuilder = useCallback((est: BuilderEstimate) => onEstimateChange(row.id, est), [row.id, onEstimateChange]);
+  return (
+    <div className="tier-builder-row">
+      <div className="tier-builder-head">
+        <span className="tier-row-label">Tier {index + 1}</span>
+        {onRemove && (
+          <button type="button" className="icon-btn" aria-label="Remove tier" onClick={() => onRemove(row.id)} disabled={!canRemove}>
+            ✕
+          </button>
+        )}
+      </div>
+      <PointsBuilder
+        points={row.points}
+        onPointsChange={handlePoints}
+        onBuilderChange={handleBuilder}
+        initialMinutes={initialMinutes}
+        initialEffortIndex={initialEffortIndex}
+      />
+    </div>
   );
 }

@@ -4,7 +4,17 @@
 > **Write here:** future feature ideas, deferred features, and known next steps.
 > **Don't write here:** anything already built (→ `PRODUCT.md` / `ARCHITECTURE.md`). And nothing here is a commitment — the owner steers, one feature at a time.
 
-**Nothing in this file is scheduled or approved.** It exists so good ideas aren't lost. Do **not** start building any of it without the owner explicitly asking, and never regenerate a whole subsystem wholesale — that's what soured a previous attempt. The owner earns back to this complexity feature by feature, steering it themselves.
+**Nothing in this file is scheduled or approved — except the "Next up" section right below**, which the owner approved as a build order. It exists so good ideas aren't lost. Do **not** start building any of it without the owner explicitly asking, and never regenerate a whole subsystem wholesale — that's what soured a previous attempt. The owner earns back to this complexity feature by feature, steering it themselves.
+
+---
+
+## Next up — the Tasks rethink (owner-approved, built one feature at a time)
+
+Designed with the owner in the "Tasks Tab Rethink" proposal (a private artifact: https://claude.ai/artifact/KNygqSVAzfGPAc82Cearqg — its "Your calls" section holds the defaulted details). Each step ships alone; the owner confirms one before the next starts. **Built:** the row actions menu (right-click / long-press → Edit, Duplicate, Delete — see `PRODUCT.md` "Forms & interactions"), **Prune** for daily/weekly tasks, **Status** (In progress / Backlog / Blocked bands), **Break down** (pieces inside a one-time task) and the **weekly Bounty** (all in `PRODUCT.md` "Task types"). **Remaining:**
+
+1. **Interest** — old tasks earn more on their own (after a grace period, capped), paused while Blocked.
+
+Dropped by the owner as over-engineering: banking timer sessions for points, and an "It grew" re-estimate action.
 
 ---
 
@@ -36,7 +46,7 @@ Ideas from a much larger earlier vision of this product. None is built; each is 
 | **Counters** | Like streaks but counting totals over a filter. |
 | **XP / Coins split** | XP = weekly score, resets weekly, never spendable. Coins = spendable, never reset. One check pays both. |
 | **Shop / wallet** | Spend coins; spending should visibly "hurt." Negative balance closes the shop. **Built, spending the board's points** (server-backed and event-logged, purchases freeze their cost — see `ARCHITECTURE.md` → "Shop"). Period rolls now **bank** the points of the tasks they uncheck. Still deferred: the XP/Coins split below, and banking *within* a period — until the day/week closes, a spent point can still be "un-earned" by unchecking its task. |
-| **Bounties / boosters** | Rolled periodically for extra motivation. |
+| **Bounties / boosters** | Rolled periodically for extra motivation. The **weekly Bounty is built** — several at a time, rolling another on a win (see `PRODUCT.md`); Interest is the last step of "Next up" above. Not built: **rerolls as a shop item** — the ledger is ready (`BountyRerollsGranted { source: "purchase" }`, banked until used, spent after the week's free ones; see ARCHITECTURE "Weekly Bounty"); what's left is a reward kind whose purchase commits that grant. |
 | **Weekly target & pace** | Target computed from the week's day types, calibrated from real data — never hardcoded. |
 | **Day types** (`WORK`/`NORMAL`/`PAUSED`) | `PAUSED` pauses the whole system (no target contribution, no streak breaks) but still allows logging. Builds directly on the now-built period close: a `dayType` field on `PeriodClosed` (see `ARCHITECTURE.md` → "Settings & period close"). |
 | **Dashboards / modules / charts / heatmap** | Composable module system (task list · streak card · counter · target ring · chart · heatmap · calendar · …). |

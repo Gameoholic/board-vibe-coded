@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  BLOCK_NOTE_MAX,
   DESCRIPTION_MAX,
   EMOJI_MAX,
   ESTIMATE_MAX,
@@ -7,16 +8,21 @@ import {
   MINUTES_MAX,
   LABEL_MAX,
   QTY_MAX,
+  Section,
   StreakMatcher,
   StreakMode,
   StreakSince,
   StreakType,
+  StreakView,
+  Task,
+  TaskStatus,
   TaskType,
   TEXT_MAX,
   TierDef,
   Timer,
 } from "./domain.js";
-import { PeriodKindSchema, TaskSchedule, WindDown } from "./period.js";
+import { BackupSettings, BountySettings, PeriodKindSchema, TaskSchedule, WindDown } from "./period.js";
+import { PIECES_MAX } from "./pieces.js";
 import { Points } from "./points.js";
 import { PointsFormula, PointsSource } from "./pointsFormula.js";
 
@@ -77,8 +83,31 @@ export const PatchTaskBody = z.object({
   // Full per-box schedule array (absent leaves it untouched); an all-unscheduled array clears it.
   schedule: TaskSchedule.optional(),
   timer: Timer.nullable().optional(),
+  // Prune (true) or unprune (false) — hidden until its tab's next day/week (see BoardStore.setPruned).
+  pruned: z.boolean().optional(),
+  // Move it to a Status band. `blocker` says why a blocked one waits — a note and/or the task it's
+  // waiting on — so it's only meaningful with status "blocked".
+  status: TaskStatus.optional(),
+  blocker: z
+    .object({
+      note: z.string().trim().max(BLOCK_NOTE_MAX).optional(),
+      taskId: z.string().min(1).optional(),
+    })
+    .optional(),
+  // Tuck it inside another task as a piece, or (null) take a piece out into its tab's list again.
+  parentId: z.string().min(1).nullable().optional(),
+}).refine((b) => b.blocker === undefined || b.status === "blocked", {
+  message: "a blocker only goes with status blocked",
+  path: ["blocker"],
 });
 export type PatchTaskBody = z.infer<typeof PatchTaskBody>;
+
+// Break a task down: the names of the pieces typed in one go, in order (see pieces.ts for what they're
+// worth). Bounded like a box count, so one body can't ask for thousands.
+export const BreakDownBody = z.object({
+  texts: z.array(z.string().trim().min(1).max(TEXT_MAX)).min(1).max(PIECES_MAX),
+});
+export type BreakDownBody = z.infer<typeof BreakDownBody>;
 
 // Create a group over a contiguous run of a section's items (a board tab's tasks or a shop tab's
 // rewards). `itemIds` is the initial membership (server checks they exist, belong to the section,
@@ -140,6 +169,9 @@ export const PatchSettingsBody = z.object({
   // Whole formula object (patchSettings shallow-merges the top-level patch, so a partial would drop the
   // untouched half); its own defaults fill anything omitted.
   pointsFormula: PointsFormula.optional(),
+  // Whole object, like windDown.
+  bounty: BountySettings.optional(),
+  backup: BackupSettings.optional(),
 });
 export type PatchSettingsBody = z.infer<typeof PatchSettingsBody>;
 
@@ -176,13 +208,102 @@ export type FormulaPreview = z.infer<typeof FormulaPreview>;
 export const RollPeriodBody = z.object({ kind: PeriodKindSchema });
 export type RollPeriodBody = z.infer<typeof RollPeriodBody>;
 
-// Recap returned after a roll: what the just-closed period held. Points are computed from current
-// config for display only (not a frozen value — see ARCHITECTURE.md on the deferred frozen-points).
+// A Bounty as its reel shows it (the recap, a reroll, one rolled when another was won): the task it
+// landed on, what it multiplies, the rerolls left (the week's free ones and any bought), and other
+// candidates' names for the reel (display only).
+export const RolledBounty = z.object({
+  taskId: z.string(),
+  text: z.string(),
+  multiplier: z.number(),
+  rerollsLeft: z.number().int().nonnegative(),
+  reel: z.array(z.string()),
+});
+export type RolledBounty = z.infer<typeof RolledBounty>;
+
+// The open week's Bounties still to win, and the rerolls left (GET /api/bounty).
+export const BountyStatus = z.object({
+  bounties: z.array(RolledBounty),
+  rerollsLeft: z.number().int().nonnegative(),
+});
+export type BountyStatus = z.infer<typeof BountyStatus>;
+
+// The saved backups (GET /api/backups), newest first — each named by its file — and when the next one
+// falls due (null while they're off). Times are the real clock's, never the debug clock's.
+export const BackupSlot = z.object({
+  name: z.string(),
+  takenAt: z.string(),
+  bytes: z.number().int().nonnegative(),
+});
+export type BackupSlot = z.infer<typeof BackupSlot>;
+
+export const BackupList = z.object({
+  slots: z.array(BackupSlot),
+  nextAt: z.string().nullable(),
+});
+export type BackupList = z.infer<typeof BackupList>;
+
+// A backup's board as it was saved (GET /api/backups/:name): its tabs, tasks and streaks — streaks counted
+// as of when it was taken — and the points it held to spend.
+export const BackupPreview = z.object({
+  takenAt: z.string(),
+  sections: z.array(Section),
+  tasks: z.array(Task),
+  streaks: z.array(StreakView),
+  points: Points,
+});
+export type BackupPreview = z.infer<typeof BackupPreview>;
+
+// Reroll one of this week's Bounties onto another task.
+export const RerollBountyBody = z.object({ taskId: z.string().min(1) });
+export type RerollBountyBody = z.infer<typeof RerollBountyBody>;
+
+// One day of a recap: per tab (in the tab's own colour), how many tasks came out of the day ahead and
+// what its ticks earned there (net, at the boost each was paid at — an untick of an earlier win counts
+// against it); what the day earned and lost in all; and each purchase it made.
+export const RecapTab = z.object({
+  sectionId: z.string(),
+  name: z.string(),
+  color: HexColor,
+  cleared: z.number().int().nonnegative(),
+  earned: z.number().int(),
+});
+export type RecapTab = z.infer<typeof RecapTab>;
+
+export const RecapPurchase = z.object({ name: z.string(), emoji: z.string(), cost: Points });
+export type RecapPurchase = z.infer<typeof RecapPurchase>;
+
+export const RecapDay = z.object({
+  dayKey: z.string(),
+  tabs: z.array(RecapTab),
+  earned: z.number().int(),
+  lost: Points,
+  purchases: z.array(RecapPurchase),
+});
+export type RecapDay = z.infer<typeof RecapDay>;
+
+// A streak at the start of the week (null when it's newer, or the week began before starts were
+// recorded) and at its end — each as the week's start, and the next one's, froze it.
+export const RecapStreak = z.object({
+  streakId: z.string(),
+  name: z.string(),
+  type: StreakType,
+  start: z.number().int().nonnegative().nullable(),
+  end: z.number().int().nonnegative(),
+});
+export type RecapStreak = z.infer<typeof RecapStreak>;
+
+// Recap returned after a roll: the closed period day by day (one day for a day; each day of a week),
+// its totals, and — for a week — its streaks from start to end and the next week's Bounties.
 export const PeriodRecap = z.object({
   kind: PeriodKindSchema,
   periodKey: z.string(),
-  items: z.array(z.object({ taskId: z.string(), text: z.string(), level: z.number().int(), points: Points })),
-  totalPoints: Points,
+  days: z.array(RecapDay),
+  earned: z.number().int(),
+  lost: Points,
+  streaks: z.array(RecapStreak),
+  // A week close rolls the next week's Bounties (none when they're off or nothing could be rolled, and
+  // for a day).
+  bounties: z.array(RolledBounty).default([]),
 });
 export type PeriodRecap = z.infer<typeof PeriodRecap>;
 

@@ -1,8 +1,10 @@
 import {
+  BountyStatus as BountyStatusSchema,
   DebugClockState as DebugClockStateSchema,
   DEFAULT_SETTINGS,
   PeriodRecap as PeriodRecapSchema,
   PeriodStatus as PeriodStatusSchema,
+  RolledBounty as RolledBountySchema,
   Group as GroupSchema,
   Section as SectionSchema,
   Settings as SettingsSchema,
@@ -14,11 +16,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import AppNav, { type AppView } from "./AppNav";
 import CardCanvas from "./CardCanvas";
-import { groupsApi, withMembership, withOrder, withoutGroup, withTrailing } from "./listOps";
+import { groupsApi, withGathered, withMembership, withOrder, withoutGroup, withTrailing } from "./listOps";
 import { CanvasSettingsProvider } from "./useCanvasSettings";
 import FlyingPoints, { type Flyer, type FlyOrigin, type Point } from "./FlyingPoints";
 import type { FlyerTier } from "./flyerTiers";
-import { PeriodPrompt, PeriodRecapCard } from "./PeriodClose";
+import { PeriodPrompt } from "./PeriodClose";
+import { PeriodRecapCard } from "./Recap";
+import { BountyReveal } from "./BountyReveal";
 import PointsCounter, { type PointsCounterHandle } from "./PointsCounter";
 import Poof, { type PoofBurst } from "./Poof";
 import RebalanceConfirm from "./RebalanceConfirm";
@@ -27,13 +31,17 @@ import SettingsView from "./SettingsView";
 import ShopView from "./ShopView";
 import type { StreakPayload } from "./StreakForm";
 import WindDownOverlay from "./WindDownOverlay";
-import { behaviorOf, isRetired, taskPointValue } from "./types";
-import type { FormulaPreview, Group, PeriodKind, PeriodRecap, PeriodStatus, PointsFormula, Reward, Section, Settings, StreakView, Task, TaskSchedule, TaskType, TierDef } from "./types";
+import { behaviorOf, boostOf, doneFromPieces, isRetired, releasedFrom, statusChange, taskPointValue } from "./types";
+import type { BountyStatus, FormulaPreview, Group, PeriodRecap, PeriodStatus, PointsFormula, Reward, RolledBounty, Section, Settings, StreakView, Task, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
 import { BoardClockProvider } from "./useBoardClock";
 import { useLocalConfig } from "./useLocalConfig";
 import { useShop } from "./useShop";
 import { uid } from "./uid";
 import { useSuppressPasswordManagers } from "./useSuppressPasswordManagers";
+
+const byOrder = (a: Task, b: Task) => (a.order ?? 0) - (b.order ?? 0);
+// A Bounty rolled by a win is revealed once the win's points have landed, after the counter's count-up (ms).
+const WIN_REVEAL_SETTLE_MS = 700;
 
 function computeTotalPoints(tasks: Task[]): number {
   return tasks.reduce((sum, t) => sum + taskPointValue(t), 0);
@@ -56,8 +64,15 @@ function App() {
   const [realNow, setRealNow] = useState<string>(() => new Date().toISOString());
   const [status, setStatus] = useState<PeriodStatus | null>(null);
   const [recap, setRecap] = useState<PeriodRecap | null>(null);
-  // Which period rolls the owner deferred this session — suppressed until reload, then re-offered.
-  const [dismissed, setDismissed] = useState<Set<PeriodKind>>(new Set());
+  // The open week's Bounties still to win and the rerolls left: the row menu's Reroll, and what's new once
+  // a win rolls another.
+  const [bountyStatus, setBountyStatus] = useState<BountyStatus | null>(null);
+  // A Bounty rolled mid-week (a win rolled another, or a row's Reroll), revealed on its reel over the board.
+  const [reveal, setReveal] = useState<RolledBounty | null>(null);
+  // One rolled by a win, waiting for that win's celebration to land before it's revealed.
+  const [revealNext, setRevealNext] = useState<RolledBounty | null>(null);
+  // Whether the owner put off ending the day this session ("Not yet") — re-offered on the next load.
+  const [dayDeferred, setDayDeferred] = useState(false);
   const [view, setView] = useState<AppView>("board");
   // The shop is a mode of the board's place, not a place of its own: same canvas, tabs poofed away.
   const shopOpen = view === "shop";
@@ -65,6 +80,17 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [flyers, setFlyers] = useState<Flyer[]>([]);
   const counterRef = useRef<PointsCounterHandle>(null);
+
+  // A Bounty rolled by a win is revealed once nothing is flying to the counter any more (and the count-up
+  // has had its moment), so the reveal never cuts the win's own celebration short.
+  useEffect(() => {
+    if (!revealNext || flyers.length > 0) return;
+    const timer = window.setTimeout(() => {
+      setReveal(revealNext);
+      setRevealNext(null);
+    }, WIN_REVEAL_SETTLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [revealNext, flyers.length]);
 
   useEffect(() => {
     Promise.all([
@@ -75,10 +101,11 @@ function App() {
       fetch("/api/settings").then((res) => res.json()),
       fetch("/api/periods/status").then((res) => res.json()),
       fetch("/api/debug/clock").then((res) => res.json()),
+      fetch("/api/bounty").then((res) => res.json()),
     ])
       // Validate the API's responses at the trust boundary rather than casting blindly — a shape
       // drift or a bad payload fails loudly here instead of surfacing as a mystery render bug.
-      .then(([sectionsData, tasksData, groupsData, streaksData, settingsData, statusData, clockData]) => {
+      .then(([sectionsData, tasksData, groupsData, streaksData, settingsData, statusData, clockData, bountyData]) => {
         setSections(SectionSchema.array().parse(sectionsData));
         setTasks(TaskSchema.array().parse(tasksData));
         setGroups(GroupSchema.array().parse(groupsData));
@@ -88,6 +115,7 @@ function App() {
         const clock = DebugClockStateSchema.parse(clockData);
         setDebugNow(clock.now);
         setRealNow(clock.real);
+        setBountyStatus(BountyStatusSchema.parse(bountyData));
       })
       .finally(() => setLoading(false));
   }, []);
@@ -100,14 +128,9 @@ function App() {
     return () => clearInterval(id);
   }, []);
 
-  // The first period kind that's rolled over and hasn't been deferred — day takes precedence so the
-  // owner closes yesterday before last week. null when nothing's waiting.
-  const duePrompt = useMemo<PeriodKind | null>(() => {
-    if (!status) return null;
-    if (status.day.due && !dismissed.has("day")) return "day";
-    if (status.week.due && !dismissed.has("week")) return "week";
-    return null;
-  }, [status, dismissed]);
+  // Whether to ask if the day has ended. Only the day is ever asked about — its week ends with it (the
+  // server's follow-up once the week is over).
+  const askDay = !!status?.day.due && !dayDeferred;
 
   function refreshStatus() {
     fetch("/api/periods/status")
@@ -115,32 +138,113 @@ function App() {
       .then((data) => setStatus(PeriodStatusSchema.parse(data)));
   }
 
-  // Confirm a period rolled: the server closes it (snapshotting live task state), unchecks the tabs
-  // recurring on that cadence (banking their points) and opens the current one, returning a recap and
-  // the recomputed streaks. We surface the recap and reconcile counts. A first start (no period was
-  // open — a fresh/reset board) has nothing to recap, so we skip the card.
-  function rollPeriod(kind: PeriodKind) {
-    const wasFirst = status?.[kind].openKey === null;
+  // The board only takes the new day (and week) once its recaps close — so the new Bounties aren't given
+  // away before their reels land. Closing the last recap resolves this.
+  const recapClosedRef = useRef<() => void>(undefined);
+  // The recaps still to show after the one up: a day that ended its week queues the week's.
+  const recapQueueRef = useRef<PeriodRecap[]>([]);
+
+  // End the day: the server closes it (snapshotting live task state), unchecks the daily tabs (banking
+  // their points) and opens today — and when the week was over too, the same for the week — returning
+  // the recaps and the recomputed streaks. The day's recap shows, then the week's; a first start (no day
+  // was open — a fresh/reset board) has nothing to recap.
+  function endDay() {
+    const wasFirst = status?.day.openKey === null;
+    // The prompt goes as soon as it's answered — the real status only follows once the board reads back.
+    setStatus((s) => (s ? { ...s, day: { ...s.day, due: false }, week: { ...s.week, due: false } } : s));
     fetch("/api/periods/roll", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind }),
+      body: JSON.stringify({ kind: "day" }),
     })
       .then((res) => res.json())
-      .then((data) => {
-        const { recap: r, streaks: s } = data as { recap: unknown; streaks: unknown };
-        if (!wasFirst) setRecap(PeriodRecapSchema.parse(r));
-        setStreaks(StreakViewSchema.array().parse(s));
+      .then(async (data) => {
+        const { recap: r, week: w, streaks: s } = data as { recap: unknown; week?: unknown; streaks: unknown };
+        const recaps = [...(wasFirst ? [] : [PeriodRecapSchema.parse(r)]), ...(w ? [PeriodRecapSchema.parse(w)] : [])];
+        const nextStreaks = StreakViewSchema.array().parse(s);
+        if (recaps.length > 0) {
+          const closed = new Promise<void>((resolve) => (recapClosedRef.current = resolve));
+          recapQueueRef.current = recaps.slice(1);
+          setRecap(recaps[0]);
+          await closed;
+        }
+        // Read back once it's closed: a reroll in the recap may have moved a Bounty since the roll.
         return Promise.all([
+          nextStreaks,
           fetch("/api/tasks").then((res) => res.json()),
           fetch("/api/periods/status").then((res) => res.json()),
+          refreshBounty(),
         ]);
       })
       // The unchecked tasks and the banked points land in the same render, so the counter never dips.
-      .then(([tasksData, statusData]) => {
+      .then(([nextStreaks, tasksData, statusData]) => {
+        setStreaks(nextStreaks);
         setTasks(TaskSchema.array().parse(tasksData));
         setStatus(PeriodStatusSchema.parse(statusData));
       });
+  }
+
+  function closeRecap() {
+    const next = recapQueueRef.current.shift();
+    if (next) {
+      setRecap(next);
+      return;
+    }
+    setRecap(null);
+    recapClosedRef.current?.();
+    recapClosedRef.current = undefined;
+  }
+
+  function refreshBounty() {
+    return fetch("/api/bounty")
+      .then((res) => res.json())
+      .then((data) => {
+        const next = BountyStatusSchema.parse(data);
+        setBountyStatus(next);
+        return next;
+      });
+  }
+
+  // Reroll one of this week's Bounties onto another task; the new one (null when the server refused).
+  function postReroll(taskId: string): Promise<RolledBounty | null> {
+    return fetch("/api/bounty/reroll", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskId }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => (data ? RolledBountySchema.parse(data) : null));
+  }
+
+  // From the recap: that Bounty's reel spins again onto the new one (the board reads it back on close).
+  function rerollInRecap(taskId: string) {
+    postReroll(taskId).then((bounty) => {
+      if (!bounty) return;
+      setRecap((r) =>
+        r ? { ...r, bounties: r.bounties.map((b) => (b.taskId === taskId ? bounty : { ...b, rerollsLeft: bounty.rerollsLeft })) } : r,
+      );
+    });
+  }
+
+  // From a Bounty's row (or the reveal's own Reroll): the new one is revealed on its reel.
+  function rerollRevealed(taskId: string) {
+    postReroll(taskId).then((bounty) => bounty && setReveal(bounty));
+  }
+
+  // The reveal closed: the board reads back its Bounties (the new one stamped, a rerolled one gone).
+  function closeReveal() {
+    setReveal(null);
+    reloadTasks();
+    refreshBounty();
+  }
+
+  // A win that rolled another Bounty (Settings' rollOnWin): the new one waits (revealNext) for the win's
+  // celebration. `known` is what was on before the win.
+  function revealRolledAfterWin(known: Set<string>) {
+    refreshBounty().then((next) => {
+      const rolled = next.bounties.find((b) => !known.has(b.taskId));
+      if (rolled) setRevealNext(rolled);
+    });
   }
 
   // A pending points-formula change awaiting the owner's confirm: the new formula + its dry-run preview.
@@ -237,7 +341,7 @@ function App() {
     return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null;
   }
 
-  function spawnFlyer(taskId: string, amount: number, origin?: FlyOrigin) {
+  function spawnFlyer(taskId: string, amount: number, origin?: FlyOrigin, finale = false) {
     if (!origin || amount <= 0) return;
     const target = counterTarget();
     if (!target) return;
@@ -249,6 +353,7 @@ function App() {
         taskId,
         amount,
         percents: origin.percents,
+        finale,
         // The source element's full box, not just its centre: the flyer is positioned and sized
         // to overlay it exactly, which is what makes the launch look like a handoff.
         from: {
@@ -326,6 +431,137 @@ function App() {
     setTasks((prev) => withTrailing([...prev, task], sectionId, isRetired));
   }
 
+  // Duplicate waits for the server (it mints the copy's id), then mirrors where the server put it: right
+  // after its source, in its group (the copy arrives with its groupId), ahead of any retired tasks.
+  // A piece's copy lands the same way among its task's pieces (and reopens that task if it was finished).
+  async function duplicateTask(id: string) {
+    const res = await fetch(`/api/tasks/${id}/duplicate`, { method: "POST" });
+    const copy = TaskSchema.parse(await res.json());
+    // A broken-down task's copy came with copies of its pieces, which only the server knows: read them back.
+    if (tasks.some((t) => t.parentId === id)) return reloadTasks();
+    setTasks((prev) => {
+      const order = prev
+        .filter((t) => t.sectionId === copy.sectionId && t.parentId === copy.parentId)
+        .sort(byOrder)
+        .map((t) => t.id);
+      order.splice(order.indexOf(id) + 1, 0, copy.id);
+      const next = withOrder([...prev, copy], order);
+      return copy.parentId ? settleParents(next, [copy.parentId]) : withTrailing(next, copy.sectionId, isRetired);
+    });
+  }
+
+  // The whole board's tasks read back from the server, for the few changes whose result only it knows.
+  function reloadTasks() {
+    return fetch("/api/tasks")
+      .then((res) => res.json())
+      .then((data) => setTasks(TaskSchema.array().parse(data)));
+  }
+
+  // Break down waits for the server like Duplicate (it mints the pieces, and moves the task's points into
+  // them), then adopts the task's new points and its new pieces.
+  async function breakDown(task: Task, texts: string[]) {
+    const res = await fetch(`/api/tasks/${task.id}/pieces`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ texts }),
+    });
+    if (!res.ok) return;
+    const [parent, ...pieces] = TaskSchema.array().parse(await res.json());
+    setTasks((prev) => {
+      const known = new Set(prev.map((t) => t.id));
+      return [
+        ...prev.map((t) => (t.id === parent.id ? { ...t, points: parent.points, pointsSource: parent.pointsSource } : t)),
+        ...pieces.filter((p) => !known.has(p.id)),
+      ];
+    });
+  }
+
+  // Tuck a task into another as its last piece, or take a piece out into its tab's list right after the
+  // task it left — the placement the server folds (TaskParentSet), mirrored; either task then follows its
+  // pieces. A refused move reads the board back.
+  function setTaskParent(taskId: string, parentId: string | null) {
+    setTasks((prev) => {
+      const task = prev.find((t) => t.id === taskId);
+      if (!task) return prev;
+      let next: Task[];
+      if (parentId) {
+        const last = prev.filter((t) => t.parentId === parentId).length;
+        next = prev.map((t) => (t.id === taskId ? { ...t, parentId, groupId: undefined, order: last } : t));
+      } else {
+        const order = prev.filter((t) => t.sectionId === task.sectionId && !t.parentId).sort(byOrder).map((t) => t.id);
+        const at = task.parentId ? order.indexOf(task.parentId) : -1;
+        order.splice(at === -1 ? order.length : at + 1, 0, taskId);
+        next = withOrder(prev.map((t) => (t.id === taskId ? { ...t, parentId: undefined } : t)), order);
+        next = withTrailing(withGathered(next, task.sectionId), task.sectionId, isRetired);
+      }
+      return settleParents(next, [task.parentId, parentId]);
+    });
+    fetch(`/api/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parentId }),
+    }).then((res) => {
+      if (!res.ok) reloadTasks();
+    });
+  }
+
+  function reorderPieces(parentId: string, orderedIds: string[]) {
+    setTasks((prev) => withOrder(prev, orderedIds));
+    fetch(`/api/tasks/${parentId}/pieces/reorder`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderedIds }),
+    });
+  }
+
+  // Prune is optimistic like a tick. The server can refuse it (e.g. no day/week started yet), so a
+  // refused write puts the task back as it was.
+  function setPruned(task: Task, pruned: boolean) {
+    const was = task.pruned;
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, pruned } : t)));
+    fetch(`/api/tasks/${task.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pruned }),
+    }).then((res) => {
+      if (!res.ok) setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, pruned: was } : t)));
+    });
+  }
+
+  // The board's effective "now" as the server will stamp it (a pinned debug time wins), for the times an
+  // optimistic update records before the server's reply lands.
+  const stampNow = () => debugNow ?? new Date().toISOString();
+
+  // Moving a task to a Status band is optimistic, through the same rule the server folds (statusChange).
+  // The server can refuse a blocker (the task it waits on is already done, say), so a refused write puts
+  // the task back; an accepted one adopts the server's stamp of since when.
+  function setTaskStatus(task: Task, status: TaskStatus, why: { note?: string; taskId?: string } = {}) {
+    const patchTask = (fields: Pick<Task, "status" | "statusSince" | "blocker">) =>
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, ...fields } : t)));
+    const previous = { status: task.status, statusSince: task.statusSince, blocker: task.blocker };
+    const blocker = status === "blocked" ? { ...(why.note ? { note: why.note } : {}), ...(why.taskId ? { taskId: why.taskId } : {}) } : undefined;
+    patchTask(statusChange(task, status, blocker ?? {}, stampNow()));
+    fetch(`/api/tasks/${task.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, ...(blocker ? { blocker } : {}) }),
+    }).then(async (res) => {
+      if (!res.ok) return patchTask(previous);
+      const saved = TaskSchema.parse(await res.json());
+      patchTask({ status: saved.status, statusSince: saved.statusSince, blocker: saved.blocker });
+    });
+  }
+
+  // Whatever waits on `taskId` goes back to its band once that task is done or deleted — the server's
+  // fold rule (releaseDependents), mirrored so the waiting task moves in the same render.
+  const releaseWaitingOn = (tasks: Task[], taskId: string): Task[] => {
+    const at = stampNow();
+    return tasks.map((t) => {
+      const release = releasedFrom(t, taskId, at);
+      return release ? { ...t, ...release } : t;
+    });
+  };
+
   // Streak counts are the server's to compute (from completion history), so any task change that
   // could move a linked streak means re-reading them. A full re-fetch is fine for a single-user
   // board; the server is the sole authority on the count.
@@ -336,33 +572,91 @@ function App() {
       .then((data) => setStreaks(StreakViewSchema.array().parse(data)));
   }
 
-  // One handler for every task type: a click resolves to a target "filled level" (via the type's
-  // behaviour), which maps to a field patch and a point delta. No branching on task.type here — a
-  // checkbox is the 1-box case, a tier is level = index+1, a count is level = boxes ticked.
-  function setLevel(task: Task, level: number, origin?: FlyOrigin) {
+  // One task's filled level set to `level`, and what follows from it: whatever waited on it is released
+  // once it's done, and a one-time task that finishes leaves its group and trails its tab (the server's
+  // retire rules, BoardStore.settleDoneChange).
+  function withLevel(list: Task[], task: Task, level: number): Task[] {
     const b = behaviorOf(task);
     const patch = b.patchForLevel(task, level);
-    setTasks((prev) => {
-      const next = prev.map((t) => (t.id === task.id ? { ...t, ...patch } : t));
-      if (!b.retiresWhenDone) return next;
-      // Mirror the server's retire rules (BoardStore.settleDoneChange): a finished one-time task leaves
-      // its group, and the tab's retired tasks trail its order.
-      const retiring = b.isDone({ ...task, ...patch });
-      return withTrailing(retiring ? withMembership(next, [task.id], undefined) : next, task.sectionId, isRetired);
-    });
+    const finishes = b.isDone({ ...task, ...patch });
+    // Paid at its boost (its Bounty's, or its parent's) while ticked — kept if it already was, as the
+    // server freezes it on the completion — and none once unticked.
+    const boost = !finishes ? 1 : b.isDone(task) ? (task.boost ?? 1) : boostOf(task, list.find((t) => t.id === task.parentId));
+    const changed = list.map((t) => (t.id === task.id ? { ...t, ...patch, boost: boost !== 1 ? boost : undefined } : t));
+    const next = finishes ? releaseWaitingOn(changed, task.id) : changed;
+    if (!b.retiresWhenDone) return next;
+    return withTrailing(finishes ? withMembership(next, [task.id], undefined) : next, task.sectionId, isRetired);
+  }
+
+  // A task with pieces is done once every piece is, and open again once one isn't — the server's
+  // settleParent, mirrored; finishing or reopening it follows the same rules as a tick of its own box.
+  function settleParents(list: Task[], ids: (string | null | undefined)[]): Task[] {
+    return ids.reduce((next, id) => {
+      const parent = id ? next.find((t) => t.id === id) : undefined;
+      const done = parent ? doneFromPieces(next.filter((t) => t.parentId === parent.id)) : null;
+      if (!parent || done === null || done === behaviorOf(parent).isDone(parent)) return next;
+      return withLevel(next, parent, done ? behaviorOf(parent).boxes(parent) : 0);
+    }, list);
+  }
+
+  // One handler for every task type: a click resolves to a target "filled level" (via the type's
+  // behaviour), which maps to a field patch and a point delta. No branching on task.type here — a
+  // checkbox is the 1-box case, a tier is level = index+1, a count is level = boxes ticked. A broken-down
+  // task's box is all of its pieces at once (the server fans the tick out to them the same way), and the
+  // tick that finishes a task's last piece celebrates the whole task.
+  function setLevel(task: Task, level: number, origin?: FlyOrigin) {
+    const patch = behaviorOf(task).patchForLevel(task, level);
+    const pieces = tasks.filter((t) => t.parentId === task.id);
+    const changes =
+      pieces.length > 0
+        ? pieces
+            .map((p) => ({ task: p, level: level > 0 ? behaviorOf(p).boxes(p) : 0 }))
+            .filter((c) => behaviorOf(c.task).filled(c.task) !== c.level)
+        : [{ task, level }];
+    // The task whose pieces this changes (it follows them).
+    const parent = pieces.length > 0 ? task : tasks.find((t) => t.id === task.parentId);
+    const apply = (list: Task[]) => settleParents(changes.reduce((l, c) => withLevel(l, c.task, c.level), list), [parent?.id]);
+    setTasks(apply);
+    const after = apply(tasks);
+    const finished = (id: string | undefined) => {
+      const was = tasks.find((t) => t.id === id);
+      const now = after.find((t) => t.id === id);
+      return !!was && !!now && !behaviorOf(was).isDone(was) && behaviorOf(now).isDone(now);
+    };
+    const wonBounty = (!!task.bounty && finished(task.id)) || (!!parent?.bounty && finished(parent.id));
+    const knownBounties = new Set(bountyStatus?.bounties.map((b) => b.taskId));
     fetch(`/api/tasks/${task.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
-    }).then(refreshStreaks); // reconcile linked streak counts once the server has applied the change
-    const delta = b.valueAt(task, level) - b.valueAt(task, b.filled(task));
-    if (delta > 0) spawnFlyer(task.id, delta, origin);
-    else cancelFlyersFor(task.id);
+    })
+      .then(refreshStreaks) // reconcile linked streak counts once the server has applied the change
+      .then(() => {
+        if (wonBounty && settings?.bounty.rollOnWin) revealRolledAfterWin(knownBounties);
+      });
+    // What the tick won — the board's total after it, less before: a Bounty's boost and a finished task's
+    // own points included. Finishing a broken-down task, or winning a Bounty, is the bigger celebration.
+    const delta = computeTotalPoints(after) - computeTotalPoints(tasks);
+    const finale = finished(parent?.id) || wonBounty;
+    // A flyer carries what was won, which can be more than the one bracket it leaves from (a broken-down
+    // task's whole tick, a boosted piece, a task finished along with its last piece).
+    const boostedTick = (after.find((t) => t.id === task.id)?.boost ?? 1) !== 1;
+    const shown = origin && (pieces.length > 0 || finale || boostedTick) ? { ...origin, percents: [delta] } : origin;
+    if (delta > 0) spawnFlyer(task.id, delta, shown, finale);
+    else changes.forEach((c) => cancelFlyersFor(c.task.id));
   }
 
+  // A broken-down task goes with its pieces; a deleted piece may leave its task with only finished ones.
   function removeTask(id: string) {
-    cancelFlyersFor(id);
-    setTasks((prev) => prev.filter((t) => t.id !== id));
+    const task = tasks.find((t) => t.id === id);
+    const gone = new Set([id, ...tasks.filter((t) => t.parentId === id).map((t) => t.id)]);
+    gone.forEach(cancelFlyersFor);
+    setTasks((prev) =>
+      settleParents(
+        [...gone].reduce((list, goneId) => releaseWaitingOn(list, goneId), prev.filter((t) => !gone.has(t.id))),
+        [task?.parentId],
+      ),
+    );
     fetch(`/api/tasks/${id}`, { method: "DELETE" });
   }
 
@@ -384,10 +678,11 @@ function App() {
     });
   }
 
-  // Reorder a section's tasks. `orderedIds` is the full new task sequence (group members kept
-  // contiguous by the block); we write each task's new index back to `order`, then persist.
+  // Reorder a section's tasks. `orderedIds` is the full new task sequence; we write each task's new index
+  // back to `order`, then persist. Groups are gathered into one run each, as the server's fold does — a
+  // Status band's reorder only sees its own tasks, so it can't always keep another band's out of a run.
   function reorderItems(sectionId: string, orderedIds: string[]) {
-    setTasks((prev) => withOrder(prev, orderedIds));
+    setTasks((prev) => withGathered(withOrder(prev, orderedIds), sectionId));
     fetch(`/api/sections/${sectionId}/reorder`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -401,7 +696,7 @@ function App() {
   async function addGroup(sectionId: string, taskIds: string[]) {
     const group = await groupsApi.create(sectionId, taskIds);
     setGroups((prev) => [...prev, group]);
-    setTasks((prev) => withMembership(prev, taskIds, group.id));
+    setTasks((prev) => withGathered(withMembership(prev, taskIds, group.id), sectionId));
   }
 
   function ejectFromGroup(taskId: string, groupId: string, newOrder: string[]) {
@@ -412,7 +707,11 @@ function App() {
   }
 
   function extendGroup(groupId: string, additionalTaskIds: string[]) {
-    setTasks((prev) => withMembership(prev, additionalTaskIds, groupId));
+    const sectionId = groups.find((g) => g.id === groupId)?.sectionId;
+    setTasks((prev) => {
+      const next = withMembership(prev, additionalTaskIds, groupId);
+      return sectionId ? withGathered(next, sectionId) : next;
+    });
     groupsApi.addMembers(groupId, additionalTaskIds);
   }
 
@@ -515,7 +814,7 @@ function App() {
       {/* The HUD floats over the whole screen; while a period prompt or recap overlay is up it would
           sit on top of that focus surface (overlapping the score), so hide it until they're dismissed.
           In shop mode the same counter docks top-centre. */}
-      {view !== "settings" && !duePrompt && !recap && (
+      {view !== "settings" && !askDay && !recap && !reveal && (
         <>
           <PointsCounter ref={counterRef} total={points} docked={shopOpen} />
           <FlyingPoints flyers={flyers} getTarget={counterTarget} onLand={landFlyer} />
@@ -524,7 +823,10 @@ function App() {
       <Poof burst={poof} />
 
       <AnimatePresence>
-        {recap && <PeriodRecapCard key="recap" recap={recap} onClose={() => setRecap(null)} />}
+        {recap && (
+          <PeriodRecapCard key={`${recap.kind}-${recap.periodKey}`} recap={recap} onReroll={rerollInRecap} onClose={closeRecap} />
+        )}
+        {reveal && <BountyReveal key="reveal" bounty={reveal} onReroll={() => rerollRevealed(reveal.taskId)} onClose={closeReveal} />}
       </AnimatePresence>
 
       {/* Screen-off wind-down nudge — mounted above the views so it pressures in every place, driven by
@@ -595,19 +897,19 @@ function App() {
               debugNow={debugNow}
               realNow={realNow}
               onSetDebugClock={setDebugClock}
+              layouts={config.layouts}
             />
           ) : (
             <BoardClockProvider value={{ now: debugNow ?? realNow, settings: settings ?? DEFAULT_SETTINGS }}>
             <CanvasSettingsProvider value={config.settings}>
               <AnimatePresence>
-                {duePrompt && status && (
+                {askDay && status && (
                   <PeriodPrompt
-                    key={duePrompt}
-                    kind={duePrompt}
-                    periodKey={status[duePrompt].openKey ?? status[duePrompt].currentKey}
-                    isFirst={status[duePrompt].openKey === null}
-                    onConfirm={() => rollPeriod(duePrompt)}
-                    onDismiss={() => setDismissed((prev) => new Set(prev).add(duePrompt))}
+                    key="day"
+                    dayKey={status.day.openKey ?? status.day.currentKey}
+                    isFirst={status.day.openKey === null}
+                    onConfirm={endDay}
+                    onDismiss={() => setDayDeferred(true)}
                   />
                 )}
               </AnimatePresence>
@@ -627,12 +929,21 @@ function App() {
                     groups={groups.filter((g) => g.sectionId === section.id)}
                     streaks={streaks.filter((s) => s.sectionId === section.id)}
                     allTasks={tasks}
+                    allStreaks={streaks}
                     flyingTaskIds={flyingTaskIds}
                     frame={frame}
                     onAddTask={(payload) => addTask(section.id, payload)}
                     onSetLevel={setLevel}
                     onRemoveTask={removeTask}
                     onEditTask={editTask}
+                    onDuplicateTask={duplicateTask}
+                    onSetPruned={setPruned}
+                    onSetStatus={setTaskStatus}
+                    onBreakDown={breakDown}
+                    onSetParent={setTaskParent}
+                    rerollsLeft={bountyStatus?.rerollsLeft ?? 0}
+                    onRerollBounty={rerollRevealed}
+                    onReorderPieces={reorderPieces}
                     onReorderItems={(orderedIds) => reorderItems(section.id, orderedIds)}
                     onAddGroup={(taskIds) => addGroup(section.id, taskIds)}
                     onExtendGroup={extendGroup}

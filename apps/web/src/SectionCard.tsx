@@ -8,24 +8,36 @@ import {
   CircleCheckIcon,
   CircleIcon,
   HourglassIcon,
+  GroupBracketIcon,
+  InProgressIcon,
+  ScissorsIcon,
   SparkleIcon,
   TimerIcon,
   ZapIcon,
 } from "./Icons";
-import ItemList from "./ItemList";
-import PointsBuilder, { type BuilderEstimate } from "./PointsBuilder";
+import type { MenuPoint } from "./ActionMenu";
+import type { BlockReason } from "./BlockForm";
+import ItemList, { type DropOutside } from "./ItemList";
+import type { RowContext } from "./ItemRow";
+import PointsBuilder, { type BuilderEstimate, TierBuilderRow, type TierRow } from "./PointsBuilder";
 import Popover from "./Popover";
 import ScheduleEditor, { scheduleFromRows, type Cadence, type ScheduleRow } from "./ScheduleEditor";
+import StatusBand from "./StatusBand";
 import StreakForm, { type StreakPayload } from "./StreakForm";
 import StreakItem from "./StreakItem";
+import { ADD_BUTTON_KEY, addButtonOption } from "./displayOptions";
 import { DisplayMenu, SortMenu, tabView, type DisplayOption, type SortOption } from "./TabControls";
 import TaskItem from "./TaskItem";
 import type { FlyOrigin } from "./FlyingPoints";
+import type { RowPieces } from "./Pieces";
 import { useBoardClock } from "./useBoardClock";
 import type { TabPrefs } from "./useLocalConfig";
-import { behaviorOfType, isBoxLocked, isRetired } from "./types";
+import { behaviorOfType, boostOf, canBreakDown, canPrune, isBoxLocked, isRetired, statusOf } from "./types";
+import { runBetween, withUnlistedKept } from "./listOps";
+import { pruneUntil, streaksBrokenByPruning } from "./pruning";
+import { IN_PROGRESS_NUDGE_ABOVE, STATUS_BANDS, statusLabel } from "./taskStatus";
 import { uid } from "./uid";
-import type { Group, Section, Settings, StreakView, Task, TaskSchedule, TaskType, TierDef } from "./types";
+import type { Group, Section, Settings, StreakView, Task, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
 
 // A board tab: the shared tab base (CanvasCard — move/resize, header, sort/display controls, add
 // button) around a board list. A "tasks" tab lists tasks on the shared list base (ItemList — reorder
@@ -70,7 +82,30 @@ const TASK_DISPLAY: DisplayOption[] = [
 // to look or to uncheck a mis-click. Off by default: done means gone.
 const COMPLETED_DISPLAY: DisplayOption = { key: "completed", label: "Completed tasks", icon: CircleCheckIcon };
 
+// Offered only on a tab whose tasks can be pruned — the way back to them before their day/week is up,
+// to look or to unprune one. Off by default: pruned means out of the way.
+const PRUNED_DISPLAY: DisplayOption = { key: "pruned", label: "Pruned tasks", icon: ScissorsIcon };
+
+// The tab's tasks in Status bands: In progress on top, the Backlog (whose order is the priority), and
+// Blocked folded at the bottom. Offered on every task tab; on by default where tasks are done once (a
+// to-do list, not a routine) — read off the tab's allowed types, never its name.
+const STATUS_DISPLAY: DisplayOption = { key: "status", label: "Status", icon: InProgressIcon };
+
+// Making groups — the group handle beside each row, and dragging a row into a group. Offered on every task
+// tab; off by default where tasks are done once (a to-do list rarely wants it), read off the allowed types.
+const GROUPING_DISPLAY: DisplayOption = { key: "grouping", label: "Grouping", icon: GroupBracketIcon };
+
+const ADD_TASK_BUTTON = addButtonOption("task");
+
+// A streak tab's one Display option.
+const STREAK_DISPLAY: DisplayOption[] = [addButtonOption("streak")];
+
 const byOrder = (a: Task, b: Task) => (a.order ?? 0) - (b.order ?? 0);
+
+// Where a task shows while the tab's Status bands are on: its band, or the Completed look-back for a
+// finished one-time task (listed only while that Display toggle is on).
+type Band = TaskStatus | "done";
+const bandOf = (task: Task): Band => (isRetired(task) ? "done" : statusOf(task));
 
 // Sort by a task's ceiling (its highest reachable value) and completion — both read from the type's
 // behaviour so no sort logic branches on task.type.
@@ -91,12 +126,25 @@ interface SectionCardProps {
   groups: Group[];
   streaks: StreakView[];
   allTasks: Task[];
+  // Every streak on the board — Prune reads which ones a task's pruning would break.
+  allStreaks: StreakView[];
   flyingTaskIds: Set<string>;
   frame: CardFrame; // placement on the board canvas (from CardCanvas)
   onAddTask: (payload: TaskCreatePayload) => void;
   onSetLevel: (task: Task, level: number, origin?: FlyOrigin) => void;
   onRemoveTask: (id: string) => void;
   onEditTask: (id: string, patch: TaskEditPayload) => void;
+  onDuplicateTask: (id: string) => void;
+  onSetPruned: (task: Task, pruned: boolean) => void;
+  onSetStatus: (task: Task, status: TaskStatus, why?: BlockReason) => void;
+  // Break down: pieces typed under a task, a task tucked into another (or, with null, a piece taken out
+  // into the list), and a task's pieces reordered.
+  onBreakDown: (task: Task, texts: string[]) => void;
+  onSetParent: (taskId: string, parentId: string | null) => void;
+  onReorderPieces: (parentId: string, orderedIds: string[]) => void;
+  // This week's rerolls left, and rerolling one of its Bounties (from the row's menu).
+  rerollsLeft: number;
+  onRerollBounty: (taskId: string) => void;
   // Reorder posts the section's full flat task-id order (group members kept contiguous by the block).
   onReorderItems: (orderedIds: string[]) => void;
   onAddGroup: (taskIds: string[]) => void;
@@ -130,12 +178,21 @@ function SectionCard({
   groups,
   streaks,
   allTasks,
+  allStreaks,
   flyingTaskIds,
   frame,
   onAddTask,
   onSetLevel,
   onRemoveTask,
   onEditTask,
+  onDuplicateTask,
+  onSetPruned,
+  onSetStatus,
+  onBreakDown,
+  onSetParent,
+  onReorderPieces,
+  rerollsLeft,
+  onRerollBounty,
   onReorderItems,
   onAddGroup,
   onExtendGroup,
@@ -164,25 +221,91 @@ function SectionCard({
   // The "Completed tasks" toggle only exists on a tab whose tasks retire when done (read off the tab's
   // allowed types, so it's there before the first one-time task is even added).
   const retiresTasks = section.allowedTypes.some((a) => behaviorOfType(a.type).retiresWhenDone);
-  const taskDisplay = retiresTasks ? [...TASK_DISPLAY, COMPLETED_DISPLAY] : TASK_DISPLAY;
-  const view = tabView(prefs, onPrefsChange, isStreaks ? [] : taskDisplay);
+  // Likewise "Pruned tasks": only on a tab that recurs and allows a prunable type (see canPrune).
+  const prunesTasks = section.period != null && section.allowedTypes.some((a) => behaviorOfType(a.type).prunable);
+  const taskDisplay = [
+    { ...STATUS_DISPLAY, defaultOn: retiresTasks },
+    ...TASK_DISPLAY,
+    { ...GROUPING_DISPLAY, defaultOn: !retiresTasks },
+    ...(retiresTasks ? [COMPLETED_DISPLAY] : []),
+    ...(prunesTasks ? [PRUNED_DISPLAY] : []),
+    // Shown by default on a to-do list of one-time tasks, where adding is the main thing you do.
+    { ...ADD_TASK_BUTTON, defaultOn: retiresTasks },
+  ];
+  const displayOptions = isStreaks ? STREAK_DISPLAY : taskDisplay;
+  const view = tabView(prefs, onPrefsChange, displayOptions);
   const sortMode = view.sortMode as AnySortMode;
   const showEstimate = view.shown("estimate");
   const showTimer = view.shown("timer");
+  const showAddButton = view.shown(ADD_BUTTON_KEY);
   const showCompleted = retiresTasks && view.shown("completed");
+  const showPruned = prunesTasks && view.shown("pruned");
+  const showStatus = !isStreaks && view.shown("status");
+  const grouping = view.shown("grouping");
+  // The Blocked band folds to its count until opened; which row's Blocked form is open (a drop on the
+  // Blocked band opens it as well as the row's own menu and pill, so the tab holds it).
+  const [blockedOpen, setBlockedOpen] = useState(false);
+  const [blockingId, setBlockingId] = useState<string | null>(null);
 
-  // Finished one-time tasks leave the list (they stay done and keep their points). The server keeps
-  // them trailing the tab's order and out of groups, so the listed tasks are one contiguous run.
-  const listedTasks = useMemo(() => (showCompleted ? tasks : tasks.filter((t) => !isRetired(t))), [tasks, showCompleted]);
-  // The list only sees listed tasks, but a reorder must name the whole tab — the hidden ones already
-  // trail, so they're simply appended in their current order.
-  const hiddenIds = useMemo(
-    () => tasks.filter((t) => !listedTasks.includes(t)).sort(byOrder).map((t) => t.id),
-    [tasks, listedTasks],
+  // A broken-down task's pieces aren't items of the tab's list: they're listed under their task, in its
+  // own order, and folded away with it (which tasks are folded is remembered per device).
+  const topTasks = useMemo(() => tasks.filter((t) => !t.parentId), [tasks]);
+  const piecesOf = useMemo(() => {
+    const byParent = new Map<string, Task[]>();
+    for (const t of [...tasks].sort(byOrder)) if (t.parentId) byParent.set(t.parentId, [...(byParent.get(t.parentId) ?? []), t]);
+    return byParent;
+  }, [tasks]);
+  const collapsed = new Set(prefs?.collapsed ?? []);
+  const toggleCollapsed = (id: string) =>
+    onPrefsChange({ collapsed: collapsed.has(id) ? [...collapsed].filter((c) => c !== id) : [...collapsed, id] });
+
+  // This week's Bounty, while it's an open task of this tab: pinned to the top of its list (taskList).
+  const bountyId = topTasks.find((t) => t.bounty && !isRetired(t))?.id;
+  // What a row's completion is paid at, when not ×1: what it was paid at once ticked, or — while it's
+  // open — what it would be (its Bounty's, or its parent's).
+  const multiplierOf = (task: Task): number | undefined => {
+    const m = isTaskDone(task) ? (task.boost ?? 1) : boostOf(task, tasks.find((t) => t.id === task.parentId));
+    return m !== 1 ? m : undefined;
+  };
+
+  // Finished one-time tasks leave the list (they stay done and keep their points), and pruned tasks
+  // are hidden until their tab's next day/week — unless the tab's Display shows them.
+  const listedTasks = useMemo(
+    () => topTasks.filter((t) => (showCompleted || !isRetired(t)) && (showPruned || !t.pruned)),
+    [topTasks, showCompleted, showPruned],
   );
-  const reorderTab = (orderedIds: string[]) => onReorderItems([...orderedIds, ...hiddenIds]);
-  const ejectFromTabGroup = (taskId: string, groupId: string, newOrder: string[]) =>
-    onEjectFromGroup(taskId, groupId, [...newOrder, ...hiddenIds]);
+  // Like the Completed view, a listing that shows pruned tasks (at the bottom) is a flat look-back: it
+  // doesn't reorder or group, so no hidden-for-now task is ever dragged out of its place.
+  const flatView = showCompleted || (showPruned && topTasks.some((t) => t.pruned));
+
+  // A list only sees the tasks it shows, but a reorder must name the whole tab. Finished one-time tasks
+  // already trail, so they're appended; the rest keep their place — pruned ones are back tomorrow, and
+  // with Status on, each band's list leaves the other bands' tasks where they were.
+  const sortedTasks = useMemo(() => [...topTasks].sort(byOrder), [topTasks]);
+  const listedIds = useMemo(() => new Set(listedTasks.map((t) => t.id)), [listedTasks]);
+  const isListed = (t: Task) => listedIds.has(t.id);
+  function fullOrder(listedOrder: string[], inList: (t: Task) => boolean, moved: string[]): string[] {
+    const kept = sortedTasks.filter((t) => inList(t) || !isRetired(t));
+    const trailing = sortedTasks.filter((t) => !inList(t) && isRetired(t)).map((t) => t.id);
+    return [...withUnlistedKept(kept, listedOrder, inList, moved), ...trailing];
+  }
+  const reorderTab = (orderedIds: string[], moved: string[], inList = isListed) =>
+    onReorderItems(fullOrder(orderedIds, inList, moved));
+  const ejectFromTabGroup = (taskId: string, groupId: string, newOrder: string[], inList = isListed) =>
+    onEjectFromGroup(taskId, groupId, fullOrder(newOrder, inList, [taskId]));
+  // A pruned task hidden inside the span a new group covers joins it (it's back tomorrow, inside the
+  // run). Another band's task there doesn't: it isn't part of what was grouped, and the group is
+  // gathered around it (the server's fold rule, mirrored in App).
+  const addTabGroup = (ids: string[]) =>
+    onAddGroup(runBetween(sortedTasks, ids).filter((id) => ids.includes(id) || !listedIds.has(id)));
+  function extendTabGroup(groupId: string, ids: string[]) {
+    const members = sortedTasks.filter((t) => t.groupId === groupId).map((t) => t.id);
+    const run = runBetween(sortedTasks, [...members, ...ids]);
+    // Only when the new rows already sit beside the group (a range-drag) do hidden tasks between them
+    // join too; a row dragged in from afar is moved beside the group by the reorder that follows.
+    const adjacent = run.every((id) => !listedIds.has(id) || members.includes(id) || ids.includes(id));
+    onExtendGroup(groupId, adjacent ? run.filter((id) => !members.includes(id)) : ids);
+  }
 
   // Board clock (ticks ~1/min) — only read to lock-aware-sort "Get done quick"; a tick re-renders the
   // card, which is cheap and lets a task slide up the moment it unlocks.
@@ -219,12 +342,194 @@ function SectionCard({
     // Manual: the stored order (used as the flat list while the Completed view is on).
     return [...list].sort(byOrder);
   }, [listedTasks, sortMode, now, boardSettings]);
+  // While they're shown, pruned tasks sit at the bottom whatever the sort — out of today's way.
+  const shownTasks = useMemo(
+    () => (showPruned ? [...displayedTasks.filter((t) => !t.pruned), ...displayedTasks.filter((t) => t.pruned)] : displayedTasks),
+    [displayedTasks, showPruned],
+  );
 
   const displayedStreaks = useMemo(() => {
     if (sortMode === "count-desc") return [...streaks].sort((a, b) => b.count - a.count);
     if (sortMode === "count-asc") return [...streaks].sort((a, b) => a.count - b.count);
     return streaks;
   }, [streaks, sortMode]);
+
+  // Which Status band is under a screen point (bands carry data-band; compared by rect, since the row
+  // being dragged sits on top of whatever is under the pointer).
+  function bandAt(at: MenuPoint): TaskStatus | null {
+    for (const el of document.querySelectorAll<HTMLElement>(`[data-band-tab="${section.id}"]`)) {
+      const r = el.getBoundingClientRect();
+      if (at.x >= r.left && at.x <= r.right && at.y >= r.top && at.y <= r.bottom) {
+        return STATUS_BANDS.find((b) => b.status === el.dataset.band)?.status ?? null;
+      }
+    }
+    return null;
+  }
+  // A row dragged out of its band and let go on another moves there — Blocked asks why first.
+  const dropFrom = (from: Band): DropOutside => ({
+    label: (at) => {
+      const to = bandAt(at);
+      return to && to !== from ? `Move to ${statusLabel(to)}` : null;
+    },
+    drop: (itemId, at) => {
+      const to = bandAt(at);
+      const task = tasks.find((t) => t.id === itemId);
+      if (!to || to === from || !task) return;
+      if (to === "blocked") setBlockingId(itemId);
+      else onSetStatus(task, to);
+    },
+  });
+
+  // A task's pieces, and what it can do with them — on a task that can be broken down.
+  const piecesFor = (task: Task): RowPieces | undefined =>
+    canBreakDown(task)
+      ? {
+          items: piecesOf.get(task.id) ?? [],
+          open: !collapsed.has(task.id),
+          onToggle: () => toggleCollapsed(task.id),
+          render: renderTask,
+          onReorder: (ids) => onReorderPieces(task.id, ids),
+          onBreakDown: (texts) => onBreakDown(task, texts),
+          onTuck: (taskId) => onSetParent(taskId, task.id),
+          allTasks,
+        }
+      : undefined;
+
+  // A task's row — a piece's too (under its task, whose tick handler it's given so the task sees the tick
+  // that finishes it).
+  const renderTask = (task: Task, row: RowContext, setLevel = onSetLevel) => (
+    <TaskItem
+      key={task.id}
+      task={task}
+      color={section.color}
+      scheduleCadence={scheduleCadence}
+      showEstimate={showEstimate}
+      showTimer={showTimer}
+      row={row}
+      pointsHidden={flyingTaskIds.has(task.id)}
+      onSetLevel={setLevel}
+      pieces={piecesFor(task)}
+      multiplier={multiplierOf(task)}
+      reroll={task.bounty && rerollsLeft > 0 ? { left: rerollsLeft, onReroll: () => onRerollBounty(task.id) } : undefined}
+      onMakeOwn={task.parentId ? () => onSetParent(task.id, null) : undefined}
+      onRemove={onRemoveTask}
+      onEdit={(patch) => onEditTask(task.id, patch)}
+      onDuplicate={() => onDuplicateTask(task.id)}
+      prune={
+        section.period && canPrune(task, section)
+          ? {
+              until: pruneUntil(section.period),
+              breaks: streaksBrokenByPruning(task, section.period, allStreaks).map((s) => s.name),
+            }
+          : undefined
+      }
+      onSetPruned={(pruned) => onSetPruned(task, pruned)}
+      status={
+        showStatus
+          ? {
+              onSet: (next, why) => onSetStatus(task, next, why),
+              blocking: blockingId === task.id,
+              onBlockingChange: (open) => setBlockingId(open ? task.id : null),
+              allTasks,
+            }
+          : undefined
+      }
+    />
+  );
+
+  // One list of the tab's tasks — the whole tab, or (with Status on) one band of it. `inList` is which of
+  // the tab's tasks it shows, so its reorders keep everything else in place.
+  // This week's Bounty, if it's among them, sits pinned above the rest in a list of its own — not moved in
+  // the tab's order, so it's back in its place once the Bounty ends (and isn't dragged meanwhile).
+  const taskList = (
+    items: Task[],
+    sorted: Task[],
+    { inList = isListed, emptyLabel = "Nothing here yet", dropOutside }: { inList?: (t: Task) => boolean; emptyLabel?: string; dropOutside?: DropOutside } = {},
+  ) => {
+    const pinned = items.find((t) => t.id === bountyId);
+    if (!pinned) return itemList(items, sorted, { inList, emptyLabel, dropOutside });
+    const rest = items.filter((t) => t !== pinned);
+    return (
+      <>
+        {itemList([pinned], [pinned], { inList: (t) => t === pinned, emptyLabel, pinned: true })}
+        {rest.length > 0 &&
+          itemList(rest, sorted.filter((t) => t !== pinned), { inList: (t) => inList(t) && t.id !== pinned.id, emptyLabel, dropOutside })}
+      </>
+    );
+  };
+  const itemList = (
+    items: Task[],
+    sorted: Task[],
+    { inList, emptyLabel, dropOutside, pinned = false }: { inList: (t: Task) => boolean; emptyLabel: string; dropOutside?: DropOutside; pinned?: boolean },
+  ) => (
+    <ItemList
+      items={items}
+      // The Completed / Pruned views are a flat look-back (those tasks sit ungrouped at the end), so
+      // they don't reorder or group — that happens in the normal view. Nor does a pinned Bounty.
+      manual={sortMode === "manual" && !flatView && !pinned}
+      sorted={sorted}
+      groups={groups}
+      noun="tasks"
+      emptyLabel={emptyLabel}
+      renderItem={renderTask}
+      onReorder={(ids, moved) => reorderTab(ids, moved, inList)}
+      onAddGroup={addTabGroup}
+      onExtendGroup={extendTabGroup}
+      onEjectFromGroup={(taskId, groupId, order) => ejectFromTabGroup(taskId, groupId, order, inList)}
+      onEditGroup={onEditGroup}
+      onRemoveGroup={onRemoveGroup}
+      dropOutside={dropOutside}
+      grouping={grouping}
+    />
+  );
+
+  // Status on: the tab as bands — each the same list over its own tasks (sorted, reordered and grouped
+  // like the whole tab; a group whose tasks sit in two bands shows in both), all on one grid so the [%]
+  // column lines up across them. Status never moves a task in the tab's order, so a task goes back to
+  // its old place in the Backlog.
+  function statusBands() {
+    const inBand = (band: Band) => (t: Task) => isListed(t) && bandOf(t) === band;
+    const bandList = (band: Band, emptyLabel?: string) =>
+      taskList(
+        listedTasks.filter((t) => bandOf(t) === band),
+        shownTasks.filter((t) => bandOf(t) === band),
+        { inList: inBand(band), emptyLabel, dropOutside: band === "done" ? undefined : dropFrom(band) },
+      );
+    const count = (band: Band) => listedTasks.filter((t) => bandOf(t) === band).length;
+    const inProgress = count("in-progress");
+    return (
+      <div className="status-bands" style={{ "--tab-color": section.color } as React.CSSProperties}>
+        <StatusBand
+          tabId={section.id}
+          band="in-progress"
+          label={statusLabel("in-progress")}
+          count={inProgress}
+          hint={inProgress > IN_PROGRESS_NUDGE_ABOVE ? `${inProgress} in progress. Finish or park one?` : undefined}
+        >
+          {bandList("in-progress", "Nothing in progress")}
+        </StatusBand>
+        <StatusBand tabId={section.id} band="backlog" label={statusLabel("backlog")} count={count("backlog")}>
+          {bandList("backlog")}
+        </StatusBand>
+        {count("blocked") > 0 && (
+          <StatusBand
+            tabId={section.id}
+            band="blocked"
+            label={statusLabel("blocked")}
+            count={count("blocked")}
+            fold={{ open: blockedOpen, onToggle: () => setBlockedOpen((open) => !open) }}
+          >
+            {bandList("blocked")}
+          </StatusBand>
+        )}
+        {count("done") > 0 && (
+          <StatusBand tabId={section.id} band="done" label="Completed" count={count("done")}>
+            {bandList("done")}
+          </StatusBand>
+        )}
+      </div>
+    );
+  }
 
   return (
     <CanvasCard
@@ -244,11 +549,11 @@ function SectionCard({
             onSelect={view.setSortMode}
             pinned={isStreaks ? undefined : { modes: pinnedSorts, onToggle: onTogglePin }}
           />
-          {!isStreaks && <DisplayMenu options={taskDisplay} shown={view.shown} onToggle={view.setShown} />}
+          <DisplayMenu options={displayOptions} shown={view.shown} onToggle={view.setShown} />
         </>
       }
       footer={
-        <CardAdd label={isStreaks ? "Add streak" : "Add task"}>
+        <CardAdd label={isStreaks ? "Add streak" : "Add task"} shown={showAddButton}>
           {(open, close) =>
             isStreaks ? (
               <Popover title="Add streak" open={open} onClose={close} align="left" width={300} scrollable>
@@ -304,38 +609,10 @@ function SectionCard({
           onEditGroup={onEditGroup}
           onRemoveGroup={onRemoveGroup}
         />
+      ) : showStatus ? (
+        statusBands()
       ) : (
-        <ItemList
-          items={listedTasks}
-          // The Completed view is a flat look-back (finished tasks sit ungrouped at the end), so it
-          // doesn't reorder or group — that happens in the normal view.
-          manual={sortMode === "manual" && !showCompleted}
-          sorted={displayedTasks}
-          groups={groups}
-          noun="tasks"
-          emptyLabel="Nothing here yet"
-          renderItem={(task, row) => (
-            <TaskItem
-              key={task.id}
-              task={task}
-              color={section.color}
-              scheduleCadence={scheduleCadence}
-              showEstimate={showEstimate}
-              showTimer={showTimer}
-              row={row}
-              pointsHidden={flyingTaskIds.has(task.id)}
-              onSetLevel={onSetLevel}
-              onRemove={onRemoveTask}
-              onEdit={(patch) => onEditTask(task.id, patch)}
-            />
-          )}
-          onReorder={reorderTab}
-          onAddGroup={onAddGroup}
-          onExtendGroup={onExtendGroup}
-          onEjectFromGroup={ejectFromTabGroup}
-          onEditGroup={onEditGroup}
-          onRemoveGroup={onRemoveGroup}
-        />
+        <div className="list-stack">{taskList(listedTasks, shownTasks)}</div>
       )}
     </CanvasCard>
   );
@@ -348,52 +625,9 @@ interface AddTaskPopoverProps {
   onCreate: (payload: TaskCreatePayload) => void;
 }
 
-// Each tier row carries a stable id so its PointsBuilder's callbacks (effect deps there) can be stable
-// per-row, and so remove/reorder keys don't shift the wrong builder. `est` is the tier's builder
-// report (minutes/effortIndex/source); minutes null ≡ none picked → no estimate stored.
-interface TierRow {
-  id: string;
-  points: string;
-  est: BuilderEstimate;
-}
-
 const EMPTY_EST: BuilderEstimate = { minutes: null, effortIndex: 0, source: "manual" };
 
 const TYPE_LABELS: Record<TaskType, string> = { checkbox: "Checkbox", tiered: "Tiered", repeatable: "Repeatable", once: "One-time" };
-
-// One tier's builder: the same PointsBuilder (Points% + Duration + Effort) the checkbox form uses,
-// plus a remove control. Its own component so onPointsChange is a stable per-row callback (the
-// builder treats it as an effect dependency) and its internal duration/effort state stays isolated.
-interface TierBuilderRowProps {
-  row: TierRow;
-  index: number;
-  canRemove: boolean;
-  onPointsChange: (id: string, points: string) => void;
-  onEstimateChange: (id: string, est: BuilderEstimate) => void;
-  onRemove: (id: string) => void;
-}
-
-function TierBuilderRow({ row, index, canRemove, onPointsChange, onEstimateChange, onRemove }: TierBuilderRowProps) {
-  const handlePoints = useCallback((v: string) => onPointsChange(row.id, v), [row.id, onPointsChange]);
-  const handleBuilder = useCallback((est: BuilderEstimate) => onEstimateChange(row.id, est), [row.id, onEstimateChange]);
-  return (
-    <div className="tier-builder-row">
-      <div className="tier-builder-head">
-        <span className="tier-row-label">Tier {index + 1}</span>
-        <button
-          type="button"
-          className="icon-btn"
-          aria-label="Remove tier"
-          onClick={() => onRemove(row.id)}
-          disabled={!canRemove}
-        >
-          ✕
-        </button>
-      </div>
-      <PointsBuilder points={row.points} onPointsChange={handlePoints} onBuilderChange={handleBuilder} />
-    </div>
-  );
-}
 
 function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProps) {
   const [type, setType] = useState<TaskType>(section.allowedTypes[0].type);

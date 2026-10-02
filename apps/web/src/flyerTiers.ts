@@ -118,15 +118,23 @@ export const FLYER_TIERS: [FlyerTier, ...FlyerTier[]] = [
   },
 ];
 
-export function tierFor(amount: number): FlyerTier {
+// Finishing a broken-down task (its last piece) celebrates the whole task, not just the piece: one tier
+// above what the piece alone earns, and never less than this.
+const FINALE_FLOOR: FlyerTierId = "surge";
+
+export function tierFor(amount: number, finale = false): FlyerTier {
   // The heavy tiers — shaking, swelling, a trailing smear of afterimages — are precisely what this
   // setting exists to switch off, so they collapse to the plain one rather than merely slowing down.
   // Same check as useDiegeticDepth's.
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return FLYER_TIERS[0];
 
-  let match = FLYER_TIERS[0];
-  for (const tier of FLYER_TIERS) {
-    if (amount >= tier.minPoints) match = tier;
+  let match = 0;
+  FLYER_TIERS.forEach((tier, i) => {
+    if (amount >= tier.minPoints) match = i;
+  });
+  if (finale) {
+    const floor = FLYER_TIERS.findIndex((tier) => tier.id === FINALE_FLOOR);
+    match = Math.min(Math.max(match + 1, floor), FLYER_TIERS.length - 1);
   }
-  return match;
+  return FLYER_TIERS[match];
 }

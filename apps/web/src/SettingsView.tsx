@@ -1,13 +1,28 @@
 import { useEffect, useRef, useState } from "react";
+import BackupSlots from "./BackupSlots";
 import ConfirmPopover from "./ConfirmPopover";
 import { useClickOutside } from "./useClickOutside";
 import type { DisplayTrigger, PointsFormula, Settings, StreakView, WindDown } from "./types";
+import type { CardLayout } from "./useLocalConfig";
 
 // A whole-number input that lets you type/clear freely and commits on blur (or Enter). A plain
 // controlled `value={number}` that commits every keystroke fought the user — clearing the field
 // parsed to 0 and snapped back, so you couldn't replace the value. Local text state fixes that; it
 // re-syncs to an external change only while unfocused (so a server reconcile doesn't clobber typing).
-function BackfillInput({ value, onCommit }: { value: number; onCommit: (n: number) => void }) {
+// Also for a value whose passing steps must never be saved (typing 12 passes through 1).
+function CommitWholeField({
+  value,
+  onCommit,
+  min = 0,
+  max = Number.MAX_SAFE_INTEGER,
+  className = "backfill-input",
+}: {
+  value: number;
+  onCommit: (n: number) => void;
+  min?: number;
+  max?: number;
+  className?: string;
+}) {
   const [text, setText] = useState(String(value));
   const focused = useRef(false);
   useEffect(() => {
@@ -16,14 +31,15 @@ function BackfillInput({ value, onCommit }: { value: number; onCommit: (n: numbe
   const commit = () => {
     focused.current = false;
     const n = Number(text);
-    if (Number.isInteger(n) && n >= 0) onCommit(n);
+    if (Number.isInteger(n) && n >= min && n <= max) onCommit(n);
     else setText(String(value)); // revert empty/invalid
   };
   return (
     <input
       type="number"
-      min={0}
-      className="backfill-input"
+      min={min}
+      max={max === Number.MAX_SAFE_INTEGER ? undefined : max}
+      className={className}
       value={text}
       onFocus={() => {
         focused.current = true;
@@ -32,6 +48,23 @@ function BackfillInput({ value, onCommit }: { value: number; onCommit: (n: numbe
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
+      }}
+    />
+  );
+}
+
+// A whole number within [min, max], saved as it's typed (anything else isn't saved).
+function WholeField({ value, min, max, onChange }: { value: number; min: number; max: number; onChange: (n: number) => void }) {
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      step={1}
+      value={value}
+      onChange={(e) => {
+        const n = Number(e.target.value);
+        if (Number.isInteger(n) && n >= min && n <= max) onChange(n);
       }}
     />
   );
@@ -84,9 +117,21 @@ interface SettingsViewProps {
   debugNow: string | null;
   realNow: string;
   onSetDebugClock: (at: string | null) => void;
+  // This device's tab placements — a backup's preview draws its board the way this board is laid out.
+  layouts: Record<string, CardLayout>;
 }
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+// How often a backup can be taken, in hours, with how each reads after "Back up every".
+const BACKUP_PACES: { hours: number; label: string }[] = [
+  { hours: 6, label: "6 hours" },
+  { hours: 12, label: "12 hours" },
+  { hours: 24, label: "day" },
+  { hours: 48, label: "2 days" },
+  { hours: 72, label: "3 days" },
+  { hours: 168, label: "week" },
+];
 
 // The platform gives us the canonical zone list — no bundled table to maintain, no outbound call.
 // Accessed through a cast since the TS lib in use may not type `supportedValuesOf` yet; guarded so a
@@ -141,6 +186,7 @@ function SettingsView({
   debugNow,
   realNow,
   onSetDebugClock,
+  layouts,
 }: SettingsViewProps) {
   const [confirming, setConfirming] = useState(false);
   const resetRef = useRef<HTMLDivElement>(null);
@@ -151,6 +197,8 @@ function SettingsView({
 
   // Send the whole windDown object each time (the server shallow-merges the top-level patch).
   const patchWind = (patch: Partial<WindDown>) => onSave({ windDown: { ...settings.windDown, ...patch } });
+  const patchBounty = (patch: Partial<Settings["bounty"]>) => onSave({ bounty: { ...settings.bounty, ...patch } });
+  const patchBackup = (patch: Partial<Settings["backup"]>) => onSave({ backup: { ...settings.backup, ...patch } });
   const [triggerDraft, setTriggerDraft] = useState("10");
 
   // The points formula is edited as a draft and applied via a Save button (unlike the per-field autosave
@@ -307,6 +355,58 @@ function SettingsView({
       </section>
 
       <section className="settings-group">
+        <h2 className="settings-heading">Bounty</h2>
+        <p className="settings-note">
+          Every week close rolls open tasks as Bounties — the longer one's sat there, the likelier — each worth
+          more until the next close. A Bounty you finish keeps what it paid.
+        </p>
+
+        <label className="field field-toggle">
+          <span className="field-label">Roll Bounties each week</span>
+          <input
+            type="checkbox"
+            className="settings-switch"
+            checked={settings.bounty.enabled}
+            onChange={(e) => patchBounty({ enabled: e.target.checked })}
+          />
+        </label>
+
+        {settings.bounty.enabled && (
+          <>
+            <label className="field">
+              <span className="field-label">Bounties at a time</span>
+              <WholeField value={settings.bounty.max} min={1} max={5} onChange={(max) => patchBounty({ max })} />
+            </label>
+
+            <label className="field">
+              <span className="field-label">A Bounty multiplies its task's points by</span>
+              <FloatField
+                value={settings.bounty.multiplier}
+                onChange={(n) => {
+                  if (n >= 1 && n <= 10) patchBounty({ multiplier: n });
+                }}
+              />
+            </label>
+
+            <label className="field">
+              <span className="field-label">Free rerolls a week</span>
+              <WholeField value={settings.bounty.rerolls} min={0} max={10} onChange={(rerolls) => patchBounty({ rerolls })} />
+            </label>
+
+            <label className="field field-toggle">
+              <span className="field-label">Roll a new Bounty when you win one</span>
+              <input
+                type="checkbox"
+                className="settings-switch"
+                checked={settings.bounty.rollOnWin}
+                onChange={(e) => patchBounty({ rollOnWin: e.target.checked })}
+              />
+            </label>
+          </>
+        )}
+      </section>
+
+      <section className="settings-group">
         <h2 className="settings-heading">Wind-down</h2>
         <p className="settings-note">
           As a chosen time nears, an alert grows on screen — small at first, then taking over the whole
@@ -427,12 +527,12 @@ function SettingsView({
               <div className="backfill-inputs">
                 <label className="backfill-cell">
                   <span className="backfill-cell-label">Start</span>
-                  <BackfillInput value={s.legacy} onCommit={(n) => onBackfillStreak(s.id, { legacy: n })} />
+                  <CommitWholeField value={s.legacy} onCommit={(n) => onBackfillStreak(s.id, { legacy: n })} />
                 </label>
                 {s.type !== "counter" && (
                   <label className="backfill-cell">
                     <span className="backfill-cell-label">Best</span>
-                    <BackfillInput value={s.legacyBest} onCommit={(n) => onBackfillStreak(s.id, { legacyBest: n })} />
+                    <CommitWholeField value={s.legacyBest} onCommit={(n) => onBackfillStreak(s.id, { legacyBest: n })} />
                   </label>
                 )}
               </div>
@@ -477,6 +577,53 @@ function SettingsView({
             Refresh
           </button>
         </div>
+      </section>
+
+      <section className="settings-group">
+        <h2 className="settings-heading">Backups</h2>
+        <p className="settings-note">
+          Copies of the whole board, saved beside it on this computer — the way back from a reset gone wrong.
+          Once the newest is as old as you pick here, another is taken and the oldest goes to make room.
+        </p>
+
+        <label className="field field-toggle">
+          <span className="field-label">Back up automatically</span>
+          <input
+            type="checkbox"
+            className="settings-switch"
+            checked={settings.backup.enabled}
+            onChange={(e) => patchBackup({ enabled: e.target.checked })}
+          />
+        </label>
+
+        {settings.backup.enabled && (
+          <>
+            <label className="field">
+              <span className="field-label">Back up every</span>
+              <select value={settings.backup.everyHours} onChange={(e) => patchBackup({ everyHours: Number(e.target.value) })}>
+                {BACKUP_PACES.map((pace) => (
+                  <option key={pace.hours} value={pace.hours}>
+                    {pace.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span className="field-label">Backups to keep</span>
+              {/* Saved once typed, not per keystroke — a passing 1 on the way to 12 would drop all but one. */}
+              <CommitWholeField
+                value={settings.backup.keep}
+                min={1}
+                max={20}
+                className=""
+                onCommit={(keep) => patchBackup({ keep })}
+              />
+            </label>
+          </>
+        )}
+
+        <BackupSlots settings={settings.backup} timeZone={settings.timeZone} realNow={realNow} layouts={layouts} />
       </section>
 
       <section className="settings-group danger">

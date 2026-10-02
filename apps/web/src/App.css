@@ -4,6 +4,8 @@
   --text: #0f172a;
   --text-dim: #94a3b8;
   --radius: 14px;
+  /* A list's four column tracks (see .item-list): one home, shared by a task tab's Status bands. */
+  --list-tracks: minmax(24px, max-content) minmax(0, max-content) 1fr auto;
 }
 
 .page {
@@ -409,7 +411,9 @@ main {
   gap: 8px;
 }
 
-/* Reveal on hover of the whole row, on keyboard focus, and while its popover is open. */
+/* Reveal on hover of the whole row, on keyboard focus, and while its popover is open — or always, where the
+   tab's Display shows its add button. */
+.add-item-anchor.shown .add-item-fab,
 .add-item-anchor:hover .add-item-fab,
 .add-item-fab:focus-visible,
 .add-item-anchor.add-open .add-item-fab {
@@ -440,7 +444,7 @@ main {
   touch-action: none;
   user-select: none;
 }
-.item-row:hover .group-handle {
+.item-row:hover:not(:has(.item-row:hover, .task-pieces:hover)) > .group-handle {
   opacity: 1;
 }
 .group-handle:active {
@@ -942,10 +946,15 @@ main {
      lets it shrink under real space pressure instead of overflowing (paired with
      .points-prefix's overflow-wrap: anywhere, so it wraps instead of overlapping the name
      column once it actually is squeezed). */
-  grid-template-columns: minmax(24px, max-content) minmax(0, max-content) 1fr auto;
+  grid-template-columns: var(--list-tracks);
   column-gap: 10px;
   row-gap: 2px;
   min-height: 20px;
+}
+
+/* An empty list's line spans the row — in column 1 it would widen that track for a whole shared grid. */
+.item-list > .empty {
+  grid-column: 1 / -1;
 }
 
 .item-row {
@@ -958,7 +967,8 @@ main {
   border-radius: 8px;
 }
 
-.item-row:hover {
+/* The row's own hover — not while the pointer is on a row inside it (a piece under its task). */
+.item-row:hover:not(:has(.item-row:hover, .task-pieces:hover)) {
   background: #f8fafc;
 }
 
@@ -1090,121 +1100,118 @@ main {
   opacity: 1;
 }
 
-/* ---- Task context menu & edit panel ---- */
+/* ---- Row actions menu (ActionMenu — right-click / long-press on any list row) ----
+   Portaled to <body> and fixed in screen space, so it sits above the cards, the HUD (40) and the
+   flying points (200), and the canvas zoom never scales it. Items share one highlight: hover moves
+   focus, and :focus is what's styled. */
 
-.task-ctx-menu {
-  z-index: 200;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(15,23,42,0.12);
+.action-menu {
+  position: fixed;
+  z-index: 300;
+  min-width: 184px;
   padding: 4px;
-  min-width: 140px;
-  display: flex;
-  flex-direction: column;
-}
-
-.task-ctx-menu button {
-  background: none;
-  border: none;
-  text-align: left;
-  padding: 7px 10px;
-  border-radius: 5px;
-  font-family: inherit;
-  font-size: 0.85rem;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.task-ctx-menu button:hover {
-  background: #f1f5f9;
-}
-
-.task-edit-panel {
-  z-index: 200;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
-  box-shadow: 0 4px 20px rgba(15,23,42,0.14);
-  padding: 12px;
-  min-width: 200px;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.06),
+    0 12px 28px rgba(15, 23, 42, 0.14);
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.task-edit-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.task-edit-input {
+  gap: 1px;
   font-family: inherit;
-  font-size: 0.9rem;
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 6px 9px;
-  background: #f8fafc;
-  width: 100%;
-  box-sizing: border-box;
 }
 
-.task-edit-input:focus {
-  outline: none;
-  border-color: #94a3b8;
-  background: #fff;
-}
-
-.task-edit-tier-row {
+.action-menu-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.83rem;
-  color: var(--text-dim);
-}
-
-.task-edit-tier-row input {
-  flex: 1;
-  font-family: inherit;
-  font-size: 0.83rem;
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 7px;
-  background: #f8fafc;
-}
-
-.task-edit-tier-row input:focus {
-  outline: none;
-  border-color: #94a3b8;
-  background: #fff;
-}
-
-.task-edit-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 2px;
-}
-
-.task-edit-actions button:not(.ghost-btn) {
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 7px 8px;
   border: none;
-  background: var(--text);
-  color: #fff;
+  border-radius: 6px;
+  background: none;
   font-family: inherit;
-  font-weight: 600;
-  font-size: 0.85rem;
-  border-radius: 8px;
-  padding: 7px 14px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text);
+  text-align: left;
   cursor: pointer;
 }
 
-.task-edit-actions button:not(.ghost-btn):hover {
-  opacity: 0.85;
+.action-menu-item:focus {
+  outline: none;
+  background: #f1f5f9;
+}
+
+.action-menu-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-menu-label svg {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.action-menu-item.danger,
+.action-menu-item.danger .action-menu-label svg {
+  color: #ef4444;
+}
+
+.action-menu-item.danger:focus {
+  background: #fef2f2;
+}
+
+.action-menu-key {
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+/* The current choice of a set (a task's Status). */
+.action-menu-check {
+  display: inline-flex;
+  color: var(--text);
+}
+
+.action-menu-sep {
+  height: 1px;
+  margin: 3px 4px;
+  background: var(--border);
+}
+
+/* A set's name above its choices (a task's Status), in the Status bands' own small caps: it sets the set
+   apart from the actions beside it without a separator line. */
+.action-menu-caption {
+  padding: 7px 8px 2px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* The row the open menu belongs to keeps its hover look, so it's clear what the menu acts on. */
+.item-row.menu-open {
+  background: #f8fafc;
+}
+
+/* On touch, a hold opens the menu — so it mustn't also start a text selection or the iOS callout. */
+@media (pointer: coarse) {
+  .item-row {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .item-row input,
+  .item-row textarea {
+    -webkit-user-select: text;
+    user-select: text;
+  }
 }
 
 .task-estimate {
@@ -1260,7 +1267,7 @@ main {
   z-index: 1;
 }
 
-.item-row:hover .drag-handle,
+.item-row:hover:not(:has(.item-row:hover, .task-pieces:hover)) > .drag-handle,
 .group-block:hover .group-header .drag-handle {
   opacity: 1;
 }
@@ -1286,7 +1293,7 @@ main {
   pointer-events: none;
 }
 
-.item-row:hover .drag-handle.disabled,
+.item-row:hover:not(:has(.item-row:hover, .task-pieces:hover)) > .drag-handle.disabled,
 .group-block:hover .group-header .drag-handle.disabled {
   opacity: 0;
 }
@@ -1310,7 +1317,7 @@ main {
   transition: opacity 0.1s;
 }
 
-.item-row:hover .remove,
+.item-row:hover:not(:has(.item-row:hover, .task-pieces:hover)) > .remove-wrap .remove,
 .group-block:hover .group-header .remove {
   opacity: 1;
 }
@@ -1397,37 +1404,13 @@ main {
   gap: 6px;
 }
 
-.tier-row-inputs {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .tier-row-label {
   flex: 1;
   font-size: 0.85rem;
   color: var(--text-dim);
 }
 
-.tier-points-input {
-  width: 64px;
-  flex: none !important;
-  padding: 7px 9px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #f8fafc;
-  font-family: inherit;
-  font-size: 0.85rem;
-  color: var(--text);
-}
-
-.tier-row-inputs input:focus {
-  outline: none;
-  border-color: #94a3b8;
-  background: var(--surface);
-}
-
-.tier-row-inputs .icon-btn:disabled {
+.tier-builder-head .icon-btn:disabled {
   opacity: 0.3;
   cursor: default;
 }
@@ -2509,7 +2492,7 @@ button.cond-connector:hover {
 }
 
 /* Neutral: inherits the handle's (dim) text color, not the tab accent. */
-.whip-icon {
+.whip-handle svg {
   flex: none;
 }
 
@@ -2724,6 +2707,197 @@ body.whip-dragging {
   flex: none;
 }
 
+/* Settings → Backups: the saved backups, one row each. */
+.backup-slots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.backup-slots li + li {
+  border-top: 1px solid var(--border);
+}
+
+.backup-slot {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 12px;
+  border: none;
+  background: var(--surface);
+  font-family: inherit;
+  font-size: 0.86rem;
+  color: var(--text);
+  text-align: left;
+  cursor: default;
+}
+
+.backup-slot:hover,
+.backup-slot.is-shown {
+  background: #f8fafc;
+}
+
+.backup-slot-when {
+  font-weight: 600;
+}
+
+.backup-slot-since,
+.backup-slot-size {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.backup-slot-drop {
+  font-size: 0.72rem;
+  color: #b45309;
+}
+
+.backup-slot-size {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A backup's board as it was saved, beside its slot (portaled to the body, placed by BackupSlots). It
+   never takes the pointer, so moving down the list goes straight from one backup to the next. */
+.backup-preview {
+  position: fixed;
+  z-index: 300;
+  box-sizing: border-box;
+  padding: 12px 14px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+  pointer-events: none;
+  animation: backup-preview-in 0.14s ease-out;
+}
+
+.backup-preview.up {
+  translate: 0 -100%;
+}
+
+@keyframes backup-preview-in {
+  from {
+    opacity: 0;
+    scale: 0.98;
+  }
+}
+
+.backup-preview-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-bottom: 10px;
+  font-size: 0.86rem;
+}
+
+.backup-preview-head span,
+.backup-preview-note {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.backup-preview-note {
+  margin: 0;
+}
+
+/* BoardSnapshot: the board drawn small — cards in world px inside a world scaled down to fit. */
+.snapshot {
+  position: relative;
+  overflow: hidden;
+  margin: 0 auto;
+  background: #f7f7f9;
+  border-radius: 10px;
+}
+
+.snapshot-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+.snapshot-card {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.snapshot-title {
+  margin-bottom: 14px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.snapshot-card ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.snapshot-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 4px;
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+
+.snapshot-row.done .snapshot-text {
+  color: var(--text-dim);
+  text-decoration: line-through;
+}
+
+.snapshot-boxes {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.snapshot-boxes i {
+  width: 17px;
+  height: 17px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--task-color, var(--border));
+  border-radius: 5px;
+}
+
+.snapshot-boxes i.on {
+  background: var(--task-color, var(--border));
+}
+
+.snapshot-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snapshot-count {
+  margin-left: auto;
+  font-weight: 700;
+}
+
+.snapshot-empty {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
 /* Wind-down display-trigger editor: removable chips + an add row. */
 .trigger-list {
   display: flex;
@@ -2867,7 +3041,235 @@ body.whip-dragging {
   font-weight: 700;
 }
 
-.recap-list {
+/* What the period earned and what it lost to the shop, each with its count. */
+.recap-sums {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.recap-sum {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recap-sum dt {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.recap-sum dd {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.recap-sum.lost dd {
+  color: #ef4444;
+}
+
+/* ---- The recap's pages (Recap.tsx): a week's days as log-in tiles, its streaks, its Bounty roll; a
+   day's own page. Flipped with Back / Next and the dots, so nothing scrolls. ---- */
+/* The page slides sideways as it flips — kept inside the card. */
+.recap-pages {
+  overflow: hidden;
+}
+
+.recap-empty {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+}
+
+.recap-tab {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.recap-tab b {
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.recap-tab-pct {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.recap-purchases {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.72rem;
+}
+
+.recap-purchases li {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.recap-purchase-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.recap-card .lost,
+.recap-wall .lost {
+  color: #ef4444;
+  font-weight: 700;
+}
+
+/* A day's page: each tab named, in its colour. */
+.recap-day-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.recap-day-tabs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.recap-day-tabs li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.recap-day-tabs i,
+.recap-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.recap-tab-name {
+  min-width: 72px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* A week's page: which colour is which tab, then a tile per day and the week's total. */
+.recap-week {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.recap-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.recap-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.recap-days {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: 8px;
+}
+
+.recap-day {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 0.78rem;
+}
+
+.recap-day.empty {
+  border-style: dashed;
+  opacity: 0.55;
+}
+
+.recap-day-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.recap-day-label b {
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.recap-day-counts {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+}
+
+.recap-day-none {
+  color: var(--text-dim);
+}
+
+.recap-day-sums {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.recap-week-total {
+  justify-content: space-between;
+  background: #f8fafc;
+  border-color: var(--text-dim);
+}
+
+.recap-week-total .recap-day-sums {
+  border-top: none;
+  font-size: 0.95rem;
+}
+
+/* A week's streaks, from where each began the week to where it ends it. */
+.recap-streaks {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -2876,19 +3278,73 @@ body.whip-dragging {
   gap: 8px;
 }
 
-.recap-row {
-  display: flex;
-  align-items: baseline;
+.recap-streaks li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto 40px;
+  align-items: center;
   gap: 8px;
+  font-size: 0.88rem;
 }
 
-.recap-name {
-  font-size: 0.92rem;
+.recap-streaks li svg {
+  color: #f97316;
 }
 
-.recap-mult {
+.recap-streak-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.recap-streak-run {
+  font-variant-numeric: tabular-nums;
   color: var(--text-dim);
-  font-size: 0.82rem;
+}
+
+.recap-streak-run b {
+  color: var(--text);
+}
+
+.recap-streak-delta {
+  text-align: right;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.recap-streak-delta.up {
+  color: #16a34a;
+}
+
+.recap-streak-delta.down {
+  color: #ef4444;
+}
+
+/* Which page you're on (each a button to it), and Back / Next — Done on the last. */
+.recap-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.recap-dots button {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--border);
+  cursor: pointer;
+}
+
+.recap-dots button.on {
+  background: var(--text);
+}
+
+.recap-nav {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
 }
 
 /* Settings → Points: editable effort presets (label × multiplier). */
@@ -2984,12 +3440,6 @@ body.whip-dragging {
   flex-wrap: wrap;
 }
 
-.recap-empty {
-  color: var(--text-dim);
-  font-size: 0.9rem;
-  margin: 0;
-}
-
 .recap-foot {
   display: flex;
   align-items: center;
@@ -2997,11 +3447,6 @@ body.whip-dragging {
   gap: 12px;
   padding-top: 6px;
   border-top: 1px solid var(--border);
-}
-
-.recap-total {
-  font-weight: 700;
-  font-size: 1.1rem;
 }
 
 
@@ -3514,5 +3959,1023 @@ main.shop-open > .zoom-controls {
   }
   .poof-layer {
     display: none;
+  }
+}
+
+/* ---- Prune (a daily/weekly task skipped until its tab's next day/week) ---- */
+
+/* A cost shown under a menu action before you pick it (Prune: the streaks it would break). */
+.action-menu-warning {
+  display: block;
+  margin-top: 1px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #ef4444;
+}
+
+/* Only listed while the tab's Display shows pruned tasks: dimmed, and saying when it's back. The cells
+   are dimmed, not the row — framer owns the row's own opacity (its enter/exit animation). */
+.task-item.pruned .task-text,
+.task-item.pruned .points-prefix {
+  color: var(--text-dim);
+}
+
+.task-item.pruned input[type="checkbox"],
+.task-item.pruned .tier-dots {
+  opacity: 0.5;
+}
+
+/* Its own line under the name, like an estimate, so it never squeezes the name in a narrow tab. */
+.task-pruned-note {
+  display: block;
+  margin-top: 1px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  font-style: italic;
+  color: var(--text-dim);
+}
+
+/* ---- Status bands (a task tab's In progress / Backlog / Blocked, plus the Completed look-back) ----
+   Every band is a list of its own, but they share one grid: the bands and their lists are subgrids of
+   .status-bands, which carries the list tracks, so the [%] column lines up across bands as in one list. */
+.status-bands {
+  display: grid;
+  grid-template-columns: var(--list-tracks);
+  column-gap: 10px;
+  row-gap: 10px;
+}
+
+/* The band's box reaches 8px past the list on each side (so a group's rail sits inside the In progress
+   tint), while its rows don't move: a subgrid's margin and padding add up to 0 on its edge tracks. */
+.status-band {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-content: start;
+  margin: 0 -8px;
+  padding: 0 8px;
+  border-radius: 10px;
+}
+
+.status-bands .item-list {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+/* What you're in the middle of, tinted in the tab's colour so it reads first. */
+.status-band.band-in-progress {
+  background: color-mix(in srgb, var(--tab-color) 7%, transparent);
+  padding-bottom: 2px;
+}
+
+.status-band-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px 3px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.status-band-count {
+  font-weight: 600;
+  letter-spacing: 0;
+  opacity: 0.8;
+}
+
+/* Blocked folds to its header: a button that opens it, with a turning chevron. */
+.status-band-fold {
+  width: 100%;
+  border: none;
+  border-top: 1px dashed var(--border);
+  border-radius: 0;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding-top: 8px;
+}
+
+.status-band-fold:hover {
+  color: var(--text);
+}
+
+.status-band-fold svg {
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+
+.status-band-fold.open svg {
+  transform: none;
+}
+
+/* The gentle "finish or park one?" once too much is in progress — a nudge, never a block. */
+.status-band-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0 4px 4px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #b45309;
+}
+
+/* A row's band note under its name: how long it's been in hand, or what it's waiting on. */
+.task-status-note {
+  display: block;
+  margin-top: 1px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.task-status-waits-on {
+  color: var(--text);
+  font-weight: 600;
+  border-bottom: 1.5px dotted var(--text-dim);
+}
+
+/* The hover pill that moves a row between bands in one click. Out of the grid (absolute), so it takes
+   no track; it sits at the end of the first line, left of the trash. */
+.status-pill {
+  position: absolute;
+  top: 5px;
+  right: 34px;
+  z-index: 2;
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s;
+}
+
+.item-row:hover:not(:has(.item-row:hover, .task-pieces:hover)) > .status-pill {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* The end of a long name fades under the pill instead of being cut off (the hovered row's own colour). */
+.status-pill::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  right: 100%;
+  width: 18px;
+  background: linear-gradient(to right, transparent, #f8fafc);
+  pointer-events: none;
+}
+
+.status-pill button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 20px;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.status-pill button:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.status-pill button:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.status-pill button + button {
+  border-left: 1px solid var(--border);
+}
+
+.status-pill button:hover {
+  color: var(--text);
+  background: #f8fafc;
+}
+
+.status-pill button.on {
+  background: var(--tab-color, var(--text));
+  color: #fff;
+  cursor: default;
+}
+
+/* Each icon's name, in the tier-dot label bubble. */
+.status-pill button::before {
+  content: attr(data-label);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--surface);
+  font-size: 0.72rem;
+  font-weight: 500;
+  white-space: nowrap;
+  padding: 3px 7px;
+  border-radius: 6px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s;
+  z-index: 10;
+}
+
+.status-pill button:hover::before {
+  opacity: 1;
+}
+
+/* No hover on touch: the same choices are in the long-press menu. */
+@media (hover: none) {
+  .status-pill {
+    display: none;
+  }
+}
+
+/* ---- Break down (a task's pieces, under it) ----
+   A broken-down task shows a strip of boxes beside its name (one per piece, filled once done) and its
+   next step under it; that line folds its pieces away and back. */
+.piece-strip {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 8px;
+  vertical-align: -1px;
+}
+
+.piece-box {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--task-color, var(--text-dim));
+  border-radius: 3px;
+}
+
+.piece-box.on {
+  background: var(--task-color, var(--text-dim));
+}
+
+.pieces-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pieces-summary:hover {
+  color: var(--text);
+}
+
+.pieces-summary b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.pieces-summary svg {
+  flex: none;
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+
+.pieces-summary.open svg {
+  transform: none;
+}
+
+.pieces-blocked {
+  color: #b45309;
+  font-weight: 600;
+}
+
+/* A task with pieces hanging below its first line keeps its checkbox, bracket, trash and handles on that
+   line, rather than centred on the whole block. */
+.task-item.has-pieces {
+  align-items: start;
+}
+
+.task-item.has-pieces > .drag-handle,
+.task-item.has-pieces > .group-handle {
+  top: 16px;
+}
+
+/* Finishing a broken-down task: once its last piece is ticked the rail its pieces hang from fills up
+   toward it, and its own box ticks with a pop and a ring as the fill arrives — the tick running back up —
+   before the row leaves (FINALE_EXIT_DELAY in TaskItem covers all of this). */
+.task-item.finishing .task-pieces::before {
+  content: "";
+  position: absolute;
+  left: -1.5px;
+  bottom: 0;
+  width: 1.5px;
+  height: 0;
+  background: var(--task-color);
+  animation: finish-rail 0.3s ease-in forwards;
+}
+
+@keyframes finish-rail {
+  to {
+    height: 100%;
+  }
+}
+
+/* Full strength over a done row's dimmed box: this is the moment it's done. */
+.task-item.finishing > input[type="checkbox"] {
+  opacity: 1;
+  animation: finish-pop 0.55s 0.25s both;
+}
+
+.task-item.finishing > input[type="checkbox"]::after {
+  animation: finish-check 0.25s 0.4s both;
+}
+
+@keyframes finish-pop {
+  0% {
+    background: var(--surface);
+    transform: scale(1);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--task-color) 55%, transparent);
+  }
+  35% {
+    background: var(--task-color);
+    transform: scale(1.35);
+  }
+  100% {
+    background: var(--task-color);
+    transform: scale(1);
+    box-shadow: 0 0 0 12px color-mix(in srgb, var(--task-color) 0%, transparent);
+  }
+}
+
+@keyframes finish-check {
+  from {
+    opacity: 0;
+    transform: rotate(45deg) scale(0.3);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(45deg) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-item.finishing .task-pieces::before,
+  .task-item.finishing > input[type="checkbox"],
+  .task-item.finishing > input[type="checkbox"]::after {
+    animation: none;
+  }
+}
+
+/* A finished task is hatched as a whole, so its (finished) pieces aren't hatched again inside it. */
+.task-item.done .piece-list > .task-item.done::after {
+  content: none;
+}
+
+/* The pieces sit under the task's first line, indented along a rule — their own list, on the same four
+   tracks as the tab's (so a piece row is laid out like any row), not a subgrid of it (the indent would
+   widen the tab's first column). */
+.task-pieces {
+  position: relative;
+  grid-column: 1 / -1;
+  margin: 4px 0 0 8px;
+  padding-left: 12px;
+  border-left: 1.5px solid var(--border);
+}
+
+.piece-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: var(--list-tracks);
+  column-gap: 10px;
+  row-gap: 2px;
+}
+
+.piece-list > .item-row {
+  padding-block: 4px;
+}
+
+.piece-list .task-text {
+  font-size: 0.86rem;
+}
+
+/* Break down: the pieces typed so far (each with what it'll be worth), the type-a-piece line, and the
+   way to tuck an existing task in. */
+.break-down {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0 2px;
+}
+
+.break-down-drafts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: var(--list-tracks);
+  column-gap: 10px;
+  row-gap: 2px;
+}
+
+.break-down-drafts li {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: center;
+  padding: 4px;
+  color: var(--text-dim);
+  font-size: 0.86rem;
+}
+
+.break-down-box {
+  width: 15px;
+  height: 15px;
+  border: 1.5px dashed var(--task-color, var(--border));
+  border-radius: 5px;
+}
+
+.break-down-drafts .points-prefix {
+  color: var(--text-dim);
+}
+
+.break-down-name {
+  grid-column: 3 / -1;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.break-down-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1.5px solid var(--task-color, var(--text));
+  border-radius: 8px;
+  padding: 4px 6px 4px 9px;
+  background: var(--surface);
+}
+
+.break-down-input input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: none;
+  padding: 1px 0;
+  font-family: inherit;
+  font-size: 0.86rem;
+  color: var(--text);
+}
+
+.break-down-input kbd,
+.break-down-foot {
+  font-size: 0.66rem;
+  color: var(--text-dim);
+}
+
+.break-down-input kbd {
+  font-family: inherit;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.break-down-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.break-down-foot .whip-handle {
+  margin-top: 0;
+  padding: 3px 9px;
+  font-size: 0.74rem;
+}
+
+/* ---- Weekly Bounty ----
+   This week's Bounty: a red stamp beside its name (with its multiplier), pinned above the rest of its list;
+   its bracket (and a boosted completion's, and its pieces') shows what it pays, in the stamp's red. */
+.points-boosted {
+  color: #dc2626;
+  font-weight: 800;
+}
+
+.bounty-stamp {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 5px;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.08);
+  color: #dc2626;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  vertical-align: 2px;
+  transform: rotate(-4deg);
+}
+
+/* A tab's lists stacked on one grid (the pinned Bounty above the rest), so the [%] column lines up. */
+.list-stack {
+  display: grid;
+  grid-template-columns: var(--list-tracks);
+  column-gap: 10px;
+  row-gap: 2px;
+}
+
+.list-stack > .item-list {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+/* ---- The week's recap, as sticky notes (Recap.tsx NoteWall) ----
+   The board fades back behind a frosted wash and the week is stuck onto it: each day a sticky note (in the
+   colour of the tab it cleared most in), its streaks one more, its Bounties rolling on the wash. Done peels
+   the notes off and drops them, and the wash clears. Above the HUD (z:40) and the nav, below the wind-down
+   nudge (z:600). */
+.recap-wall {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  overflow: hidden;
+}
+
+.recap-wash {
+  position: absolute;
+  inset: 0;
+  background: rgba(247, 247, 249, 0.86);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Its date at the top, the page in the middle, the way through at the bottom. */
+.recap-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: clamp(24px, 6vh, 56px) 16px 24px;
+}
+
+.recap-screen > * {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 880px;
+}
+
+.recap-wall .recap-head {
+  align-items: center;
+  text-align: center;
+}
+
+.recap-wall .recap-kicker {
+  letter-spacing: 0.18em;
+}
+
+.recap-wall .recap-date {
+  font-size: clamp(1.5rem, 4vw, 2.2rem);
+  font-weight: 800;
+}
+
+/* The page fills the middle, centred in it (and scrolls only on a screen too short for it). */
+.recap-wall .recap-pages {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.recap-wall .recap-page {
+  margin: auto 0;
+}
+
+.recap-wall .recap-foot {
+  padding-top: 14px;
+}
+
+.recap-wall .recap-dots button {
+  width: 10px;
+  height: 10px;
+}
+
+.recap-wall .btn-primary {
+  padding: 11px 26px;
+  font-size: 0.95rem;
+}
+
+.recap-wall .ghost-btn {
+  font-size: 0.95rem;
+}
+
+/* Done: the notes (and the Bounty reels) fall, everything else fades, and nothing clips the fall. The fall
+   uses the individual translate/rotate properties, so it adds to the slap-in's transform. */
+.recap-wall .recap-head,
+.recap-wall .recap-foot,
+.recap-wall .recap-legend,
+.recap-wall .bounty-page-head {
+  transition: opacity 0.25s;
+}
+
+.recap-wall.leaving .recap-head,
+.recap-wall.leaving .recap-foot,
+.recap-wall.leaving .recap-legend,
+.recap-wall.leaving .bounty-page-head {
+  opacity: 0;
+}
+
+.recap-wall.leaving .recap-pages {
+  overflow: visible;
+}
+
+.recap-wall.leaving .recap-drop {
+  pointer-events: none;
+  animation: recap-drop 0.75s cubic-bezier(0.45, 0, 0.85, 0.45) forwards;
+  animation-delay: calc(var(--i, 0) * 35ms);
+}
+
+@keyframes recap-drop {
+  20% {
+    translate: calc(var(--drift, 0px) * 0.2) -10px;
+    rotate: calc(var(--r, 0deg) * 2);
+  }
+  100% {
+    translate: var(--drift, 0px) 110vh;
+    rotate: calc(var(--r, 0deg) * 8 + 25deg);
+  }
+}
+
+/* A sticky note: square-cornered paper, lifted off the board. Its colour is its own (a day's is set
+   inline); a plain one is the classic yellow. */
+.recap-note {
+  border: none;
+  border-radius: 3px;
+  background: #fef08a;
+  box-shadow: 0 12px 20px rgba(15, 23, 42, 0.14), 0 2px 3px rgba(15, 23, 42, 0.08);
+}
+
+.recap-wall .recap-legend {
+  justify-content: center;
+  font-size: 0.95rem;
+}
+
+.recap-wall .recap-days {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.recap-wall .recap-day {
+  min-height: 132px;
+  gap: 8px;
+  padding: 14px 16px;
+  font-size: 1rem;
+}
+
+.recap-wall .recap-day.empty {
+  opacity: 1;
+  border: none;
+  background: #eef1f5;
+}
+
+/* On coloured paper the board's light greys wash out — the note's own ink is a darker tint. */
+.recap-wall .recap-day-label,
+.recap-wall .recap-tab-pct,
+.recap-wall .recap-day-none,
+.recap-wall .recap-streak-run {
+  color: rgba(15, 23, 42, 0.55);
+}
+
+.recap-wall .recap-day-label b {
+  font-size: 1.3rem;
+}
+
+.recap-wall .recap-tab b {
+  font-size: 1.4rem;
+}
+
+.recap-wall .recap-tab-pct,
+.recap-wall .recap-purchases {
+  font-size: 0.85rem;
+}
+
+.recap-wall .recap-day-sums {
+  border-top-color: rgba(15, 23, 42, 0.15);
+}
+
+.recap-wall .recap-week-total {
+  background: #fde047;
+}
+
+.recap-wall .recap-week-total .recap-day-sums {
+  font-size: 1.45rem;
+}
+
+/* The streaks, on one note. */
+.recap-wall .recap-streaks {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  gap: 12px;
+  padding: 22px 24px;
+}
+
+.recap-wall .recap-streaks li {
+  font-size: 1.1rem;
+}
+
+@media (max-width: 600px) {
+  .recap-wall .recap-days {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .recap-wall .recap-day {
+    min-height: 0;
+    padding: 10px 12px;
+    font-size: 0.9rem;
+  }
+}
+
+/* ---- The Bounty roll (BountyRoll.tsx) ----
+   A slot reel of open tasks spins past a ticking pointer and lands on the Bounty — rays, sparks, a shake,
+   and its multiplier stamped on. On the week recap's wash (BountiesPage) or a reveal card (BountyReveal). */
+.bounty-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.bounty-page-head {
+  font-size: clamp(1.3rem, 3.5vw, 1.8rem);
+  font-weight: 800;
+}
+
+.bounty-page > .recap-drop {
+  width: 100%;
+}
+
+.bounty-page > .recap-drop:last-child {
+  width: auto;
+}
+
+.bounty-roll {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.bounty-stage {
+  position: relative;
+  width: 100%;
+  padding: 16px 0;
+}
+
+/* The payoff stays close around the reel: clipped here, it never scrolls the page or the card. */
+.bounty-burst {
+  position: absolute;
+  inset: -60px 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.bounty-rays {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 560px;
+  height: 560px;
+  margin: -280px 0 0 -280px;
+  border-radius: 50%;
+  background: repeating-conic-gradient(rgba(251, 191, 36, 0.32) 0deg 9deg, transparent 9deg 22.5deg);
+  mask-image: radial-gradient(circle, #000 12%, transparent 62%);
+  -webkit-mask-image: radial-gradient(circle, #000 12%, transparent 62%);
+  animation: bounty-rays-in 0.6s ease-out both, bounty-rays-spin 16s linear infinite;
+}
+
+@keyframes bounty-rays-in {
+  from {
+    opacity: 0;
+    scale: 0.3;
+  }
+}
+
+@keyframes bounty-rays-spin {
+  to {
+    rotate: 1turn;
+  }
+}
+
+.bounty-sparks {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+}
+
+.bounty-sparks span {
+  position: absolute;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+}
+
+/* The pointer above the reel ticks as names pass; the one below holds still. */
+.bounty-stage::after,
+.bounty-pointer {
+  position: absolute;
+  left: 50%;
+  z-index: 2;
+  margin-left: -9px;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  filter: drop-shadow(0 2px 2px rgba(15, 23, 42, 0.25));
+}
+
+.bounty-pointer {
+  top: 4px;
+  border-top: 14px solid #ef4444;
+  transform-origin: 50% 0;
+}
+
+.bounty-stage::after {
+  content: "";
+  bottom: 4px;
+  border-bottom: 14px solid #ef4444;
+}
+
+.bounty-reel {
+  position: relative;
+  overflow: hidden;
+  padding: 18px 0;
+  mask-image: linear-gradient(90deg, transparent, #000 25%, #000 75%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 25%, #000 75%, transparent);
+}
+
+.bounty-reel-track {
+  display: flex;
+  gap: 10px;
+  width: max-content;
+}
+
+.bounty-reel-track span {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  padding: 9px 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 1rem;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: opacity 0.3s;
+}
+
+/* The name passing under the pointer — lit at once (a fade would trail behind a fast reel). */
+.bounty-reel-track span.under {
+  border-color: var(--text);
+  color: var(--text);
+}
+
+.bounty-roll.landed .bounty-reel-track span {
+  opacity: 0.3;
+}
+
+.bounty-roll.landed .bounty-reel-track span.hit {
+  opacity: 1;
+  border-color: #fecaca;
+  background: #dc2626;
+  color: #fff;
+  animation: bounty-hit 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) both, bounty-glow 1.6s ease-in-out 0.5s infinite;
+}
+
+/* A shine sweeps across the winner as it lands. */
+.bounty-roll.landed .bounty-reel-track span.hit::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, 0.85) 50%, transparent 70%);
+  translate: -120% 0;
+  animation: bounty-shine 0.9s 0.3s ease-out both;
+}
+
+@keyframes bounty-hit {
+  0% {
+    scale: 1;
+  }
+  60% {
+    scale: 1.3;
+  }
+  100% {
+    scale: 1.15;
+  }
+}
+
+@keyframes bounty-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5), 0 0 14px rgba(251, 191, 36, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0), 0 0 26px rgba(251, 191, 36, 0.85);
+  }
+}
+
+@keyframes bounty-shine {
+  to {
+    translate: 120% 0;
+  }
+}
+
+/* Under the reel: the multiplier stamped on (like the board's BOUNTY stamp), and its reroll. */
+.bounty-roll-under {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 56px;
+}
+
+.bounty-mult {
+  padding: 0 14px;
+  border: 3px solid #fff;
+  border-radius: 10px;
+  background: #dc2626;
+  color: #fff;
+  font-size: clamp(1.8rem, 5vw, 2.6rem);
+  font-weight: 900;
+  line-height: 1.15;
+  box-shadow: 0 8px 22px rgba(127, 29, 29, 0.35);
+}
+
+.bounty-roll-under .ghost-btn {
+  padding: 7px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+}
+
+.bounty-roll-under .ghost-btn:disabled {
+  visibility: hidden;
+}
+
+/* What a Bounty means, said once the reels land. */
+.bounty-explain {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  max-width: 440px;
+  margin: 4px auto 0;
+  text-align: center;
+}
+
+.bounty-explain p {
+  margin: 0;
+  color: #475569;
+  font-size: 1rem;
+}
+
+.bounty-explain b {
+  color: var(--text);
+}
+
+/* A mid-week reveal: the reel in a card, wide enough for a proper spin. */
+.recap-card.bounty-reveal {
+  max-width: 520px;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bounty-rays,
+  .bounty-roll.landed .bounty-reel-track span.hit,
+  .bounty-roll.landed .bounty-reel-track span.hit::after,
+  .recap-wall.leaving .recap-drop {
+    animation: none;
   }
 }

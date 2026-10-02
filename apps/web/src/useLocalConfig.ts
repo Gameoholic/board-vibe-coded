@@ -29,6 +29,8 @@ const DEFAULT_SETTINGS: CanvasSettings = { snap: true, gridSize: 20, showGrid: f
 export interface TabPrefs {
   sortMode: string;
   display: Record<string, boolean>;
+  // The broken-down tasks whose pieces are folded away, by id. Absent ≡ every one shows its pieces.
+  collapsed?: string[];
 }
 
 export const DEFAULT_TAB_PREFS: TabPrefs = { sortMode: "manual", display: {} };
@@ -40,7 +42,12 @@ function normalizeTabPrefs(raw: Record<string, unknown>): TabPrefs {
     ...(typeof raw.showEstimate === "boolean" ? { estimate: raw.showEstimate } : {}),
     ...(typeof raw.showTimer === "boolean" ? { timer: raw.showTimer } : {}),
   };
-  return { sortMode: typeof raw.sortMode === "string" ? raw.sortMode : DEFAULT_TAB_PREFS.sortMode, display };
+  const collapsed = Array.isArray(raw.collapsed) ? raw.collapsed.filter((id): id is string => typeof id === "string") : undefined;
+  return {
+    sortMode: typeof raw.sortMode === "string" ? raw.sortMode : DEFAULT_TAB_PREFS.sortMode,
+    display,
+    ...(collapsed ? { collapsed } : {}),
+  };
 }
 
 // Which sort modes show in a task tab's Sort menu without expanding "Show more". A single global

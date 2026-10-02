@@ -1,6 +1,7 @@
 import { AnimatePresence, Reorder } from "framer-motion";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { flushSync } from "react-dom";
+import type { MenuPoint } from "./ActionMenu";
 import GroupBlock from "./GroupBlock";
 import type { RowContext } from "./ItemRow";
 import type { Group } from "./types";
@@ -20,6 +21,14 @@ export interface ListItem {
 // run of items. Both are framer Reorder values, so the group moves as one unit.
 type Row<T> = { kind: "item"; item: T } | { kind: "group"; group: Group; items: T[] };
 
+// Somewhere else in the tab a row can be dragged to, out of this list — another list shown beside it (a
+// Status band). `label` says what letting go at a point would do ("Move to Backlog"), shown by the
+// pointer — null when nothing takes a row there; `drop` does it.
+export interface DropOutside {
+  label: (at: MenuPoint) => string | null;
+  drop: (itemId: string, at: MenuPoint) => void;
+}
+
 const byOrder = (a: ListItem, b: ListItem) => (a.order ?? 0) - (b.order ?? 0);
 
 interface ItemListProps<T extends ListItem> {
@@ -32,13 +41,19 @@ interface ItemListProps<T extends ListItem> {
   noun: string; // plural, for labels ("tasks", "rewards")
   emptyLabel: string;
   renderItem: (item: T, row: RowContext) => React.ReactNode; // must return a keyed ItemRow
-  // Posts the tab's full flat item-id order (group members kept contiguous by the block).
-  onReorder: (orderedIds: string[]) => void;
+  // Posts the list's new flat item-id order (group members kept contiguous by the block), with the ids
+  // the drag moved — a row, or a whole group's members — so the tab can keep the items this list doesn't
+  // show beside the ones that stayed (see withUnlistedKept).
+  onReorder: (orderedIds: string[], moved: string[]) => void;
   onAddGroup: (itemIds: string[]) => void;
   onExtendGroup: (groupId: string, itemIds: string[]) => void;
   onEjectFromGroup: (itemId: string, groupId: string, newOrder: string[]) => void;
   onEditGroup: (id: string, label: string) => void;
   onRemoveGroup: (id: string) => void;
+  dropOutside?: DropOutside;
+  // Whether new groups can be made here: the group handle's range-drag and dragging a row into a group.
+  // Groups already in the list show either way (and can still be ungrouped from their header). Default on.
+  grouping?: boolean;
 }
 
 function ItemList<T extends ListItem>({
@@ -55,9 +70,26 @@ function ItemList<T extends ListItem>({
   onEjectFromGroup,
   onEditGroup,
   onRemoveGroup,
+  dropOutside,
+  grouping = true,
 }: ItemListProps<T>) {
   // The tab's items in manual order (the stored order). Group membership + this order define the rows.
   const ordered = useMemo(() => [...items].sort(byOrder), [items]);
+  // What the drag in progress is moving (set when its handle is pressed): framer reorders one swap at a
+  // time, and a swap alone can't say which of its two sides moved.
+  const [dragged, setDragged] = useState<string[]>([]);
+  // The list a dragged row is in, found from the row (it stays in its list for the whole drag). Groups
+  // are looked up inside it, never across the page: one group can show in more than one list of a tab
+  // (a group whose tasks sit in two Status bands).
+  const listOf = (itemId: string) => document.querySelector(`[data-item-id="${itemId}"]`)?.closest(".item-list") ?? null;
+
+  // What letting go of a dragged row at a point would do out of its list altogether, if anything (see
+  // DropOutside).
+  function outsideLabel(itemId: string, x: number, y: number): string | null {
+    const r = listOf(itemId)?.getBoundingClientRect();
+    if (!dropOutside || !r || (y >= r.top && y <= r.bottom && x >= r.left && x <= r.right)) return null;
+    return dropOutside.label({ x, y });
+  }
 
   // Build the render rows: a run of consecutive items sharing a groupId collapses into one group
   // block; every other item is its own row. Only in manual order — otherwise groups are hidden.
@@ -90,7 +122,10 @@ function ItemList<T extends ListItem>({
   function reorderMembers(orderedMemberIds: string[]) {
     const memberSet = new Set(orderedMemberIds);
     const queue = [...orderedMemberIds];
-    onReorder(ordered.map((it) => (memberSet.has(it.id) ? queue.shift()! : it.id)));
+    onReorder(
+      ordered.map((it) => (memberSet.has(it.id) ? queue.shift()! : it.id)),
+      dragged,
+    );
   }
 
   // Ejection: remove an item from its group and reinsert it adjacent to the group.
@@ -109,17 +144,23 @@ function ItemList<T extends ListItem>({
     onEjectFromGroup(itemId, groupId, [...without.slice(0, insertAt), itemId, ...without.slice(insertAt)]);
   }
 
-  // Drag-into-group: capture-phase pointer listeners so we fire before framer's reorder cleanup.
-  // Uses rect comparison (not elementFromPoint) because the dragged row sits on top of the group.
+  // Drag-into-group (and out of the list altogether, see DropOutside): capture-phase pointer listeners
+  // so we fire before framer's reorder cleanup. Uses rect comparison (not elementFromPoint) because the
+  // dragged row sits on top of whatever is under the pointer.
   function handleUngroupedDragHandleDown(itemId: string) {
     let targetGroupId: string | null = null;
     let hintEl: HTMLDivElement | null = null;
+    const list = listOf(itemId);
+    const groupEl = (groupId: string) => {
+      const el = list?.querySelector(`[data-group-id="${groupId}"]`);
+      return el?.closest(".group-block") ?? el ?? null;
+    };
 
-    // Find which group block (if any) the pointer is over, by comparing rects.
+    // Find which of this list's group blocks (if any) the pointer is over, by comparing rects.
     // data-group-id lives on .group-header (a plain div, reliably forwarded to DOM).
     // Walk up to .group-block for the full group bounds (includes header + members).
     function groupAtPoint(x: number, y: number): string | null {
-      for (const el of document.querySelectorAll("[data-group-id]")) {
+      for (const el of list?.querySelectorAll("[data-group-id]") ?? []) {
         const block = el.closest(".group-block") ?? el;
         const r = block.getBoundingClientRect();
         if (y >= r.top && y <= r.bottom && x >= r.left && x <= r.right) return el.getAttribute("data-group-id");
@@ -145,12 +186,14 @@ function ItemList<T extends ListItem>({
     }
 
     function onMove(e: PointerEvent) {
-      const gId = groupAtPoint(e.clientX, e.clientY);
+      const gId = grouping ? groupAtPoint(e.clientX, e.clientY) : null;
       targetGroupId = gId;
       document.querySelectorAll(".group-drag-over").forEach((el) => el.classList.remove("group-drag-over"));
-      if (gId) {
-        const el = document.querySelector(`[data-group-id="${gId}"]`);
-        (el?.closest(".group-block") ?? el)?.classList.add("group-drag-over");
+      const outside = outsideLabel(itemId, e.clientX, e.clientY);
+      if (outside) {
+        setHint(e.clientY, e.clientX, outside);
+      } else if (gId) {
+        groupEl(gId)?.classList.add("group-drag-over");
         const label = groups.find((g) => g.id === gId)?.label ?? "group";
         setHint(e.clientY, e.clientX, `Add to ${label}`);
       } else {
@@ -158,13 +201,17 @@ function ItemList<T extends ListItem>({
       }
     }
 
-    function onUp() {
+    function onUp(e: PointerEvent) {
       window.removeEventListener("pointermove", onMove, { capture: true });
       window.removeEventListener("pointerup", onUp, { capture: true });
       setHint(0, 0, null);
       if (hintEl) {
         hintEl.remove();
         hintEl = null;
+      }
+      if (dropOutside && outsideLabel(itemId, e.clientX, e.clientY)) {
+        flushSync(() => dropOutside.drop(itemId, { x: e.clientX, y: e.clientY }));
+        return;
       }
       // Only this list's groups can take the item (a group in another tab isn't a valid target).
       if (!targetGroupId || !groups.some((g) => g.id === targetGroupId)) return;
@@ -176,7 +223,7 @@ function ItemList<T extends ListItem>({
       const newOrder = [...without.slice(0, insertAt), itemId, ...without.slice(insertAt)];
       flushSync(() => {
         onExtendGroup(gId, [itemId]);
-        onReorder(newOrder);
+        onReorder(newOrder, [itemId]);
       });
     }
 
@@ -266,7 +313,7 @@ function ItemList<T extends ListItem>({
           if (r?.kind === "group") flat.push(...r.items.map((it) => it.id));
           else if (r) flat.push(r.item.id);
         }
-        onReorder(flat);
+        onReorder(flat, dragged);
       }}
       className="item-list"
     >
@@ -285,13 +332,21 @@ function ItemList<T extends ListItem>({
               onEditLabel={(label) => onEditGroup(r.group.id, label)}
               onUngroup={onRemoveGroup}
               onEjectItem={(itemId, dir) => ejectItem(itemId, r.group.id, dir)}
+              onDragStart={setDragged}
+              outsideLabel={outsideLabel}
+              onDropOutside={dropOutside?.drop}
             />
           ) : (
             renderItem(r.item, {
               draggable: manual,
               noun,
-              onGroupDragStart: manual ? startGroupDrag : undefined,
-              onDragHandleDown: manual && groups.length > 0 ? () => handleUngroupedDragHandleDown(r.item.id) : undefined,
+              onGroupDragStart: manual && grouping ? startGroupDrag : undefined,
+              onDragHandleDown: manual
+                ? () => {
+                    setDragged([r.item.id]);
+                    if ((grouping && groups.length > 0) || dropOutside) handleUngroupedDragHandleDown(r.item.id);
+                  }
+                : undefined,
             })
           ),
         )}

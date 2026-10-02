@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { PickWhipIcon } from "./Icons";
+import { usePickWhip, type WhipTarget } from "./pickWhip";
 import { behaviorOf } from "./types";
 import type { StreakMatcher, StreakMode, StreakSince, StreakType, Task, TaskCondition, TaskRequirement } from "./types";
 
@@ -29,30 +30,11 @@ const TYPES: { value: StreakType; label: string }[] = [
   { value: "counter", label: "Counter" },
 ];
 
-// Neutral ink for the whip line — deliberately not the streak's color (that read as red).
-const WHIP_COLOR = "#334155";
-
-// The live pick-whip line: its screen-space start (the handle) and end (the pointer), plus whichever
-// task row is currently under the pointer so the line can snap to it and we know what to link on drop.
-// `cx`/`cy` are the target box's centre — the line lands on that box, not the row. `required` is what
-// dropping here would demand: a number when hovering a specific box of a count task, "all" when over
-// the row of a count task (every box, tracked live), or 1 for a plain single-box task.
-// filledUpTo: the 0-based box index to fill up to (inclusive) during the hover preview; undefined
-// means no per-box preview (row-level only).
-interface WhipTarget {
-  id: string;
-  cx: number;
-  cy: number;
-  dupe: boolean;
+// What dropping the pick-whip on a task links: `required` is what the condition would demand — a
+// number when hovering a specific box of a count task, "all" when over the row of a count task (every
+// box, tracked live), or 1 for a plain single-box task. The line lands on that box (`cx`/`cy`).
+interface StreakWhipTarget extends WhipTarget {
   required: TaskRequirement;
-  filledUpTo?: number;
-}
-interface WhipState {
-  sx: number;
-  sy: number;
-  x: number;
-  y: number;
-  target: WhipTarget | null;
 }
 
 // Add/edit a streak. Renders the form body only — the caller wraps it in a Popover so add and
@@ -70,14 +52,12 @@ function StreakForm({ allTasks, accentColor, initial, submitLabel, onSubmit, onC
   const [conditions, setConditions] = useState<TaskCondition[]>(
     initial?.matcher.kind === "tasks" ? initial.matcher.conditions : [],
   );
-  const [whip, setWhip] = useState<WhipState | null>(null);
   const [errors, setErrors] = useState<{ name?: string; conditions?: string }>({});
 
   // Whip drag runs on window listeners; those closures capture state, so read the live values off
   // refs to avoid staleness mid-gesture.
   const conditionsRef = useRef(conditions);
   conditionsRef.current = conditions;
-  const hoverRowRef = useRef<HTMLElement | null>(null);
 
   const taskName = (id: string) => allTasks.find((t) => t.id === id)?.text ?? "(deleted task)";
   // A counter sums each linked task independently, so AND/OR doesn't apply — the join is a fixed,
@@ -98,7 +78,7 @@ function StreakForm({ allTasks, accentColor, initial, submitLabel, onSubmit, onC
   // Resolve the screen point under the pointer to a drop target: the row's task, the box being
   // hovered (count tasks track "do it N times"; the whole row means "all", live), and where to land
   // the line. Non-quantity tasks always resolve to a single completion, matching the old behaviour.
-  function resolveTarget(px: number, py: number): WhipTarget | null {
+  function resolveTarget(px: number, py: number): StreakWhipTarget | null {
     const el = document.elementFromPoint(px, py);
     const row = el?.closest<HTMLElement>("[data-task-id]");
     if (!row) return null;
@@ -141,82 +121,20 @@ function StreakForm({ allTasks, accentColor, initial, submitLabel, onSubmit, onC
     }
     const rr = landEl.getBoundingClientRect();
     const dupe = conditionsRef.current.some((c) => c.taskId === id);
-    return { id, cx: rr.left + rr.width / 2, cy: rr.top + rr.height / 2, dupe, required, filledUpTo };
+    // Preview fill: a specific box fills boxes 0..that one; the row fills every box.
+    return { id, cx: rr.left + rr.width / 2, cy: rr.top + rr.height / 2, dupe, required, fillUpTo: filledUpTo ?? Infinity };
   }
 
-  // Safety net: if the popover unmounts mid-drag, drop the global drag styling we set on <body>.
-  useEffect(
-    () => () => {
-      document.body.classList.remove("whip-dragging");
-      document.body.style.removeProperty("--whip-color");
-    },
-    [],
-  );
-
-  // After Effects–style pick-whip: press the handle and drag a line onto a task row anywhere on the
-  // board (rows carry data-task-id). We hit-test with elementFromPoint in *screen* coordinates, so
-  // canvas zoom/pan need no correction, and add the task on release.
-  function startWhip(e: React.PointerEvent) {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    const r = e.currentTarget.getBoundingClientRect();
-    const sx = r.left + r.width / 2;
-    const sy = r.top + r.height / 2;
-    document.body.classList.add("whip-dragging");
-    document.body.style.setProperty("--whip-color", WHIP_COLOR);
-    setWhip({ sx, sy, x: e.clientX, y: e.clientY, target: null });
-
-    const clearHighlight = () => {
-      const r = hoverRowRef.current;
-      r?.classList.remove("whip-target", "whip-target-dupe");
-      r?.querySelectorAll<HTMLElement>(".whip-box-fill").forEach((el) => el.classList.remove("whip-box-fill"));
-    };
-
-    const move = (ev: PointerEvent) => {
-      const target = resolveTarget(ev.clientX, ev.clientY);
-      const row = target ? document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>("[data-task-id]") ?? null : null;
-      if (row !== hoverRowRef.current) {
-        clearHighlight();
-        hoverRowRef.current = row;
-      }
-      if (row && target) {
-        row.classList.add("whip-target");
-        row.classList.toggle("whip-target-dupe", target.dupe);
-        // Preview fill: specific box hover fills boxes 0..filledUpTo; row hover fills everything.
-        const upTo = target.filledUpTo ?? Infinity;
-        row.querySelectorAll<HTMLElement>("[data-box-index]").forEach((dot) => {
-          dot.classList.toggle("whip-box-fill", Number(dot.dataset.boxIndex) <= upTo);
-        });
-        const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]');
-        checkbox?.classList.add("whip-box-fill");
-      }
-      setWhip((w) => (w ? { ...w, x: ev.clientX, y: ev.clientY, target } : w));
-    };
-
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      clearHighlight();
-      hoverRowRef.current = null;
-      document.body.classList.remove("whip-dragging");
-      document.body.style.removeProperty("--whip-color");
-      const target = resolveTarget(ev.clientX, ev.clientY);
-      // Drop upserts: re-dropping a linked task updates its required amount rather than duplicating it.
-      if (target) {
-        const { id, required } = target;
-        setConditions((prev) =>
-          prev.some((c) => c.taskId === id)
-            ? prev.map((c) => (c.taskId === id ? { taskId: id, required } : c))
-            : [...prev, { taskId: id, required }],
-        );
-        setErrors((p) => ({ ...p, conditions: undefined }));
-      }
-      setWhip(null);
-    };
-
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  }
+  // Link a task by pick-whipping its row. A drop upserts: re-dropping a linked task updates its
+  // required amount rather than duplicating it.
+  const whip = usePickWhip(resolveTarget, ({ id, required }) => {
+    setConditions((prev) =>
+      prev.some((c) => c.taskId === id)
+        ? prev.map((c) => (c.taskId === id ? { taskId: id, required } : c))
+        : [...prev, { taskId: id, required }],
+    );
+    setErrors((p) => ({ ...p, conditions: undefined }));
+  });
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -325,15 +243,11 @@ function StreakForm({ allTasks, accentColor, initial, submitLabel, onSubmit, onC
 
           <button
             type="button"
-            className={`whip-handle${whip ? " dragging" : ""}`}
-            onPointerDown={startWhip}
+            className={`whip-handle${whip.dragging ? " dragging" : ""}`}
+            onPointerDown={whip.start}
             title="Drag onto a task on your board to link it"
           >
-            <svg className="whip-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-              <circle cx="6" cy="6" r="4" fill="none" stroke="currentColor" strokeWidth="1.4" />
-              <circle cx="6" cy="6" r="1.4" fill="currentColor" />
-              <path d="M9 9 L14 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-            </svg>
+            <PickWhipIcon />
             <span>{conditions.length ? "Drag to link another task" : "Drag onto a task to link it"}</span>
           </button>
           {errors.conditions && <span className="field-error">{errors.conditions}</span>}
@@ -347,33 +261,8 @@ function StreakForm({ allTasks, accentColor, initial, submitLabel, onSubmit, onC
         <button type="submit">{submitLabel}</button>
       </div>
 
-      {whip &&
-        createPortal(
-          <svg className="whip-overlay" aria-hidden="true">
-            <WhipLine whip={whip} />
-          </svg>,
-          document.body,
-        )}
+      {whip.overlay}
     </form>
-  );
-}
-
-// The drawn line, extracted so the path math reads cleanly. Ends on the hovered row's checkbox when
-// there is one (a magnetic snap), otherwise at the raw pointer.
-function WhipLine({ whip }: { whip: WhipState }) {
-  const ex = whip.target ? whip.target.cx : whip.x;
-  const ey = whip.target ? whip.target.cy : whip.y;
-  const dx = ex - whip.sx;
-  const path = `M ${whip.sx} ${whip.sy} C ${whip.sx + dx * 0.4} ${whip.sy}, ${whip.sx + dx * 0.6} ${ey}, ${ex} ${ey}`;
-  const dupe = whip.target?.dupe ?? false;
-  const stroke = dupe ? "#f59e0b" : WHIP_COLOR;
-  return (
-    <>
-      <path d={path} fill="none" stroke={stroke} strokeWidth={8} strokeLinecap="round" opacity={0.18} />
-      <path d={path} fill="none" stroke={stroke} strokeWidth={2} strokeLinecap="round" />
-      <circle cx={ex} cy={ey} r={whip.target ? 6 : 4} fill={stroke} />
-      {whip.target && <circle cx={ex} cy={ey} r={10} fill="none" stroke={stroke} strokeWidth={1.5} opacity={0.5} />}
-    </>
   );
 }
 

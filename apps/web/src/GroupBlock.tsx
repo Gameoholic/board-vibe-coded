@@ -1,6 +1,7 @@
 import { Reorder, useDragControls } from "framer-motion";
 import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import type { MenuPoint } from "./ActionMenu";
 import ConfirmPopover from "./ConfirmPopover";
 import { UngroupIcon } from "./Icons";
 import type { RowContext } from "./ItemRow";
@@ -19,6 +20,13 @@ interface GroupBlockProps<T extends ListItem> {
   onUngroup: (groupId: string) => void;
   // Called when a member is dragged out of the group's bounds. `direction` says which side.
   onEjectItem: (itemId: string, direction: "above" | "below") => void;
+  // A drag starts: what it moves — one member, or (by the header's handle) the whole block.
+  onDragStart: (itemIds: string[]) => void;
+  // A member dragged out of the list altogether, onto another list of the tab (see ItemList's
+  // DropOutside): what letting go there would do (null ≡ nothing), and doing it — instead of an eject,
+  // so the member keeps its group wherever it goes.
+  outsideLabel?: (itemId: string, x: number, y: number) => string | null;
+  onDropOutside?: (itemId: string, at: MenuPoint) => void;
 }
 
 // A labeled bundle of contiguous items, drawn as a left rail spanning them with a header (the label).
@@ -35,6 +43,9 @@ function GroupBlock<T extends ListItem>({
   onEditLabel,
   onUngroup,
   onEjectItem,
+  onDragStart,
+  outsideLabel,
+  onDropOutside,
 }: GroupBlockProps<T>) {
   const controls = useDragControls();
   // Tracks pending eject state during a drag — direction if outside bounds, null if inside.
@@ -49,16 +60,20 @@ function GroupBlock<T extends ListItem>({
   // forces React to update the DOM before framer can spring the item back.
   function handleDragHandleDown(itemId: string) {
     pendingEjectRef.current = null;
+    // This block, found from the dragged member (it's in the block for the whole drag) — not a page-wide
+    // lookup by group id, since one group can show in more than one list of a tab (its tasks split
+    // across Status bands).
+    const groupEl = document.querySelector(`[data-item-id="${itemId}"]`)?.closest(".group-block") ?? null;
 
     // Show/hide the floating hint label next to the cursor.
-    function showHint(y: number, x: number) {
+    function showHint(y: number, x: number, text: string) {
       if (!hintRef.current) {
         const el = document.createElement("div");
         el.className = "group-eject-hint";
-        el.textContent = "Leave group";
         document.body.appendChild(el);
         hintRef.current = el;
       }
+      hintRef.current.textContent = text;
       hintRef.current.style.top = `${y + 16}px`;
       hintRef.current.style.left = `${x + 16}px`;
       hintRef.current.style.opacity = "1";
@@ -70,27 +85,30 @@ function GroupBlock<T extends ListItem>({
     }
 
     function onMove(e: PointerEvent) {
-      const headerEl = document.querySelector(`[data-group-id="${group.id}"]`);
-      const groupEl = headerEl?.closest(".group-block") ?? headerEl;
       const rect = groupEl?.getBoundingClientRect();
       if (!rect) return;
-      if (e.clientY < rect.top - 12 || e.clientY > rect.bottom + 12) {
+      const outside = outsideLabel?.(itemId, e.clientX, e.clientY);
+      if (outside) {
+        // Off to another list: the member goes there and keeps its group, so it's no eject.
+        pendingEjectRef.current = null;
+        groupEl?.classList.remove("group-ejecting");
+        showHint(e.clientY, e.clientX, outside);
+      } else if (e.clientY < rect.top - 12 || e.clientY > rect.bottom + 12) {
         const dir = e.clientY < rect.top ? "above" : "below";
         pendingEjectRef.current = { itemId, direction: dir };
-        (groupEl as Element | null)?.classList.add("group-ejecting");
-        showHint(e.clientY, e.clientX);
+        groupEl?.classList.add("group-ejecting");
+        showHint(e.clientY, e.clientX, "Leave group");
       } else {
         if (pendingEjectRef.current?.itemId === itemId) pendingEjectRef.current = null;
-        (groupEl as Element | null)?.classList.remove("group-ejecting");
+        groupEl?.classList.remove("group-ejecting");
         hideHint();
       }
     }
 
-    function onUp() {
+    function onUp(e: PointerEvent) {
       window.removeEventListener("pointermove", onMove, { capture: true });
       window.removeEventListener("pointerup", onUp, { capture: true });
-      const _hEl = document.querySelector(`[data-group-id="${group.id}"]`);
-      (_hEl?.closest(".group-block") ?? _hEl)?.classList.remove("group-ejecting");
+      groupEl?.classList.remove("group-ejecting");
       hideHint();
       if (hintRef.current) {
         hintRef.current.remove();
@@ -98,7 +116,9 @@ function GroupBlock<T extends ListItem>({
       }
       const pending = pendingEjectRef.current;
       pendingEjectRef.current = null;
-      if (pending?.itemId === itemId) {
+      if (onDropOutside && outsideLabel?.(itemId, e.clientX, e.clientY)) {
+        flushSync(() => onDropOutside(itemId, { x: e.clientX, y: e.clientY }));
+      } else if (pending?.itemId === itemId) {
         flushSync(() => onEjectItem(itemId, pending.direction));
       }
     }
@@ -135,7 +155,11 @@ function GroupBlock<T extends ListItem>({
       <div className="group-header" data-group-id={group.id}>
         <span
           className={`drag-handle${draggable ? "" : " disabled"}`}
-          onPointerDown={(e) => draggable && controls.start(e)}
+          onPointerDown={(e) => {
+            if (!draggable) return;
+            onDragStart(items.map((it) => it.id));
+            controls.start(e);
+          }}
         >
           ⠿
         </span>
@@ -183,7 +207,16 @@ function GroupBlock<T extends ListItem>({
         onReorder={(ordered: T[]) => onReorderMembers(ordered.map((i) => i.id))}
         className="group-tasks"
       >
-        {items.map((item) => renderItem(item, { draggable, noun, onDragHandleDown: () => handleDragHandleDown(item.id) }))}
+        {items.map((item) =>
+          renderItem(item, {
+            draggable,
+            noun,
+            onDragHandleDown: () => {
+              onDragStart([item.id]);
+              handleDragHandleDown(item.id);
+            },
+          }),
+        )}
       </Reorder.Group>
     </Reorder.Item>
   );

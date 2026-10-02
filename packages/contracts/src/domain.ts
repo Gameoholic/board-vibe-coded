@@ -16,6 +16,8 @@ const DESCRIPTION_MAX = 1000;
 // A task's box count / a streak requirement is bounded so a hostile body can't ask for a
 // million boxes. Generous for a personal board.
 const QTY_MAX = 100;
+// Why a blocked task is waiting ("the insurance letter") — a short note, not prose.
+const BLOCK_NOTE_MAX = 200;
 
 // A task's type. "checkbox" is the general case — a row of `count` boxes (default 1, i.e. a plain
 // checkbox), each worth `points`; "tiered" is a pick-one ladder; "repeatable" is a single box that
@@ -51,6 +53,21 @@ export type TierDef = z.infer<typeof TierDef>;
 export const HexColor = z
   .string()
   .regex(/^#[0-9a-fA-F]{6}$/, "color must be a hex string like #6366f1");
+
+// Where a task stands in its tab's Status bands: being worked on, waiting its turn (the default — a
+// task that never had a status is in the backlog), or stuck on something. Organisation only: it never
+// touches points, order or progress. The words the owner sees are display labels, not these ids.
+export const TaskStatus = z.enum(["in-progress", "backlog", "blocked"]);
+export type TaskStatus = z.infer<typeof TaskStatus>;
+
+// Why a task is blocked: a short note, the task it's waiting on (which releases it once done), or both.
+// `resume` is the status it goes back to when that task is done — where it was before it was blocked.
+export const TaskBlocker = z.object({
+  note: z.string().max(BLOCK_NOTE_MAX).optional(),
+  taskId: z.string().optional(),
+  resume: TaskStatus.exclude(["blocked"]),
+});
+export type TaskBlocker = z.infer<typeof TaskBlocker>;
 
 export const Timer = z.object({
   elapsedMs: z.number().nonnegative(),
@@ -123,6 +140,22 @@ export const Task = z.object({
   // (see isBoxLocked). Absent ≡ no box is scheduled.
   schedule: TaskSchedule.optional(),
   timer: Timer.optional(),
+  // Pruned: skipped until its tab's current day/week rolls over, and hidden from the list until then.
+  // Server-derived on read (never stored on the task) — absent ≡ not pruned.
+  pruned: z.boolean().optional(),
+  // Its Status band (absent ≡ backlog), when it last changed band, and — only while blocked — why.
+  status: TaskStatus.optional(),
+  statusSince: z.string().optional(),
+  blocker: TaskBlocker.optional(),
+  // A piece of a broken-down task: the task it sits inside (one level deep — a piece never has pieces).
+  // Pieces aren't items of their tab's list; they're listed under their task, in its own order.
+  parentId: z.string().optional(),
+  // This week's Bounty, while it's on this task: its multiplier and the week it was rolled for. Derived
+  // on read (it ends with that week) — absent ≡ not the Bounty.
+  bounty: z.object({ multiplier: z.number(), periodKey: z.string() }).optional(),
+  // The factor its current completion was paid at (a Bounty's ×2), frozen on its TaskCompleted so the
+  // Bounty ending later never re-prices it. Absent ≡ ×1.
+  boost: z.number().optional(),
   // Data-silo timestamps, server-authored. Additive — the UI may ignore them.
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -292,4 +325,4 @@ export const Shop = z.object({
 });
 export type Shop = z.infer<typeof Shop>;
 
-export { TEXT_MAX, ESTIMATE_MAX, MINUTES_MAX, DESCRIPTION_MAX, LABEL_MAX, QTY_MAX, EMOJI_MAX };
+export { TEXT_MAX, ESTIMATE_MAX, MINUTES_MAX, DESCRIPTION_MAX, LABEL_MAX, QTY_MAX, EMOJI_MAX, BLOCK_NOTE_MAX };

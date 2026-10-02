@@ -4,6 +4,8 @@ A personal productivity board replacing a physical whiteboard — daily/weekly c
 
 **This file is the one thing that survives when the owner clears their chat, so it stays a thin index — the real content lives in `docs/`.** Read the docs before touching anything. Keep them current: when the design genuinely changes, update the relevant doc in the same breath rather than letting it drift stale.
 
+**Read [docs/CONVENTIONS.md](docs/CONVENTIONS.md) at the start of every task — every prompt, not once per session.** It's how code is written here and how we work together (the build/verify/report cycle, reuse rules, the event-log rules), and it's not optional: work that ignores it gets redone. Then read whichever of the docs below the task touches.
+
 ## The one rule above all others
 
 **Never hardcode the owner's board** — no task named in code, no `if (task.name === …)`. Everything the owner sees is data over generic primitives, editable through the UI. Full rationale in `docs/CONVENTIONS.md`.
@@ -15,9 +17,16 @@ A personal productivity board replacing a physical whiteboard — daily/weekly c
 | **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | How it's built + why it's shaped that way | System structure, data/history model, API surface, component maps, state flow, security architecture, dev gotchas, hard-won implementation traps | Code style, product rationale, unbuilt features |
 | **[docs/CONVENTIONS.md](docs/CONVENTIONS.md)** | How we write code & work together | Code style, prime directives, reuse rules, dependency & security coding rules, the working process | System structure, product rationale, future features |
 | **[docs/PRODUCT.md](docs/PRODUCT.md)** | Why it exists, who it's for, how it must feel | Owner goals & pain points, product principles, current features from the user's view, design language, deliberate scope decisions | How things are implemented, code style, unbuilt ideas |
-| **[docs/BACKLOG.md](docs/BACKLOG.md)** | What's not built yet | Deferred features (with a pointer to the reasoning), known next steps, loose ideas | Anything already built; and nothing here is approved to build |
+| **[docs/BACKLOG.md](docs/BACKLOG.md)** | What's not built yet | Deferred features (with a pointer to the reasoning), known next steps, loose ideas | Anything already built; and nothing here is approved to build — except its "Next up" build order |
+| **[docs/period-close-implementation.md](docs/period-close-implementation.md)** | History: the plan the day/week close was built from (its "nothing is built" status is from then) | Nothing — it's a record | Anything; where it disagrees with ARCHITECTURE or PRODUCT, those win |
+
+Every file in `docs/` has a row here; a new doc gets one.
 
 `ARCHITECTURE.md` is meant to be edited freely as the design evolves — keep it honest about what exists vs. what's intended.
+
+**Celebration moments get the full game-feel treatment** (the owner's standing preference) — a reveal, a win, a recap, anything "extra" or cool: build-up, a landing with weight, a payoff. The Weekly Bounty reel is the reference. Details in `docs/PRODUCT.md` → "Design language".
+
+**Active work:** the owner-approved Tasks rethink — the build order is `docs/BACKLOG.md` → "Next up"; the one-feature-at-a-time build/verify/report cycle is `docs/CONVENTIONS.md` → "How we work together"; how to verify safely is `docs/ARCHITECTURE.md` → "Verifying in an isolated instance".
 
 ## History note
 
@@ -25,4 +34,4 @@ There was a much larger earlier attempt at this same product. Its durable reason
 
 ## Stack (one line — details in `docs/ARCHITECTURE.md`)
 
-pnpm monorepo: `apps/web` (React 19 + TS + Vite + framer-motion), `apps/api` (Express + TS, in-memory today). `pnpm install && pnpm dev` runs both; web on http://localhost:5173.
+pnpm monorepo: `apps/web` (React 19 + TS + Vite + framer-motion), `apps/api` (Express + TS, SQLite append-only event log). `pnpm install && pnpm dev` runs both; web on http://localhost:5173.

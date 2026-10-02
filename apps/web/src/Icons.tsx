@@ -153,6 +153,18 @@ export function ArrowDownIcon({ size = 14 }: IconProps) {
   );
 }
 
+// Reroll: two arrows chasing round.
+export function RerollIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M13 6.5A5 5 0 0 0 4 4.2L2.8 5.4" />
+      <path d="M2.8 2.6v2.8h2.8" />
+      <path d="M3 9.5a5 5 0 0 0 9 2.3l1.2-1.2" />
+      <path d="M13.2 13.4v-2.8h-2.8" />
+    </svg>
+  );
+}
+
 export function CircleIcon({ size = 14 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
@@ -185,6 +197,27 @@ export function PencilIcon({ size = 14 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
       <path d="M11.5 2.5 13.5 4.5 5.5 12.5 3 13l.5-2.5 8-8Z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// Two stacked sheets — "Duplicate" in a row's actions menu.
+export function CopyIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M10.5 3.5v-.5A1 1 0 0 0 9.5 2H3.5A1.5 1.5 0 0 0 2 3.5v6a1 1 0 0 0 1 1h.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// Scissors — "Prune": snip a daily/weekly task out of this cycle (its menu action and Display toggle).
+export function ScissorsIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <circle cx="4" cy="4.5" r="2" stroke="currentColor" strokeWidth="1.2" />
+      <circle cx="4" cy="11.5" r="2" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M5.7 5.6 13.5 12.5M5.7 10.4 13.5 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
     </svg>
   );
 }
@@ -250,6 +283,63 @@ export function PlusIcon({ size = 14 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
       <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// A reticle with a lead — the pick-whip handle (drag a line onto a task to link it).
+export function PickWhipIcon({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="6" cy="6" r="4" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="6" cy="6" r="1.4" fill="currentColor" />
+      <path d="M9 9 L14 14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// The three Status bands: a half-filled circle (under way), a dashed one (not started), a barred one
+// (can't go on). Also the Status Display toggle's icon (the half circle).
+export function InProgressIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M8 4.5a3.5 3.5 0 0 1 0 7Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function BacklogIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.3" strokeDasharray="2.2 1.9" />
+    </svg>
+  );
+}
+
+export function BlockedIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M4.2 11.8 11.8 4.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// A line with pieces hanging off it — "Break down": split a task into the pieces inside it.
+export function BreakDownIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <path d="M2.5 3.5h11M4.5 3.5V12M4.5 7.5h2.5M4.5 12h2.5M9.5 7.5h4M9.5 12h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// Outdent — "Make it its own task": a piece steps out of its task into the list.
+export function OutdentIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <path d="M7 4h6.5M7 8h6.5M7 12h6.5M4.5 5.5 2.5 8l2 2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

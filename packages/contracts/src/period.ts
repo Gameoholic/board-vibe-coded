@@ -52,6 +52,27 @@ export function windDownLeadMinutes(wd: WindDown): number {
   return wd.displayTriggers.reduce((mx, t) => (t.kind === "before" ? Math.max(mx, t.minutes) : mx), 0);
 }
 
+// The weekly Bounty's knobs (Settings → Bounty): whether week closes roll Bounties at all, how many may
+// be on at once, what one multiplies a task's points by, the free rerolls each week brings (bought ones
+// come on top — see BountyRerollsGranted), and whether winning one rolls another in its place.
+export const BountySettings = z.object({
+  enabled: z.boolean().default(true),
+  max: z.number().int().min(1).max(5).default(1),
+  multiplier: z.number().min(1).max(10).default(2),
+  rerolls: z.number().int().min(0).max(10).default(1),
+  rollOnWin: z.boolean().default(false),
+});
+export type BountySettings = z.infer<typeof BountySettings>;
+
+// The rolling database snapshots' knobs (Settings → Backups; see apps/api/src/backup.ts): whether they're
+// taken on their own, how often, and how many are kept — the oldest is dropped to make room.
+export const BackupSettings = z.object({
+  enabled: z.boolean().default(true),
+  everyHours: z.number().int().min(1).max(24 * 30).default(48),
+  keep: z.number().int().min(1).max(20).default(5),
+});
+export type BackupSettings = z.infer<typeof BackupSettings>;
+
 export const Settings = z.object({
   timeZone: z.string().trim().min(1).default(DEFAULT_TIME_ZONE),
   // Minutes past local midnight at which a new *day* begins. Defaults to 00:01 (not 00:00) so the
@@ -70,6 +91,10 @@ export const Settings = z.object({
   // The time→% conversion formula (rate + effort presets) the points builder uses. Defaulted so a
   // board predating it parses unchanged with today's values (2.5%/hr, Normal ×1 / Challenging ×1.5).
   pointsFormula: PointsFormula,
+  // The weekly Bounty (see bounty.ts). Defaulted, so a board predating it parses unchanged.
+  bounty: BountySettings.default({}),
+  // Database backups. Defaulted to how they ran before they were settings (every 2 days, 5 kept).
+  backup: BackupSettings.default({}),
 });
 export type Settings = z.infer<typeof Settings>;
 export const DEFAULT_SETTINGS: Settings = Settings.parse({});

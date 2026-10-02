@@ -1,6 +1,7 @@
 import { type Request, Router } from "express";
 import {
   ApplyFormulaBody,
+  BreakDownBody,
   CreateGroupBody,
   CreateRewardBody,
   CreateShopSectionBody,
@@ -14,6 +15,7 @@ import {
   PatchShopSectionBody,
   PatchStreakBody,
   PatchTaskBody,
+  RerollBountyBody,
   RecolorSectionBody,
   ReorderBody,
   type RewardEditFields,
@@ -24,6 +26,7 @@ import {
   type Task,
   type TaskEditFields,
 } from "@board/contracts";
+import type { Backups } from "./backup.js";
 import { getDebugNow, setDebugNow } from "./clock.js";
 import type { BoardStore } from "./projection.js";
 import { initializeInfra } from "./seed.js";
@@ -37,7 +40,7 @@ function idemKey(req: Request, tag: string): string | null {
   return key && key.trim() ? `${key.trim()}:${tag}` : null;
 }
 
-export function buildRouter(store: BoardStore): Router {
+export function buildRouter(store: BoardStore, backups: Backups): Router {
   const router = Router();
 
   router.get("/sections", (_req, res) => {
@@ -98,8 +101,28 @@ export function buildRouter(store: BoardStore): Router {
     if (Object.keys(changes).length > 0) task = store.editTask(id, changes, idemKey(req, "edit"));
 
     if (body.timer !== undefined) task = store.setTimer(id, body.timer);
+    if (body.pruned !== undefined) task = store.setPruned(id, body.pruned, idemKey(req, "prune"));
+    if (body.status !== undefined) task = store.setStatus(id, body.status, body.blocker, idemKey(req, "status"));
+    if (body.parentId !== undefined) task = store.setParent(id, body.parentId, idemKey(req, "parent"));
 
     res.json(task ?? store.getTask(id));
+  });
+
+  // The row menu's "Duplicate": copy a task's definition into a new task placed right after it.
+  router.post("/tasks/:id/duplicate", (req, res) => {
+    res.status(201).json(store.duplicateTask(req.params.id, idemKey(req, "duplicate")));
+  });
+
+  // Break down: the pieces typed in one go, created inside the task. Returns the task, then its pieces.
+  router.post("/tasks/:id/pieces", (req, res) => {
+    const { texts } = BreakDownBody.parse(req.body);
+    res.status(201).json(store.breakDown(req.params.id, texts, idemKey(req, "break-down")));
+  });
+
+  // Reorder a task's pieces; `orderedIds` must be exactly its pieces (cf. /sections/:id/reorder).
+  router.patch("/tasks/:id/pieces/reorder", (req, res) => {
+    const { orderedIds } = ReorderBody.parse(req.body);
+    res.json(store.reorderPieces(req.params.id, orderedIds, idemKey(req, "pieces-reorder")));
   });
 
   router.delete("/tasks/:id", (req, res) => {
@@ -238,7 +261,10 @@ export function buildRouter(store: BoardStore): Router {
 
   router.patch("/settings", (req, res) => {
     const body = PatchSettingsBody.parse(req.body);
-    res.json(store.patchSettings(body, idemKey(req, "settings")));
+    const settings = store.patchSettings(body, idemKey(req, "settings"));
+    // A new pace or a switch back on can make one due now.
+    if (body.backup) backups.check();
+    res.json(settings);
   });
 
   // Dry-run a points-formula change: which builder values move (old→new) and how many stay put.
@@ -259,10 +285,34 @@ export function buildRouter(store: BoardStore): Router {
     res.json(store.periodStatus());
   });
 
-  // Confirm a period rolled over: close the open one (freezing a snapshot) and open the current one.
+  // Confirm a period rolled over: close the open one (freezing a snapshot) and open the current one. Ending
+  // a day ends its week too once that is over (the week's recap comes back as `week`).
   router.post("/periods/roll", (req, res) => {
     const { kind } = RollPeriodBody.parse(req.body);
     res.json(store.rollPeriod(kind));
+  });
+
+  // The open week's Bounties still to win, and the rerolls left.
+  router.get("/bounty", (_req, res) => {
+    res.json(store.bountyStatus());
+  });
+
+  // Reroll one of this week's Bounties onto another task (while rerolls are left). Returns the new one.
+  router.post("/bounty/reroll", (req, res) => {
+    const { taskId } = RerollBountyBody.parse(req.body);
+    res.json(store.rerollBounty(taskId, idemKey(req, "bounty-reroll")));
+  });
+
+  // ---- backups ----
+
+  // The saved backups, newest first, and when the next one falls due.
+  router.get("/backups", (_req, res) => {
+    res.json(backups.list());
+  });
+
+  // One backup's board as it was saved — to look at, never to change.
+  router.get("/backups/:name", (req, res) => {
+    res.json(backups.preview(req.params.name));
   });
 
   // ---- debug clock ----

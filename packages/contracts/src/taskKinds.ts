@@ -1,4 +1,5 @@
-import type { Task, TaskType } from "./domain.js";
+import type { Section, Task, TaskType } from "./domain.js";
+import { boosted } from "./points.js";
 
 // One behaviour per task type, so no consumer ever branches on `task.type` itself — they read
 // through `behaviorOf(task)`. Adding a task type means adding one entry to TASK_BEHAVIORS; the row
@@ -44,6 +45,12 @@ export interface TaskBehavior {
   /** Whether a finished task leaves its list (one-time tasks: done means gone). It stays in the
    *  board's state — still done, still worth its points — it just isn't listed any more. */
   readonly retiresWhenDone: boolean;
+  /** Whether a task of this type can be pruned — skipped until its tab's next day/week. The other half
+   *  of the rule is the tab: it must recur (see canPrune). */
+  readonly prunable: boolean;
+  /** Whether a task of this type can be broken down into pieces (see pieces.ts). Its pieces are tasks of
+   *  the same type, so a type that breaks down is also one a piece can be. */
+  readonly breaksDown: boolean;
 }
 
 // count>1 ⇒ a row of `progress`-driven boxes; count≤1 ⇒ a plain `done` checkbox. `filled` reads
@@ -69,6 +76,8 @@ const checkbox: TaskBehavior = {
   unbounded: false,
   supportsTimer: false,
   retiresWhenDone: false,
+  prunable: true,
+  breaksDown: false,
 };
 
 const tiered: TaskBehavior = {
@@ -86,6 +95,8 @@ const tiered: TaskBehavior = {
   unbounded: false,
   supportsTimer: true,
   retiresWhenDone: false,
+  prunable: false,
+  breaksDown: false,
 };
 
 // A single box you tick again and again — the whiteboard tally. Its completion count lives in
@@ -107,13 +118,16 @@ const repeatable: TaskBehavior = {
   unbounded: true,
   supportsTimer: false,
   retiresWhenDone: false,
+  prunable: false,
+  breaksDown: false,
 };
 
 // A single "do it once" checkbox — the Tasks tab's kind: check it and it's gone. Scores exactly like
 // a 1-box checkbox (same native toggle); it differs in two ways: no box count or scheduled times
 // (`supportsQuantity: false` — neither means anything for a one-off), and a finished one leaves its
-// list (`retiresWhenDone`) instead of sitting there hatched like a daily task waiting for tomorrow.
-const once: TaskBehavior = { ...checkbox, supportsQuantity: false, retiresWhenDone: true };
+// list (`retiresWhenDone`) instead of sitting there hatched like a daily task waiting for tomorrow. A
+// one-off that turns out bigger than it looked can be broken down into pieces (`breaksDown`).
+const once: TaskBehavior = { ...checkbox, supportsQuantity: false, retiresWhenDone: true, prunable: false, breaksDown: true };
 
 const TASK_BEHAVIORS: Record<TaskType, TaskBehavior> = { checkbox, tiered, repeatable, once };
 
@@ -127,13 +141,20 @@ export function isRetired(task: Task): boolean {
   return b.retiresWhenDone && b.isDone(task);
 }
 
+/** Whether a task can be pruned where it lives: a prunable type in a tab that recurs (a `period`), so
+ *  there's a next day/week for it to come back in. The one rule — server and client both read it. */
+export function canPrune(task: Task, section: Pick<Section, "period">): boolean {
+  return behaviorOf(task).prunable && section.period != null;
+}
+
 /** A type's behaviour before any task of it exists — for config-level questions (what a tab offers). */
 export function behaviorOfType(type: TaskType): TaskBehavior {
   return TASK_BEHAVIORS[type];
 }
 
-/** Live point contribution of a task to the running total. */
+/** Live point contribution of a task to the running total — at the factor its completion was paid at
+ *  (`boost`, frozen when it was ticked: a Bounty's ×2 stays after the Bounty ends). */
 export function taskPointValue(task: Task): number {
   const b = behaviorOf(task);
-  return b.valueAt(task, b.filled(task));
+  return boosted(b.valueAt(task, b.filled(task)), task.boost ?? 1);
 }

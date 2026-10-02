@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import BoardCanvas from "./BoardCanvas";
 import CanvasToolbar from "./CanvasToolbar";
 import type { CardFrame } from "./CanvasCard";
-import { defaultLayout, MARGIN } from "./canvas";
+import { MARGIN, placeCards } from "./canvas";
 import type { CanvasSettings, CardLayout } from "./useLocalConfig";
 
 // The shared base of every canvas (the board, the shop): a pannable/zoomable world of freely-placed
@@ -39,13 +39,7 @@ function CardCanvas<T extends { id: string }>({
   // Each card's free-canvas placement: its saved layout, or a tidy default derived from order for
   // cards never moved yet. The world is just their bounding box plus a margin of slack — that's the
   // whole pannable area, so it grows only when a card is dropped further out.
-  const placed = useMemo(() => {
-    const map: Record<string, CardLayout> = {};
-    cards.forEach((c, i) => {
-      map[c.id] = layouts[c.id] ?? defaultLayout(i, cards.length, topInset);
-    });
-    return map;
-  }, [cards, layouts, topInset]);
+  const placed = useMemo(() => placeCards(cards, layouts, topInset), [cards, layouts, topInset]);
 
   const world = useMemo(() => {
     let w = 0;

@@ -65,6 +65,8 @@ export interface Flyer {
   taskId: string;
   amount: number;
   percents: number[];
+  // It finishes a broken-down task: celebrated as the whole task (see tierFor).
+  finale?: boolean;
   from: { x: number; y: number; width: number; height: number };
   to: Point;
 }
@@ -184,7 +186,7 @@ interface FlyerItemProps {
 // One flyer. Split out of the map purely because the wind-up needs per-flyer phase state, which a
 // .map() body can't hold.
 function FlyerItem({ flyer, getTarget, onLand }: FlyerItemProps) {
-  const tier = useMemo(() => tierFor(flyer.amount), [flyer.amount]);
+  const tier = useMemo(() => tierFor(flyer.amount, flyer.finale), [flyer.amount, flyer.finale]);
   const charged = tier.windup.duration > 0;
   const [charging, setCharging] = useState(charged);
   const [target, setTarget] = useState<Point>(flyer.to);

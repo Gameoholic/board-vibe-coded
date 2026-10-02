@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { FlameIcon } from "./Icons";
 import ItemRow, { RowRemove, type RowContext } from "./ItemRow";
+import { deleteAction, editAction } from "./rowActions";
 import Popover from "./Popover";
 import StreakForm, { type StreakPayload } from "./StreakForm";
 import { useClickOutside } from "./useClickOutside";
@@ -19,6 +20,7 @@ interface StreakItemProps {
 
 function StreakItem({ streak, allTasks, sectionColor, row, onEdit, onRemove }: StreakItemProps) {
   const [editOpen, setEditOpen] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const editRef = useRef<HTMLDivElement>(null);
   useClickOutside(editRef, () => setEditOpen(false), editOpen);
 
@@ -33,7 +35,7 @@ function StreakItem({ streak, allTasks, sectionColor, row, onEdit, onRemove }: S
       id={streak.id}
       row={row}
       className="streak-item"
-      onContextMenu={(e) => { e.preventDefault(); setEditOpen((v) => !v); }}
+      actions={[[editAction(() => setEditOpen(true))], [deleteAction(() => setRemoving(true))]]}
     >
       <span className={`streak-flame ${flameState}`} style={{ "--streak-color": sectionColor } as React.CSSProperties}>
         <FlameIcon size={16} />
@@ -56,7 +58,13 @@ function StreakItem({ streak, allTasks, sectionColor, row, onEdit, onRemove }: S
         <span className="streak-name">{streak.name}</span>
       </div>
 
-      <RowRemove label="Remove streak" message="Delete this streak?" onConfirm={() => onRemove(streak.id)} />
+      <RowRemove
+        label="Remove streak"
+        message="Delete this streak?"
+        confirming={removing}
+        onConfirmingChange={setRemoving}
+        onConfirm={() => onRemove(streak.id)}
+      />
 
       {/* Zero-size, right-edge-anchored like every other row's edit popover (row-edit-anchor) so it
           doesn't take a subgrid column of its own. */}

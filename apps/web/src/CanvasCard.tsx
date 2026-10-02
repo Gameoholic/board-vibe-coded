@@ -216,13 +216,16 @@ export function CardTitle({
   );
 }
 
-// The hover-revealed "+" at the foot of a tab that opens its add form. The form (usually a Popover)
-// is the tab kind's, rendered with the open state and a close callback.
+// The "+" at the foot of a tab that opens its add form: always shown, or hidden until the pointer is on
+// its row (the tab's Display option — see addButtonOption). The form (usually a Popover) is the tab
+// kind's, rendered with the open state and a close callback.
 export function CardAdd({
   label,
+  shown = false,
   children,
 }: {
   label: string;
+  shown?: boolean;
   children: (open: boolean, close: () => void) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -230,7 +233,7 @@ export function CardAdd({
   const close = () => setOpen(false);
   useClickOutside(ref, close, open);
   return (
-    <div className={`popover-anchor add-item-anchor${open ? " add-open" : ""}`} ref={ref}>
+    <div className={`popover-anchor add-item-anchor${open ? " add-open" : ""}${shown ? " shown" : ""}`} ref={ref}>
       <button type="button" className="add-item-fab" aria-label={label} onClick={() => setOpen((v) => !v)}>
         +
       </button>

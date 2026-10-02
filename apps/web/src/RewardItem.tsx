@@ -1,6 +1,7 @@
 import { formatPercent, POINTS_PER_PERCENT } from "@board/contracts";
 import { useRef, useState } from "react";
 import ItemRow, { RowRemove, type RowContext } from "./ItemRow";
+import { deleteAction, editAction } from "./rowActions";
 import Popover from "./Popover";
 import type { Reward } from "./types";
 import { useClickOutside } from "./useClickOutside";
@@ -8,8 +9,8 @@ import type { RewardInput } from "./useShop";
 
 // One reward in a shop tab, on the shared row base (ItemRow — move/group handles, reorder, grouping).
 // Its cells sit in the same four list columns a task row uses — [emoji] [price] [name] [remove] —
-// and it edits the same way (right-click opens the edit popover), so shop rows read and behave like
-// board rows. The price tag is the buy button, in the tab's colour (a task's checkbox counterpart).
+// and right-click opens the same actions menu (Edit, Delete), so shop rows read and behave like board
+// rows. The price tag is the buy button, in the tab's colour (a task's checkbox counterpart).
 
 interface RewardItemProps {
   reward: Reward;
@@ -25,6 +26,7 @@ interface RewardItemProps {
 
 function RewardItem({ reward, color, row, affordable, showNote, showBought, onBuy, onEdit, onRemove }: RewardItemProps) {
   const [editOpen, setEditOpen] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const editRef = useRef<HTMLDivElement>(null);
   useClickOutside(editRef, () => setEditOpen(false), editOpen);
 
@@ -34,10 +36,7 @@ function RewardItem({ reward, color, row, affordable, showNote, showBought, onBu
       id={reward.id}
       row={row}
       className="reward-item"
-      onContextMenu={(e) => {
-        e.preventDefault();
-        setEditOpen((v) => !v);
-      }}
+      actions={[[editAction(() => setEditOpen(true))], [deleteAction(() => setRemoving(true))]]}
     >
       <span className="reward-emoji" aria-hidden="true">
         {reward.emoji}
@@ -59,7 +58,13 @@ function RewardItem({ reward, color, row, affordable, showNote, showBought, onBu
         </span>
         {showNote && reward.note && <span className="reward-note">{reward.note}</span>}
       </div>
-      <RowRemove label="Remove reward" message={`Remove "${reward.name}"?`} onConfirm={onRemove} />
+      <RowRemove
+        label="Remove reward"
+        message={`Remove "${reward.name}"?`}
+        confirming={removing}
+        onConfirmingChange={setRemoving}
+        onConfirm={onRemove}
+      />
       <div className="popover-anchor row-edit-anchor" ref={editRef}>
         <Popover title="Edit reward" open={editOpen} onClose={() => setEditOpen(false)} align="right" width={280}>
           <RewardForm

@@ -6,6 +6,7 @@ import { ArrowDownIcon, ArrowUpIcon, BagIcon, CircleCheckIcon, FlameIcon, Pencil
 import ItemList from "./ItemList";
 import Popover from "./Popover";
 import RewardItem, { RewardForm } from "./RewardItem";
+import { ADD_BUTTON_KEY, addButtonOption } from "./displayOptions";
 import { DisplayMenu, SortMenu, tabView, type DisplayOption, type SortOption } from "./TabControls";
 import type { Group, Reward, ShopSection } from "./types";
 import type { TabPrefs } from "./useLocalConfig";
@@ -27,10 +28,11 @@ const REWARD_SORT_OPTIONS: SortOption[] = [
 ];
 
 // A reward row's optional extras (the Display menu). Both on by default — unlike a task's, they're
-// the reward's own details rather than add-on tooling.
+// the reward's own details rather than add-on tooling. The "+" is hidden until wanted, as on most tabs.
 const REWARD_DISPLAY: DisplayOption[] = [
   { key: "note", label: "Note", icon: PencilIcon, defaultOn: true },
   { key: "bought", label: "Times bought", icon: BagIcon, defaultOn: true },
+  addButtonOption("reward"),
 ];
 
 // Whether a reward can be bought right now. Mirrors the server's own check, only to disable the
@@ -87,6 +89,7 @@ function ShopSectionCard({
   onRemoveGroup,
 }: ShopSectionCardProps) {
   const view = tabView(prefs, onPrefsChange, REWARD_DISPLAY);
+  const showAddButton = view.shown(ADD_BUTTON_KEY);
   const sortMode = view.sortMode;
   const canBuy = (r: Reward) => affordable(r, points, closed);
 
@@ -125,7 +128,7 @@ function ShopSectionCard({
         </>
       }
       footer={
-        <CardAdd label="Add reward">
+        <CardAdd label="Add reward" shown={showAddButton}>
           {(open, close) => (
             <Popover title="Add reward" open={open} onClose={close} align="left" width={280}>
               <RewardForm

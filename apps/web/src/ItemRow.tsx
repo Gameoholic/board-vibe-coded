@@ -1,5 +1,6 @@
 import { Reorder, useDragControls } from "framer-motion";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import ActionMenu, { type MenuPoint, type RowAction } from "./ActionMenu";
 import ConfirmPopover from "./ConfirmPopover";
 import { GroupBracketIcon, TrashIcon } from "./Icons";
 
@@ -42,28 +43,109 @@ interface ItemRowProps<T> {
   // Extra DOM attributes a row kind needs for its own features (e.g. a task row's data-task-id, which
   // the streak pick-whip hit-tests). List mechanics use data-item-id, set here for every kind.
   attrs?: Record<string, string>;
-  onContextMenu?: (e: React.MouseEvent) => void;
+  // What the row's actions menu offers (right-click, or long-press on touch), as groups with separators
+  // between them. By convention Edit comes first, so right-click → Enter edits.
+  actions: RowAction[][];
   // Seconds to hold the row in place before its exit animation plays — for a row leaving because it
   // was finished, so the finished state registers before it goes. Absent ≡ leave immediately.
   exitDelay?: number;
   children: React.ReactNode;
 }
 
-function ItemRow<T>({ value, id, row, className, attrs, onContextMenu, exitDelay, children }: ItemRowProps<T>) {
+// Where a right-click or a hold keeps its native meaning: inside the row's own forms (so a text field
+// still gets the browser's paste menu) and on text inputs such as the inline rename.
+const NATIVE_TARGETS = ".popover, .confirm-popover, textarea, input:not([type='checkbox'])";
+// A hold on a drag handle is the start of a drag, not a request for the menu.
+const NO_HOLD_TARGETS = `${NATIVE_TARGETS}, .drag-handle, .group-handle`;
+// A row can hold rows of its own (a broken-down task's pieces): a press on one of those is that row's.
+const fromNestedRow = (e: React.SyntheticEvent) => (e.target as Element).closest(".item-row") !== e.currentTarget;
+
+// How long (ms) a touch must hold still on a row to open its menu — the touch stand-in for right-click
+// (iOS never fires contextmenu), and how far (px) the finger may drift before it's a scroll instead.
+const HOLD_MS = 500;
+const HOLD_SLOP = 8;
+
+function useLongPress(onHold: (at: MenuPoint) => void) {
+  const press = useRef<{ timer: number; x: number; y: number } | null>(null);
+  // Set once a hold has opened the menu, until the next press: the lift that ends the hold would
+  // otherwise land as a click on whatever is under the finger (ticking a checkbox), and Android follows
+  // a hold with its own contextmenu event for a menu that's already open.
+  const held = useRef(false);
+  const cancel = useCallback(() => {
+    if (press.current) window.clearTimeout(press.current.timer);
+    press.current = null;
+  }, []);
+  useEffect(() => cancel, [cancel]);
+
+  const handlers = {
+    onPointerDown(e: React.PointerEvent) {
+      held.current = false;
+      cancel();
+      if (e.pointerType !== "touch" || (e.target as Element).closest(NO_HOLD_TARGETS) || fromNestedRow(e)) return;
+      const at = { x: e.clientX, y: e.clientY };
+      press.current = {
+        ...at,
+        timer: window.setTimeout(() => {
+          press.current = null;
+          held.current = true;
+          onHold(at);
+        }, HOLD_MS),
+      };
+    },
+    onPointerMove(e: React.PointerEvent) {
+      const p = press.current;
+      if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > HOLD_SLOP) cancel();
+    },
+    onPointerUp: cancel,
+    onPointerCancel: cancel,
+  };
+  return { handlers, held };
+}
+
+function ItemRow<T>({ value, id, row, className, attrs, actions, exitDelay, children }: ItemRowProps<T>) {
   const controls = useDragControls();
+  const rowRef = useRef<HTMLLIElement>(null);
+  const [menuAt, setMenuAt] = useState<MenuPoint | null>(null);
+  const closeMenu = useCallback(() => setMenuAt(null), []);
+  const { handlers: holdHandlers, held } = useLongPress(setMenuAt);
+
+  // Swallow the click that ends a hold. A native capture listener, not React's onClickCapture: React
+  // derives a checkbox's onChange from the same click, and only stopping the native event before it
+  // reaches React's root listener keeps the box from toggling.
+  useEffect(() => {
+    const el = rowRef.current;
+    if (!el) return;
+    function swallow(e: MouseEvent) {
+      if (!held.current) return;
+      held.current = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    el.addEventListener("click", swallow, true);
+    return () => el.removeEventListener("click", swallow, true);
+  }, [held]);
+
+  function onContextMenu(e: React.MouseEvent) {
+    if ((e.target as Element).closest(NATIVE_TARGETS) || fromNestedRow(e)) return;
+    e.preventDefault();
+    if (!held.current) setMenuAt({ x: e.clientX, y: e.clientY });
+  }
+
   const exit = exitDelay
     ? { ...itemMotionProps.exit, transition: { ...itemMotionProps.transition.default, delay: exitDelay } }
     : itemMotionProps.exit;
   return (
     <Reorder.Item
+      ref={rowRef}
       value={value}
       dragListener={false}
       dragControls={controls}
       as="li"
-      className={`item-row${className ? ` ${className}` : ""}`}
+      className={`item-row${className ? ` ${className}` : ""}${menuAt ? " menu-open" : ""}`}
       data-item-id={id}
       {...attrs}
       onContextMenu={onContextMenu}
+      {...holdHandlers}
       {...itemMotionProps}
       exit={exit}
     >
@@ -89,19 +171,28 @@ function ItemRow<T>({ value, id, row, className, attrs, onContextMenu, exitDelay
         </span>
       )}
       {children}
+      <ActionMenu at={menuAt} groups={actions} onClose={closeMenu} />
     </Reorder.Item>
   );
 }
 
-// The hover-revealed trash control at a row's end, confirmed before it fires.
-export function RowRemove({ label, message, onConfirm }: { label: string; message: string; onConfirm: () => void }) {
-  const [confirming, setConfirming] = useState(false);
+// The hover-revealed trash control at a row's end, confirmed before it fires. Its confirm is owned by
+// the row kind, because the menu's Delete opens this same confirm.
+interface RowRemoveProps {
+  label: string;
+  message: string;
+  confirming: boolean;
+  onConfirmingChange: (confirming: boolean) => void;
+  onConfirm: () => void;
+}
+
+export function RowRemove({ label, message, confirming, onConfirmingChange, onConfirm }: RowRemoveProps) {
   return (
     <div className="remove-wrap">
-      <button type="button" className="remove" aria-label={label} onClick={() => setConfirming(true)}>
+      <button type="button" className="remove" aria-label={label} onClick={() => onConfirmingChange(true)}>
         <TrashIcon />
       </button>
-      <ConfirmPopover open={confirming} message={message} onConfirm={onConfirm} onCancel={() => setConfirming(false)} />
+      <ConfirmPopover open={confirming} message={message} onConfirm={onConfirm} onCancel={() => onConfirmingChange(false)} />
     </div>
   );
 }

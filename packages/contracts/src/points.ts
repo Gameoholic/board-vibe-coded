@@ -33,6 +33,12 @@ export function formatPercentFixed(thousandths: number, decimals: number): strin
   return `${(thousandths / POINTS_PER_PERCENT).toFixed(decimals)}%`;
 }
 
+/** `points` at a multiplier (a Bounty's ×2) — applied once and rounded once, half-up, to whole
+ *  thousandths, so a factor like ×1.5 never leaves a fraction behind. */
+export function boosted(points: number, factor: number): number {
+  return Math.round(points * factor);
+}
+
 /** Parse a user-typed percent ("2.5", "0.08") into integer thousandths, or null if not a valid
  *  non-negative number. The forms speak `%`; storage is thousandths — this is the one crossing. */
 export function parsePercent(input: string): number | null {
