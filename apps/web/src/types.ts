@@ -63,6 +63,8 @@ export { canBreakDown, doneFromPieces, newPiecePoints } from "@board/contracts";
 export { boostOf } from "@board/contracts";
 // Pure per-box schedule gate + its human label — the display-only "do this at a certain hour" lock.
 export { isBoxLocked, boxScheduleLabel } from "@board/contracts";
+// Which streaks can count a task: a daily streak a daily tab's, a weekly one a weekly tab's, a counter any.
+export { streakCanCount } from "@board/contracts";
 // Pure timing curve for the screen-off wind-down nudge (idle → ramp → takeover) — see WindDownOverlay.
 export { windDownState, dayKeyFor } from "@board/contracts";
 export type { WindDownPhase, WindDownState } from "@board/contracts";

@@ -2404,6 +2404,17 @@ button.cond-connector:hover {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
+/* A linked task the streak's type no longer fits (a weekly task on a daily streak): marked to remove. */
+.cond-row.misfit {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.cond-row.misfit .cond-name {
+  color: #b91c1c;
+  text-decoration: line-through;
+}
+
 .cond-dot {
   flex: none;
   width: 9px;
@@ -2523,6 +2534,26 @@ body.whip-dragging {
 .task-item.whip-target.whip-target-dupe {
   outline-color: #f59e0b;
   background: color-mix(in srgb, #f59e0b 10%, transparent);
+}
+
+/* A task the whip can't link: red, with the reason beside the line's end (pickWhip). */
+.task-item.whip-target.whip-target-refused {
+  outline-color: #ef4444;
+  background: color-mix(in srgb, #ef4444 8%, transparent);
+}
+
+.whip-refusal {
+  position: fixed;
+  z-index: 4001;
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
 }
 
 /* Fill preview on tier-dots and plain checkboxes during a whip drag. */
@@ -2986,6 +3017,33 @@ body.whip-dragging {
   color: var(--text-dim);
   margin: 0;
   line-height: 1.5;
+}
+
+/* Back after a gap: the days and weeks never opened since the day left open. */
+.period-prompt-skipped {
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+/* A phone's board is narrow: the prompt takes all of it rather than 70%. */
+@media (max-width: 600px) {
+  .period-prompt-scrim {
+    padding: 16px;
+  }
+
+  .period-prompt-card {
+    width: 100%;
+    padding: 28px 20px;
+  }
+}
+
+.period-prompt-skipped ul {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  color: var(--text);
+  font-weight: 600;
 }
 
 .period-prompt-actions {

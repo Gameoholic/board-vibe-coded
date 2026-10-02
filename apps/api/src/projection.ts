@@ -56,8 +56,11 @@ import {
   type StoredEvent,
   type Streak,
   type StreakEditFields,
+  type StreakMatcher,
+  type StreakType,
   type StreakView,
   statusChange,
+  streakCanCount,
   statusOf,
   type Task,
   type TaskEditFields,
@@ -266,11 +269,13 @@ export class BoardStore {
     // so an uncheck today drops the streak instead of the raw log keeping it).
     const boxCounts = new Map(this.tasks.map((t) => [t.id, behaviorOf(t).boxes(t)]));
     const currentLevels = new Map(this.tasks.map((t) => [t.id, behaviorOf(t).filled(t)]));
-    const settled = streak.type === "weekly" ? this.settled.week : this.settled.day;
+    const kind = streak.type === "weekly" ? "week" : "day";
+    const openKey = this.openPeriods[kind]?.key;
     const { count, active, best } = computeStreak(this.completions, streak, now, boxCounts, this.settings.timeZone, {
       settings: this.settings,
-      settled,
+      settled: this.settled[kind],
       currentLevels,
+      ...(openKey ? { openKey } : {}),
     });
     return { ...streak, count, active, best, order };
   }
@@ -817,6 +822,7 @@ export class BoardStore {
   createStreak(body: CreateStreakBody, idempotencyKey?: string | null): StreakView {
     const section = this.requireSection(body.sectionId);
     if (section.kind !== "streaks") throw badRequest("section does not hold streaks");
+    this.assertStreakCanCount(body.type, body.matcher);
     const event: BoardEvent = {
       type: "StreakCreated",
       streakId: randomUUID(),
@@ -833,6 +839,9 @@ export class BoardStore {
 
   editStreak(id: string, changes: StreakEditFields, idempotencyKey?: string | null): StreakView {
     const streak = this.requireStreak(id);
+    if (changes.type !== undefined || changes.matcher !== undefined) {
+      this.assertStreakCanCount(changes.type ?? streak.type, changes.matcher ?? streak.matcher);
+    }
     const previous: StreakEditFields = {};
     if (changes.name !== undefined) previous.name = streak.name;
     if (changes.type !== undefined) previous.type = streak.type;
@@ -843,6 +852,16 @@ export class BoardStore {
     if (changes.matcher !== undefined) previous.matcher = streak.matcher;
     this.commit({ type: "StreakEdited", streakId: id, changes, previous }, idempotencyKey);
     return this.readStreak(this.requireStreak(id));
+  }
+
+  // A daily or weekly streak counts only tasks that reset on its beat (see streakCanCount).
+  private assertStreakCanCount(type: StreakType, matcher: StreakMatcher): void {
+    if (matcher.kind !== "tasks") return;
+    for (const { taskId } of matcher.conditions) {
+      const task = this.tasks.find((t) => t.id === taskId);
+      const section = task && this.sections.find((s) => s.id === task.sectionId);
+      if (section && !streakCanCount(type, section)) throw badRequest(`${type} streaks only take ${type} tasks`);
+    }
   }
 
   reorderStreaks(sectionId: string, orderedIds: string[], idempotencyKey?: string | null): StreakView[] {
@@ -1388,7 +1407,7 @@ export class BoardStore {
   }
 
   // The fold, with the open periods' tallies kept around it, each day by day (the board's day it happened
-  // in): a tick's gain is the task's value after it less before (so its boost, and anything a tick
+  // in — the open one): a tick's gain is the task's value after it less before (so its boost, and anything a tick
   // settles, is in it), and a purchase is what it froze, under the reward's name then. TasksReset is
   // banking, not a tick, so a period's own reset never counts against it.
   private apply(stored: StoredEvent): void {
@@ -1396,7 +1415,8 @@ export class BoardStore {
     const ticked = TICKS.has(event.type) && "taskId" in event ? event.taskId : null;
     const before = ticked ? this.valueOf(ticked) : 0;
     this.applyEvent(stored);
-    const dayKey = dayKeyFor(occurredAt, this.settings);
+    // The day a tick lands in is the open one (a day not yet ended is still today), else its moment's.
+    const dayKey = this.openPeriods.day?.key ?? dayKeyFor(occurredAt, this.settings);
     const dayOf = (tally: PeriodTally): DayTally => {
       let day = tally.get(dayKey);
       if (!day) tally.set(dayKey, (day = { gains: new Map(), purchases: [] }));
@@ -1422,6 +1442,18 @@ export class BoardStore {
     if (event.type === "PeriodStarted" && event.kind === "week") {
       this.weekStartStreaks = event.streaks ? new Map(event.streaks.map((st) => [st.streakId, st.count])) : null;
     }
+  }
+
+  // A tick as streaks count it: in the open day and week — one not yet ended is still today, whatever the
+  // clock says, so a daily finished at 2am before ending yesterday counts for yesterday.
+  private recordCompletion(taskId: string, occurredAt: string, count?: number): void {
+    this.completions.push({
+      taskId,
+      occurredAt,
+      ...(count !== undefined ? { count } : {}),
+      ...(this.openPeriods.day ? { dayKey: this.openPeriods.day.key } : {}),
+      ...(this.openPeriods.week ? { weekKey: this.openPeriods.week.key } : {}),
+    });
   }
 
   private valueOf(taskId: string): number {
@@ -1492,7 +1524,7 @@ export class BoardStore {
         return;
       }
       case "TaskCompleted":
-        this.completions.push({ taskId: event.taskId, occurredAt });
+        this.recordCompletion(event.taskId, occurredAt);
         this.mutateTask(event.taskId, occurredAt, (t) => {
           t.done = true;
           t.completedAt = occurredAt;
@@ -1513,7 +1545,7 @@ export class BoardStore {
         return;
       case "TaskTierSet":
         // Selecting any tier is a completion moment for streak purposes; clearing it is not.
-        if (event.activeTier !== null) this.completions.push({ taskId: event.taskId, occurredAt });
+        if (event.activeTier !== null) this.recordCompletion(event.taskId, occurredAt);
         this.mutateTask(event.taskId, occurredAt, (t) => {
           t.activeTier = event.activeTier;
           t.completedAt = event.activeTier !== null ? occurredAt : null;
@@ -1523,8 +1555,7 @@ export class BoardStore {
       case "TaskProgressSet":
         // Reaching a box count is a completion moment for streaks; the level reached is recorded so a
         // streak can require "done N times". Clearing back to 0 is not a completion.
-        if (event.progress > 0)
-          this.completions.push({ taskId: event.taskId, occurredAt, count: event.progress });
+        if (event.progress > 0) this.recordCompletion(event.taskId, occurredAt, event.progress);
         this.mutateTask(event.taskId, occurredAt, (t) => {
           t.progress = event.progress;
           t.completedAt = t.count != null && event.progress >= t.count ? occurredAt : null;
@@ -1743,6 +1774,9 @@ export class BoardStore {
           event.periodKey,
           new Map(event.snapshot.map((s) => [s.taskId, s.level])),
         );
+        // No longer open: between a close and the next start (where a week freezes its streaks' start),
+        // the period now falls in is the current one, not the one just closed.
+        if (this.openPeriods[event.kind]?.key === event.periodKey) delete this.openPeriods[event.kind];
         return;
       case "TasksReset":
         // Back to level 0 through the one level→storage mapping; the frozen value moves to `banked`, and

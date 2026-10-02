@@ -6,6 +6,8 @@ interface PeriodPromptProps {
   // True when no day was ever open (a fresh/reset board) — it offers to start one instead, since there's
   // nothing to end.
   isFirst: boolean;
+  // The days and weeks never opened since that day (skippedSince) — they'll count as missed.
+  skipped: string[];
   onConfirm: () => void;
   onDismiss: () => void;
 }
@@ -14,7 +16,7 @@ interface PeriodPromptProps {
 // the board. It asks one plain question — has it ended? — and "Yes, end it" ends it (and its week, when
 // that's over too — never asked about on its own); or defer — deferring only suppresses it for this
 // session (App re-checks on next load). Clicking the scrim is the same as "Not yet".
-export function PeriodPrompt({ dayKey, isFirst, onConfirm, onDismiss }: PeriodPromptProps) {
+export function PeriodPrompt({ dayKey, isFirst, skipped, onConfirm, onDismiss }: PeriodPromptProps) {
   const label = labelFor("day", dayKey);
   return (
     <div className="period-prompt-scrim" onClick={onDismiss}>
@@ -36,6 +38,16 @@ export function PeriodPrompt({ dayKey, isFirst, onConfirm, onDismiss }: PeriodPr
           </>
         ) : (
           <h2 className="period-prompt-q">Has {label} ended?</h2>
+        )}
+        {!isFirst && skipped.length > 0 && (
+          <div className="period-prompt-skipped">
+            <span>Skipped since then:</span>
+            <ul>
+              {skipped.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
         )}
         <div className="period-prompt-actions">
           <button type="button" className="ghost-btn" onClick={onDismiss}>

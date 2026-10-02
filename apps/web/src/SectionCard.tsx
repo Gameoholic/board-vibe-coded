@@ -115,9 +115,9 @@ const isTaskDone = (task: Task): boolean => behaviorOf(task).isDone(task);
 const estMinutes = (task: Task): number | undefined => task.estimateMinutes;
 // Whether the box you'd act on next is currently schedule-locked (its time-of-day / weekday hasn't
 // come). Used by the "Get done quick" sort to sink not-yet-doable tasks — you can't knock them out now.
-const taskLocked = (task: Task, now: string, settings: Settings): boolean => {
+const taskLocked = (task: Task, now: string, settings: Settings, openDay?: string): boolean => {
   const entry = task.schedule?.[behaviorOf(task).filled(task)];
-  return !!entry && isBoxLocked(entry, now, settings);
+  return !!entry && isBoxLocked(entry, now, settings, openDay);
 };
 
 interface SectionCardProps {
@@ -126,6 +126,8 @@ interface SectionCardProps {
   groups: Group[];
   streaks: StreakView[];
   allTasks: Task[];
+  // Every board tab — the streak form reads which streaks each task can be counted by.
+  allSections: Section[];
   // Every streak on the board — Prune reads which ones a task's pruning would break.
   allStreaks: StreakView[];
   flyingTaskIds: Set<string>;
@@ -178,6 +180,7 @@ function SectionCard({
   groups,
   streaks,
   allTasks,
+  allSections,
   allStreaks,
   flyingTaskIds,
   frame,
@@ -309,7 +312,7 @@ function SectionCard({
 
   // Board clock (ticks ~1/min) — only read to lock-aware-sort "Get done quick"; a tick re-renders the
   // card, which is cheap and lets a task slide up the moment it unlocks.
-  const { now, settings: boardSettings } = useBoardClock();
+  const { now, settings: boardSettings, openDay } = useBoardClock();
 
   const displayedTasks = useMemo(() => {
     const list = listedTasks;
@@ -318,7 +321,7 @@ function SectionCard({
     // the untimed), 2 no time assigned, 3 completed (very bottom). Within a band, shorter time first.
     if (sortMode === "quick") {
       const rank = (t: Task) =>
-        isTaskDone(t) ? 3 : taskLocked(t, now, boardSettings) ? 1 : estMinutes(t) == null ? 2 : 0;
+        isTaskDone(t) ? 3 : taskLocked(t, now, boardSettings, openDay) ? 1 : estMinutes(t) == null ? 2 : 0;
       return [...list].sort(
         (a, b) => rank(a) - rank(b) || (estMinutes(a) ?? Infinity) - (estMinutes(b) ?? Infinity),
       );
@@ -341,7 +344,7 @@ function SectionCard({
       return [...list].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     // Manual: the stored order (used as the flat list while the Completed view is on).
     return [...list].sort(byOrder);
-  }, [listedTasks, sortMode, now, boardSettings]);
+  }, [listedTasks, sortMode, now, boardSettings, openDay]);
   // While they're shown, pruned tasks sit at the bottom whatever the sort — out of today's way.
   const shownTasks = useMemo(
     () => (showPruned ? [...displayedTasks.filter((t) => !t.pruned), ...displayedTasks.filter((t) => t.pruned)] : displayedTasks),
@@ -559,6 +562,7 @@ function SectionCard({
               <Popover title="Add streak" open={open} onClose={close} align="left" width={300} scrollable>
                 <StreakForm
                   allTasks={allTasks}
+                  allSections={allSections}
                   accentColor={section.color}
                   submitLabel="Add streak"
                   onSubmit={(payload) => {
@@ -596,6 +600,7 @@ function SectionCard({
               key={streak.id}
               streak={streak}
               allTasks={allTasks}
+              allSections={allSections}
               sectionColor={section.color}
               row={row}
               onEdit={(payload) => onEditStreak(streak.id, payload)}

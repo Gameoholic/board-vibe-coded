@@ -5,11 +5,12 @@ import { deleteAction, editAction } from "./rowActions";
 import Popover from "./Popover";
 import StreakForm, { type StreakPayload } from "./StreakForm";
 import { useClickOutside } from "./useClickOutside";
-import type { StreakView, Task } from "./types";
+import type { Section, StreakView, Task } from "./types";
 
 interface StreakItemProps {
   streak: StreakView;
   allTasks: Task[];
+  allSections: Section[];
   sectionColor: string;
   // This row's place in its list (drag / group handles) — from ItemList, via the shared ItemRow base
   // (the same one TaskItem and RewardItem render on, so drag/reorder/grouping is one implementation).
@@ -18,7 +19,7 @@ interface StreakItemProps {
   onRemove: (id: string) => void;
 }
 
-function StreakItem({ streak, allTasks, sectionColor, row, onEdit, onRemove }: StreakItemProps) {
+function StreakItem({ streak, allTasks, allSections, sectionColor, row, onEdit, onRemove }: StreakItemProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
   const editRef = useRef<HTMLDivElement>(null);
@@ -72,6 +73,7 @@ function StreakItem({ streak, allTasks, sectionColor, row, onEdit, onRemove }: S
         <Popover title="Edit streak" open={editOpen} onClose={() => setEditOpen(false)} align="right" width={300} scrollable>
           <StreakForm
             allTasks={allTasks}
+            allSections={allSections}
             accentColor={sectionColor}
             initial={{
               name: streak.name,

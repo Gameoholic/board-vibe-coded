@@ -266,13 +266,13 @@ function formatMinutes(total: number): string {
 
 function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, pointsHidden, onSetLevel, onRemove, onEdit, onDuplicate, prune, onSetPruned, status, pieces, onMakeOwn, multiplier, reroll }: TaskItemProps) {
   const b = behaviorOf(task);
-  const { now, settings } = useBoardClock();
+  const { now, settings, openDay } = useBoardClock();
   // A scheduled box shows a lock until its time arrives — but only on checkbox tasks (the gate is
   // meaningless for tiered ladders) and never on a box that's already ticked.
   const entryFor = (i: number): BoxSchedule | undefined => (b.supportsQuantity ? task.schedule?.[i] ?? undefined : undefined);
   function boxLocked(i: number): boolean {
     const entry = entryFor(i);
-    return !!entry && isBoxLocked(entry, now, settings);
+    return !!entry && isBoxLocked(entry, now, settings, openDay);
   }
   // Hover text for a scheduled box: "Unlocks …" while it's still gated, otherwise "For …" — so an
   // already-open timed box still tells you which time it belongs to (undefined ⇒ box has no schedule).

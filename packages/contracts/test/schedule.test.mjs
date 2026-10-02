@@ -37,3 +37,12 @@ test("labels read as time (daily), weekday+time, or weekday only (any time)", ()
   assert.equal(boxScheduleLabel({ minutes: 605, dayOfWeek: 5 }), "Friday 10:05");
   assert.equal(boxScheduleLabel({ dayOfWeek: 5 }), "Friday");
 });
+
+test("a day not yet ended is still today: past it on the clock, its hours have all come", () => {
+  const saturday2am = "2026-09-25T23:00:00.000Z"; // Saturday 02:00 local, Friday still open
+  assert.equal(isBoxLocked({ minutes: 1200 }, saturday2am, s), true); // by the clock: 20:00 hasn't come today
+  assert.equal(isBoxLocked({ minutes: 1200 }, saturday2am, s, "2026-09-25"), false); // Friday's 20:00 has
+  assert.equal(isBoxLocked({ minutes: 1200, dayOfWeek: 5 }, saturday2am, s, "2026-09-25"), false); // a Friday box
+  assert.equal(isBoxLocked({ minutes: 60, dayOfWeek: 6 }, saturday2am, s, "2026-09-25"), true); // Saturday's waits
+  assert.equal(isBoxLocked({ minutes: 1200 }, now, s, "2026-09-25"), true); // the open day itself: the clock decides
+});

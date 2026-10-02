@@ -11,12 +11,17 @@ import { createPortal } from "react-dom";
 const WHIP_COLOR = "#334155";
 // A target that's already linked: the line and the row turn amber, and dropping updates the link.
 const DUPE_COLOR = "#f59e0b";
+// A target that can't be linked: the line and the row turn red, the reason rides the line's end, and
+// dropping there does nothing.
+const REFUSED_COLOR = "#ef4444";
 
 export interface WhipTarget {
   id: string; // the task under the pointer
   cx: number; // where the line lands (a box, the checkbox or the row), in screen space
   cy: number;
   dupe?: boolean;
+  // Why this task can't be linked (shown at the line's end); absent ≡ it can.
+  refused?: string;
   // Preview-fill the row's boxes up to this index while hovering (Infinity ≡ every box); absent ≡ none.
   fillUpTo?: number;
 }
@@ -62,7 +67,7 @@ export function usePickWhip<T extends WhipTarget>(
 
     const clearHighlight = () => {
       const row = hoverRowRef.current;
-      row?.classList.remove("whip-target", "whip-target-dupe");
+      row?.classList.remove("whip-target", "whip-target-dupe", "whip-target-refused");
       row?.querySelectorAll<HTMLElement>(".whip-box-fill").forEach((el) => el.classList.remove("whip-box-fill"));
     };
 
@@ -76,6 +81,7 @@ export function usePickWhip<T extends WhipTarget>(
       if (row && target) {
         row.classList.add("whip-target");
         row.classList.toggle("whip-target-dupe", !!target.dupe);
+        row.classList.toggle("whip-target-refused", !!target.refused);
         if (target.fillUpTo !== undefined) {
           const upTo = target.fillUpTo;
           row.querySelectorAll<HTMLElement>("[data-box-index]").forEach((dot) => {
@@ -94,7 +100,7 @@ export function usePickWhip<T extends WhipTarget>(
       hoverRowRef.current = null;
       clearBodyDrag();
       const target = resolveRef.current(ev.clientX, ev.clientY);
-      if (target) dropRef.current(target);
+      if (target && !target.refused) dropRef.current(target);
       setWhip(null);
     };
 
@@ -102,12 +108,20 @@ export function usePickWhip<T extends WhipTarget>(
     window.addEventListener("pointerup", up);
   }
 
-  // The line lives in a full-viewport SVG portaled to <body>, above everything.
+  // The line lives in a full-viewport SVG portaled to <body>, above everything — with a refusal's reason
+  // beside its end.
   const overlay = whip
     ? createPortal(
-        <svg className="whip-overlay" aria-hidden="true">
-          {whipLine(whip)}
-        </svg>,
+        <>
+          <svg className="whip-overlay" aria-hidden="true">
+            {whipLine(whip)}
+          </svg>
+          {whip.target?.refused && (
+            <span className="whip-refusal" style={{ left: whip.target.cx + 14, top: whip.target.cy + 12 }}>
+              {whip.target.refused}
+            </span>
+          )}
+        </>,
         document.body,
       )
     : null;
@@ -121,7 +135,7 @@ function whipLine<T extends WhipTarget>(whip: WhipState<T>) {
   const ey = whip.target ? whip.target.cy : whip.y;
   const dx = ex - whip.sx;
   const path = `M ${whip.sx} ${whip.sy} C ${whip.sx + dx * 0.4} ${whip.sy}, ${whip.sx + dx * 0.6} ${ey}, ${ex} ${ey}`;
-  const stroke = whip.target?.dupe ? DUPE_COLOR : WHIP_COLOR;
+  const stroke = whip.target?.refused ? REFUSED_COLOR : whip.target?.dupe ? DUPE_COLOR : WHIP_COLOR;
   return (
     <>
       <path d={path} fill="none" stroke={stroke} strokeWidth={8} strokeLinecap="round" opacity={0.18} />

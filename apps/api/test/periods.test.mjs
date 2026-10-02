@@ -96,3 +96,33 @@ test("weeks away: the stale day and week end on return, the time between is miss
   assert.deepEqual(short.days.filter((d) => d.tabs.length > 0).map((d) => d.dayKey), ["2026-10-16"]);
   assert.deepEqual(counts(store), { "Stretch daily": 0, "Plates weekly": 1 }); // Saturday missed; that week's plates stand
 });
+
+test("a day not yet ended is still today: a tick after midnight counts for it, and so does its week", (t) => {
+  t.after(() => setDebugNow(null));
+  const { store, stretch, plates } = board();
+  setDebugNow(at("2026-10-01"));
+  store.rollPeriod("day"); // Thursday
+  store.setDone(stretch.id, true);
+  setDebugNow(at("2026-10-02"));
+  store.rollPeriod("day"); // Friday — and the daily isn't done yet
+  assert.deepEqual(counts(store), { "Stretch daily": 1, "Plates weekly": 0 });
+
+  setDebugNow("2026-10-02T23:00:00.000Z"); // Saturday 02:00 by the clock; Friday not ended
+  store.setDone(stretch.id, true);
+  assert.deepEqual(counts(store), { "Stretch daily": 2, "Plates weekly": 0 }); // Friday's, at once
+  setDebugNow("2026-10-03T07:00:00.000Z"); // Saturday 10:00: yes, Friday's over
+  const { recap } = store.rollPeriod("day");
+  assert.equal(recap.periodKey, "2026-10-02");
+  assert.deepEqual(recap.days[0].tabs.map((tab) => [tab.name, tab.cleared]), [["Daily", 1]]); // the 2am tick is Friday's
+  assert.deepEqual(counts(store), { "Stretch daily": 2, "Plates weekly": 0 });
+
+  // Saturday not ended at Sunday 02:00: the week isn't over either, so a weekly tick is still its.
+  setDebugNow("2026-10-03T23:00:00.000Z");
+  store.setDone(plates.id, true);
+  assert.deepEqual(counts(store), { "Stretch daily": 2, "Plates weekly": 1 });
+  setDebugNow("2026-10-04T07:00:00.000Z");
+  const { week } = store.rollPeriod("day"); // ending Saturday ends the week
+  assert.equal(week.periodKey, "2026-09-27");
+  assert.deepEqual(week.days.filter((d) => d.tabs.length > 0).map((d) => d.dayKey), ["2026-10-01", "2026-10-02", "2026-10-03"]);
+  assert.deepEqual(counts(store), { "Stretch daily": 0, "Plates weekly": 1 }); // Saturday's daily was missed
+});

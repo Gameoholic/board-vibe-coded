@@ -11,6 +11,8 @@ import type { Settings } from "./types";
 export interface BoardClock {
   now: string;
   settings: Settings;
+  // The board's open day: one not yet ended is still today, whatever `now` says (see isBoxLocked).
+  openDay?: string;
 }
 
 const BoardClockContext = createContext<BoardClock>({

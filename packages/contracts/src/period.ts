@@ -184,6 +184,12 @@ function shiftedCivil(iso: string, timeZone: string, minutes: number): Civil {
   return civilOf(new Date(iso).getTime() - minutes * 60_000, timeZone);
 }
 
+/** The civil date a day or week key names ("2026-10-02"). */
+export function civilOfKey(key: string): Civil {
+  const [y, m, d] = key.split("-").map(Number);
+  return { y, m, d };
+}
+
 /** The day-key ("YYYY-MM-DD") an instant belongs to, honouring the configured day-start offset. */
 export function dayKeyFor(iso: string, settings: Settings): string {
   return ymd(shiftedCivil(iso, settings.timeZone, settings.dayStartMinutes));
@@ -207,9 +213,16 @@ const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "
  * Whether a scheduled box is still locked at `now` — its scheduled wall-clock moment hasn't arrived
  * yet in the board's timezone. A daily gate (no `dayOfWeek`) unlocks at `minutes` past midnight every
  * day; a weekly gate unlocks at that weekday+time within the current week (week start from settings).
+ * `openDay` is the board's open day: one not yet ended is still today, so once the clock is past it every
+ * hour of it has come — its daily gates are open, and a weekly gate reads as of its last minute.
  * Pure display gate: it never affects scoring, and the server doesn't reject an early tick.
  */
-export function isBoxLocked(entry: BoxSchedule, now: string, settings: Settings): boolean {
+export function isBoxLocked(entry: BoxSchedule, now: string, settings: Settings, openDay?: string): boolean {
+  if (openDay && dayKeyFor(now, settings) > openDay) {
+    if (entry.dayOfWeek === undefined) return false;
+    const posOpen = ((dowOf(civilOfKey(openDay)) - settings.weekStartDay + 7) % 7) * 1440 + 1439;
+    return posOpen < ((entry.dayOfWeek - settings.weekStartDay + 7) % 7) * 1440 + (entry.minutes ?? 0);
+  }
   const ms = new Date(now).getTime();
   const mod = minutesOfDay(ms, settings.timeZone);
   // Daily gate: needs a time; a timeless daily entry can't happen (refine), but guard anyway.

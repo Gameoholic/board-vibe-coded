@@ -2,8 +2,8 @@ import { useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { PickWhipIcon } from "./Icons";
 import { usePickWhip, type WhipTarget } from "./pickWhip";
-import { behaviorOf } from "./types";
-import type { StreakMatcher, StreakMode, StreakSince, StreakType, Task, TaskCondition, TaskRequirement } from "./types";
+import { behaviorOf, streakCanCount } from "./types";
+import type { Section, StreakMatcher, StreakMode, StreakSince, StreakType, Task, TaskCondition, TaskRequirement } from "./types";
 
 export interface StreakPayload {
   name: string;
@@ -15,6 +15,8 @@ export interface StreakPayload {
 
 interface StreakFormProps {
   allTasks: Task[];
+  // Every board tab — what a task resets with decides which streaks can count it (streakCanCount).
+  allSections: Section[];
   // Display-only accent (the Streaks tab's color) for the condition dots and whip handle — streaks
   // no longer carry their own color, they inherit their section's.
   accentColor: string;
@@ -40,7 +42,7 @@ interface StreakWhipTarget extends WhipTarget {
 // Add/edit a streak. Renders the form body only — the caller wraps it in a Popover so add and
 // per-row edit share one implementation. Streaks match by task conditions; the matcher union still
 // carries a `filter` variant server-side, but it has no UI (it was an inert debug preview, removed).
-function StreakForm({ allTasks, accentColor, initial, submitLabel, onSubmit, onCancel }: StreakFormProps) {
+function StreakForm({ allTasks, allSections, accentColor, initial, submitLabel, onSubmit, onCancel }: StreakFormProps) {
   const [name, setName] = useState(initial?.name ?? "");
   const [type, setType] = useState<StreakType>(initial?.type ?? "daily");
   // "all" = every condition must be met (AND), "any" = at least one (OR). This IS the connector the
@@ -65,6 +67,16 @@ function StreakForm({ allTasks, accentColor, initial, submitLabel, onSubmit, onC
   const isCounter = type === "counter";
   const connector = isCounter ? "+" : mode === "all" ? "and" : "or";
 
+  // A daily streak counts only daily tasks, a weekly one only weekly ones (a counter, anything) — the whip
+  // won't link another, and one already linked that the type no longer fits is marked to remove.
+  const fits = (taskId: string): boolean => {
+    const task = allTasks.find((t) => t.id === taskId);
+    const section = task && allSections.find((s) => s.id === task.sectionId);
+    return !section || streakCanCount(type, section);
+  };
+  const refusal = `${type === "daily" ? "Daily" : "Weekly"} streaks only take ${type} tasks`;
+  const misfits = conditions.some((c) => !fits(c.taskId));
+
   // How many completions a condition demands, as a short label — only for tasks with more than one
   // box (a plain checkbox's "once" is implicit, so it stays unlabelled to avoid clutter).
   function requirementLabel(cond: TaskCondition): string | null {
@@ -84,6 +96,10 @@ function StreakForm({ allTasks, accentColor, initial, submitLabel, onSubmit, onC
     if (!row) return null;
     const id = row.dataset.taskId as string;
     const task = allTasks.find((t) => t.id === id);
+    if (!fits(id)) {
+      const r = (row.querySelector<HTMLElement>('input[type="checkbox"]') ?? row).getBoundingClientRect();
+      return { id, cx: r.left + r.width / 2, cy: r.top + r.height / 2, required: 1, refused: refusal };
+    }
     const quantity = task ? behaviorOf(task).supportsQuantity : false;
     let box = el?.closest<HTMLElement>("[data-box-index]") ?? null;
     // Buffer between dots: if the pointer is in the tier-dots container but not on a dot,
@@ -142,6 +158,7 @@ function StreakForm({ allTasks, accentColor, initial, submitLabel, onSubmit, onC
     const errs: { name?: string; conditions?: string } = {};
     if (!trimmed) errs.name = "Name is required";
     if (conditions.length === 0) errs.conditions = "Link at least one task";
+    else if (misfits) errs.conditions = `${refusal} — remove the marked ones or change the type`;
     if (Object.keys(errs).length) { setErrors(errs); return; }
     const matcher: StreakMatcher = { kind: "tasks", conditions };
     onSubmit({ name: trimmed, type, mode, since, matcher });
@@ -224,7 +241,11 @@ function StreakForm({ allTasks, accentColor, initial, submitLabel, onSubmit, onC
                     )}
                   </div>
                 )}
-                <div className="cond-row" style={{ "--cond-color": accentColor } as React.CSSProperties}>
+                <div
+                  className={fits(cond.taskId) ? "cond-row" : "cond-row misfit"}
+                  style={{ "--cond-color": accentColor } as React.CSSProperties}
+                  title={fits(cond.taskId) ? undefined : refusal}
+                >
                   <span className="cond-dot" />
                   <span className="cond-name">{taskName(cond.taskId)}</span>
                   {requirementLabel(cond) && <span className="cond-req">{requirementLabel(cond)}</span>}

@@ -1,5 +1,5 @@
-import type { Streak, StreakType } from "./domain.js";
-import { DEFAULT_TIME_ZONE, periodKeyFor, type Settings } from "./period.js";
+import type { Section, Streak, StreakType } from "./domain.js";
+import { civilOfKey, DEFAULT_TIME_ZONE, periodKeyFor, type Settings } from "./period.js";
 
 // Streak counts are derived from completion history, never stored. A "completion" is any moment a
 // task's box was checked (TaskCompleted / a non-null TaskTierSet). This module is pure (time and
@@ -14,11 +14,24 @@ import { DEFAULT_TIME_ZONE, periodKeyFor, type Settings } from "./period.js";
 
 /** One box-checked moment. `occurredAt` is a UTC ISO string as stored on the event. `count` is the
  *  completion level reached at that moment — 1 for a checkbox/tier, the ticked-box count for a count
- *  task — so a streak can ask "done at least N times this period", not just "done at all". */
+ *  task — so a streak can ask "done at least N times this period", not just "done at all". `dayKey` /
+ *  `weekKey` are the board's open day and week then: a day not yet ended is still today, whatever the
+ *  clock says (absent with none open — the moment's own keys stand in). */
 export interface CompletionRecord {
   taskId: string;
   occurredAt: string;
   count?: number;
+  dayKey?: string;
+  weekKey?: string;
+}
+
+/** Whether a streak of `type` can count a task in `section`: a daily streak only a daily tab's tasks, a
+ *  weekly one only a weekly tab's — they reset on its beat. Any other pairing can't work: a weekly task
+ *  stays ticked all week (a daily streak would count it every day), a daily one is unticked before its
+ *  week settles (a weekly streak would never see it), and one that never resets would count for ever once
+ *  ticked. A counter counts ticks, so it takes any task. */
+export function streakCanCount(type: StreakType, section: Pick<Section, "period">): boolean {
+  return type === "counter" || section.period === (type === "daily" ? "day" : "week");
 }
 
 interface Civil {
@@ -98,6 +111,9 @@ export interface StreakOpts {
   // only, so a box checked then unchecked the same day reads 0 there instead of the raw max-reached
   // (which never drops). Omitted by pure tests → current period falls back to raw history as before.
   currentLevels?: Map<string, number>;
+  // The board's open period of the streak's kind: the current one until it's ended, whatever `now` says.
+  // Absent (none open, pure tests) → the one `now` falls in.
+  openKey?: string;
 }
 
 export function computeStreak(
@@ -147,7 +163,7 @@ export function computeStreak(
   let earliestMs = Infinity; // earliest completion instant, to bound the best walk-back
   for (const c of completions) {
     if (!wanted.has(c.taskId)) continue;
-    const key = keyForInstant(c.occurredAt);
+    const key = (kind === "week" ? c.weekKey : c.dayKey) ?? keyForInstant(c.occurredAt);
     const level = c.count ?? 1;
     const all = perTaskAll.get(c.taskId)!;
     all.set(key, Math.max(all.get(key) ?? 0, level));
@@ -159,9 +175,11 @@ export function computeStreak(
     byKey.set(key, Math.max(byKey.get(key) ?? 0, level));
   }
 
-  // The current open period's key — resolved the same way the walk-back does (UTC-noon of now's civil
-  // date), so "is this the live period?" and the run's period keys always agree.
-  const nowKey = keyForCivil(civilOf(now.toISOString(), timeZone));
+  // Where the walk starts: the open period while one is, else now's. Its key is resolved the same way
+  // the walk-back does (UTC-noon of the civil date), so "is this the live period?" and the run's period
+  // keys always agree.
+  const startCivil = (): Civil => (opts.openKey ? civilOfKey(opts.openKey) : civilOf(now.toISOString(), timeZone));
+  const nowKey = keyForCivil(startCivil());
 
   // A settled period's snapshot wins outright — it's the honest close-time state, so an unchecked box
   // there reads as 0 no matter what the raw log shows. The current OPEN period is live (an uncheck now
@@ -179,7 +197,7 @@ export function computeStreak(
       : reqs.some((r) => reachedFrom(map, r.taskId, key) >= r.need);
 
   const step = streak.type === "weekly" ? 7 : 1;
-  let civil = civilOf(now.toISOString(), timeZone);
+  let civil = startCivil();
   const active = satisfiedWith(perTask, keyForCivil(civil));
 
   // Current run: consecutive satisfied periods ending at (or, via a grace period, just before) now.
@@ -196,7 +214,7 @@ export function computeStreak(
   // satisfy — a settled level only exists where a box was actually ticked, which logged a completion).
   let run = 0;
   let bestRun = 0;
-  let bc = civilOf(now.toISOString(), timeZone);
+  let bc = startCivil();
   for (let i = 0; i < MAX_PERIODS; i++) {
     const instMs = Date.UTC(bc.y, bc.m - 1, bc.d, 12);
     if (instMs < earliestMs - 86_400_000) break; // a day's margin past the oldest data, then stop

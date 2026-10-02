@@ -21,6 +21,7 @@ import { CanvasSettingsProvider } from "./useCanvasSettings";
 import FlyingPoints, { type Flyer, type FlyOrigin, type Point } from "./FlyingPoints";
 import type { FlyerTier } from "./flyerTiers";
 import { PeriodPrompt } from "./PeriodClose";
+import { skippedSince } from "./periodLabels";
 import { PeriodRecapCard } from "./Recap";
 import { BountyReveal } from "./BountyReveal";
 import PointsCounter, { type PointsCounterHandle } from "./PointsCounter";
@@ -900,7 +901,9 @@ function App() {
               layouts={config.layouts}
             />
           ) : (
-            <BoardClockProvider value={{ now: debugNow ?? realNow, settings: settings ?? DEFAULT_SETTINGS }}>
+            <BoardClockProvider
+              value={{ now: debugNow ?? realNow, settings: settings ?? DEFAULT_SETTINGS, openDay: status?.day.openKey ?? undefined }}
+            >
             <CanvasSettingsProvider value={config.settings}>
               <AnimatePresence>
                 {askDay && status && (
@@ -908,6 +911,7 @@ function App() {
                     key="day"
                     dayKey={status.day.openKey ?? status.day.currentKey}
                     isFirst={status.day.openKey === null}
+                    skipped={skippedSince(status)}
                     onConfirm={endDay}
                     onDismiss={() => setDayDeferred(true)}
                   />
@@ -929,6 +933,7 @@ function App() {
                     groups={groups.filter((g) => g.sectionId === section.id)}
                     streaks={streaks.filter((s) => s.sectionId === section.id)}
                     allTasks={tasks}
+                    allSections={sections}
                     allStreaks={streaks}
                     flyingTaskIds={flyingTaskIds}
                     frame={frame}
