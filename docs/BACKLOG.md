@@ -61,4 +61,5 @@ Ideas from a much larger earlier vision of this product. None is built; each is 
 
 ## Loose ideas
 
+- **Live tab icon** (owner-approved, not built yet): the tab icon fills from the bottom as today's points come in, with the points that fill it to the top set in Settings.
 - (Add here as they come up — keep each to a line, with a pointer if the reasoning lives elsewhere.)
