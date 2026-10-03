@@ -38,7 +38,7 @@ import ShopView from "./ShopView";
 import type { StreakPayload } from "./StreakForm";
 import WindDownOverlay from "./WindDownOverlay";
 import { finishFx, thawFx } from "./freezeFx";
-import { behaviorOf, doneFromPieces, frostFill, frostShare, isRetired, modifiersOf, onWholeTask, payout, releasedFrom, statusChange, taskPointValue, wholeWorth } from "./types";
+import { behaviorOf, doneFromPieces, frostFill, frostShare, isRetired, modifiersOf, onWholeTask, payout, releasedFrom, saleOn, statusChange, taskPointValue, wholeWorth } from "./types";
 import type { BoosterHand, BountyStatus, FormulaPreview, Group, PeriodRecap, PeriodStatus, PointsFormula, Reward, RolledBounty, Section, Settings, StreakView, Task, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
 import { BoardClockProvider } from "./useBoardClock";
 import { useLocalConfig } from "./useLocalConfig";
@@ -60,7 +60,7 @@ function App() {
   useSuppressPasswordManagers();
   // Device-local view config (layouts, canvas settings, tab prefs) — one store shared by both canvases.
   const local = useLocalConfig();
-  const { config, setCardLayout, setSettings, setTabPref, togglePinnedSort, resetLayouts } = local;
+  const { config, setCardLayout, setSettings, setTabPref, resetLayouts } = local;
   const shopState = useShop();
   const [sections, setSections] = useState<Section[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -83,6 +83,8 @@ function App() {
   // This week's Booster hand when a pick is still to be made (the board was left before the recap's pick):
   // dealt again over the board.
   const [boosterLeft, setBoosterLeft] = useState<BoosterHand | null>(null);
+  // Booster rerolls bought in the shop and not yet used: a Booster's menu offers one while any are left.
+  const [boosterRerolls, setBoosterRerolls] = useState(0);
   // Whether the owner put off ending the day this session ("Not yet") — re-offered on the next load.
   const [dayDeferred, setDayDeferred] = useState(false);
   const [view, setView] = useState<AppView>("board");
@@ -129,7 +131,7 @@ function App() {
         setDebugNow(clock.now);
         setRealNow(clock.real);
         setBountyStatus(BountyStatusSchema.parse(bountyData));
-        setBoosterLeft(pickLeft(BoosterStatusSchema.parse(boosterData).hand));
+        takeBoosterStatus(boosterData);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -199,7 +201,7 @@ function App() {
         setStreaks(nextStreaks);
         setTasks(TaskSchema.array().parse(tasksData));
         setStatus(PeriodStatusSchema.parse(statusData));
-        setBoosterLeft(pickLeft(BoosterStatusSchema.parse(boosterData).hand));
+        takeBoosterStatus(boosterData);
       });
   }
 
@@ -268,6 +270,34 @@ function App() {
   function closeBoosterLeft() {
     setBoosterLeft(null);
     reloadTasks();
+  }
+
+  // The open week's Booster hand, when a pick is left to make, and the rerolls left.
+  function takeBoosterStatus(data: unknown) {
+    const booster = BoosterStatusSchema.parse(data);
+    setBoosterLeft(pickLeft(booster.hand));
+    setBoosterRerolls(booster.rerollsLeft);
+  }
+
+  function refreshBooster() {
+    return fetch("/api/booster")
+      .then((res) => res.json())
+      .then(takeBoosterStatus);
+  }
+
+  // From a Booster's row: it's given up, and the new hand is dealt over the board to pick one card from.
+  function rerollBooster(taskId: string) {
+    fetch("/api/booster/reroll", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskId }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setBoosterLeft(BoosterHandSchema.parse(data));
+        setBoosterRerolls((n) => Math.max(0, n - 1));
+      });
   }
 
   // From a Bounty's row (or the reveal's own Reroll): the new one is revealed on its reel.
@@ -447,9 +477,15 @@ function App() {
   // from events), so every device agrees.
   const points = displayedPoints + (status?.banked ?? 0) - shopState.shop.spent;
 
-  function buyReward(reward: Reward) {
-    shopState.buy(reward);
-    counterRef.current?.spend(reward.cost);
+  // At the price the owner was shown. An item lands once the server has it: the rerolls it gives are
+  // read back for the Bounty's and the Booster's menus.
+  function buyReward(reward: Reward, price: number) {
+    shopState.buy(reward, price).then(() => {
+      if (!reward.item) return;
+      refreshBounty();
+      refreshBooster();
+    });
+    counterRef.current?.spend(price);
   }
 
   function recolorSection(id: string, color: string) {
@@ -1031,6 +1067,8 @@ function App() {
               realNow={realNow}
               onSetDebugClock={setDebugClock}
               layouts={config.layouts}
+              saleRunning={saleOn(debugNow ?? realNow, settings, { openDay: status?.day.openKey ?? undefined, startedEarly: shopState.shop.saleStarted })}
+              onStartSale={shopState.startSale}
             />
           ) : (
             <BoardClockProvider
@@ -1081,6 +1119,8 @@ function App() {
                     onSetParent={setTaskParent}
                     rerollsLeft={bountyStatus?.rerollsLeft ?? 0}
                     onRerollBounty={rerollRevealed}
+                    boosterRerollsLeft={boosterRerolls}
+                    onRerollBooster={rerollBooster}
                     onReorderPieces={reorderPieces}
                     onReorderItems={(orderedIds) => reorderItems(section.id, orderedIds)}
                     onAddGroup={(taskIds) => addGroup(section.id, taskIds)}
@@ -1098,8 +1138,6 @@ function App() {
                     onRecolor={recolorSection}
                     prefs={config.tabPrefs[section.id]}
                     onPrefsChange={(patch) => setTabPref(section.id, patch)}
-                    pinnedSorts={config.pinnedSorts}
-                    onTogglePin={togglePinnedSort}
                   />
                 )}
               />

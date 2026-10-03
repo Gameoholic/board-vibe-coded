@@ -327,15 +327,33 @@ export const ShopSection = z.object({
 });
 export type ShopSection = z.infer<typeof ShopSection>;
 
+// What a reward is: bought again and again (a video, a film); bought once and then yours (headphones, a
+// trip — it leaves its shelf, like a one-time task); or an Item, whose purchase gives you a game
+// mechanic (a Bounty reroll). Every reward from before kinds was repeatable, so absent reads as that.
+export const RewardKind = z.enum(["repeatable", "once", "game"]);
+export type RewardKind = z.infer<typeof RewardKind>;
+
+// The items a "game" reward (an Item) can give. What buying one does is the server's (BoardStore's item
+// grants); its name, emoji and price are the owner's, like any reward's.
+export const GameItemId = z.enum(["bounty-reroll", "booster-reroll"]);
+export type GameItemId = z.infer<typeof GameItemId>;
+
 export const Reward = z.object({
   id: z.string(),
   shopSectionId: z.string(),
   name: z.string().max(TEXT_MAX),
   emoji: z.string().max(EMOJI_MAX),
+  // Its price before modifiers (the weekend sale) — what it costs now is priceOf (modifiers.ts).
   cost: Points,
   note: z.string().max(DESCRIPTION_MAX).optional(),
-  // Times bought — derived from RewardPurchased events, never stored.
+  kind: RewardKind,
+  // The item a "game" reward gives (absent on every other kind).
+  item: GameItemId.optional(),
+  // Whether the weekend sale takes its share off this reward (Settings → Weekend sale).
+  onSale: z.boolean(),
+  // Times bought, and when it last was — derived from RewardPurchased events, never stored.
   redeemed: z.number().int().nonnegative(),
+  boughtAt: z.string().optional(),
   // List structure, exactly as on a task: the group it's in (if any) and its position in its shop
   // section (server-derived from the section order, never evented). See Group.
   groupId: z.string().optional(),
@@ -344,14 +362,30 @@ export const Reward = z.object({
 });
 export type Reward = z.infer<typeof Reward>;
 
+/** Whether a reward has left its shelf: a one-time reward once it's bought. It isn't deleted — it's still
+ *  in the shop's state and history, just not listed (the tab's Display can show it). */
+export const isBought = (reward: Pick<Reward, "kind" | "redeemed">): boolean => reward.kind === "once" && reward.redeemed > 0;
+
+// One item the owner has: those bought and not yet used (kept from week to week), and the open
+// week's free ones left (a Bounty reroll's — gone when the week ends).
+export const InventoryItem = z.object({
+  item: GameItemId,
+  owned: z.number().int().nonnegative(),
+  free: z.number().int().nonnegative(),
+});
+export type InventoryItem = z.infer<typeof InventoryItem>;
+
 // The shop read model in one payload. `spent` is the sum of every purchase's frozen pointsSpent —
 // the client shows the owner's points as the board's live total minus it. `groups` are the shop
-// sections' groups (the board's are served by /api/groups).
+// sections' groups (the board's are served by /api/groups). `inventory` is every item and how
+// many the owner has; `saleStarted` whether the weekend sale was started early this week.
 export const Shop = z.object({
   sections: z.array(ShopSection),
   rewards: z.array(Reward),
   groups: z.array(Group),
   spent: Points,
+  inventory: z.array(InventoryItem).default([]),
+  saleStarted: z.boolean().default(false),
 });
 export type Shop = z.infer<typeof Shop>;
 

@@ -28,7 +28,7 @@ Every file in `docs/` has a row here; a new doc gets one.
 
 **In-app text is product copy, never an echo of the prompt** (the owner's standing rule): a button that ends the week says "End the week", not a summary of everything the request asked it to do. No narrating the mechanism, no "the user", no hint that repeats its label. Rules in `docs/CONVENTIONS.md` → "In-app text".
 
-**Anything that boosts or changes what a task pays is a modifier** (the owner's standing rule for every future gamified mechanic, MMO-style): one registry entry that stacks with the rest, never its own one-off payout, colour or badge. Rules in `docs/CONVENTIONS.md` → "Modifiers"; the Bounty, frost, Subzero and the Booster are its first four entries.
+**Anything that boosts or changes what a task pays is a modifier** (the owner's standing rule for every future gamified mechanic, MMO-style): one registry entry that stacks with the rest, never its own one-off payout, colour or badge. Rules in `docs/CONVENTIONS.md` → "Modifiers"; the Bounty, frost, Subzero and the Booster are its first four entries, and the weekend sale the first on a reward's price.
 
 **Active work:** the owner-approved Tasks rethink — the build order is `docs/BACKLOG.md` → "Next up"; the one-feature-at-a-time build/verify/report cycle is `docs/CONVENTIONS.md` → "How we work together"; how to verify safely is `docs/ARCHITECTURE.md` → "Verifying in an isolated instance".
 

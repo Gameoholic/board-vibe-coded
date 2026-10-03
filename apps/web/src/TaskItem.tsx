@@ -6,6 +6,7 @@ import AgeChip from "./AgeChip";
 import BlockForm, { type BlockReason } from "./BlockForm";
 import { BreakDownIcon, CopyIcon, EyeIcon, HourglassIcon, LockIcon, OutdentIcon, RerollIcon, ScissorsIcon, SnowflakeIcon, ThawIcon } from "./Icons";
 import ItemRow, { RowRemove, type RowContext } from "./ItemRow";
+import { ModifierLine, ModifierTag } from "./ModifierBadges";
 import { lookOf } from "./modifierLooks";
 import { PieceList, PieceStrip, PiecesSummary, type RowPieces } from "./Pieces";
 import { deleteAction, editAction } from "./rowActions";
@@ -68,8 +69,12 @@ interface TaskItemProps {
   // What its completion is (or was) paid at — its modifiers (a Bounty, frost, Subzero): its bracket shows what
   // it pays, each one tags its name and says what it does on a line under it.
   modifiers: readonly AppliedModifier[];
-  // Only on a Bounty still to win, while rerolls are left: its menu's Reroll, and how many are left.
-  reroll?: { left: number; onReroll: () => void };
+  // Which of those lines the tab shows: the modifiers whose line it hides, and whether a line's meter shows (frost's
+  // bar on ice). Absent ≡ every line, with its meter.
+  lines?: { hidden: ReadonlySet<string>; meters: boolean };
+  // Only on what a reroll can change (a Bounty still to win, a Booster), while rerolls are left: its menu's
+  // Reroll, saying how many are left.
+  reroll?: RowReroll;
   // Only in a Freezer: thawing it (the button in its box's place, and its menu) and what that gains — and the
   // thaw bonus it would pay, said under its frost.
   onIce?: { onThaw: () => void; gains?: string; thawBonus?: number };
@@ -77,6 +82,13 @@ interface TaskItemProps {
   freeze?: { onFreeze: () => void; refusal: string | null };
   // The tab's Age Display toggle: how long it has waited, beside its name.
   showAge: boolean;
+}
+
+// A row menu's Reroll: what it rerolls, how many rerolls are left, and doing it.
+export interface RowReroll {
+  label: string;
+  left: number;
+  onReroll: () => void;
 }
 
 export interface RowStatus {
@@ -274,7 +286,7 @@ function formatMinutes(total: number): string {
   return `${m}m`;
 }
 
-function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, pointsHidden, onSetLevel, onRemove, onEdit, onDuplicate, prune, onSetPruned, status, pieces, onMakeOwn, modifiers, reroll, onIce, freeze, showAge }: TaskItemProps) {
+function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, pointsHidden, onSetLevel, onRemove, onEdit, onDuplicate, prune, onSetPruned, status, pieces, onMakeOwn, modifiers, lines, reroll, onIce, freeze, showAge }: TaskItemProps) {
   const b = behaviorOf(task);
   const { now, settings, openDay } = useBoardClock();
   // A scheduled box shows a lock until its time arrives — but only on checkbox tasks (the gate is
@@ -427,10 +439,9 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
       ? pieceStatusActions(task, () => pickStatus("blocked"), () => rowStatus.onSet("backlog"))
       : statusActions(task, pickStatus, () => pickStatus("blocked"), losesBonus);
   // A Bounty still to win can be rerolled from its menu, saying what that spends.
-  const rerollActions: RowAction[] =
-    reroll && task.bounty && !b.isDone(task)
-      ? [{ key: "reroll", label: "Reroll Bounty", icon: RerollIcon, shortcut: "r", warning: `${reroll.left} reroll${reroll.left === 1 ? "" : "s"} left`, onSelect: reroll.onReroll }]
-      : [];
+  const rerollActions: RowAction[] = reroll
+    ? [{ key: "reroll", label: reroll.label, icon: RerollIcon, shortcut: "r", warning: `${reroll.left} reroll${reroll.left === 1 ? "" : "s"} left`, onSelect: reroll.onReroll }]
+    : [];
   // Into its tab's Freezer — shown even when it can't go, saying why (a Bounty, a blocked task). A piece goes
   // with its task, and a finished task is out of the way already.
   const freezeActions: RowAction[] =
@@ -492,11 +503,7 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
     : modifiers.flatMap((m) => {
         const look = lookOf(m);
         if (!look || (onIce && !look.tagOnIce)) return [];
-        return [
-          <span key={m.id} className={`modifier-tag${!look.plainTag && look.aura?.(task, settings, place) ? " glow" : ""}`} style={{ "--c": look.color } as React.CSSProperties}>
-            {look.tag}
-          </span>,
-        ];
+        return [<ModifierTag key={m.id} look={look} glow={!look.plainTag && !!look.aura?.(task, settings, place)} />];
       });
   // The thaw bonus thawing it would pay, said under its frost — on the task, not on each of its pieces.
   const thawLine = !task.parentId ? (onIce?.thawBonus ?? 0) : 0;
@@ -505,12 +512,10 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
       <span className="modifier-lines">
         {modifiers.map((m) => {
           const look = lookOf(m);
-          if (!look) return null;
-          const fill = onIce && look.fill ? look.fill(task, settings) : null;
+          if (!look || lines?.hidden.has(m.id)) return null;
+          const fill = onIce && look.fill && (lines?.meters ?? true) ? look.fill(task, settings) : null;
           return (
-            <span key={m.id} className="modifier-line" style={{ "--c": look.color } as React.CSSProperties}>
-              <look.icon size={12} />
-              <span>{look.line(m, pieceItems.length > 0 ? percents[0] : task.points ?? 0)}</span>
+            <ModifierLine key={m.id} look={look} text={look.line(m, pieceItems.length > 0 ? percents[0] : task.points ?? 0)}>
               {fill !== null && (
                 <>
                   <span className="modifier-meter" aria-hidden="true">
@@ -519,7 +524,7 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
                   {fill >= 1 && <span className="subzero-badge">Subzero</span>}
                 </>
               )}
-            </span>
+            </ModifierLine>
           );
         })}
         {thawLine ? (

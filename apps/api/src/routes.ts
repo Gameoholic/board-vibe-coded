@@ -16,6 +16,8 @@ import {
   PatchStreakBody,
   PatchTaskBody,
   PickBoosterBody,
+  PurchaseRewardBody,
+  RerollBoosterBody,
   RerollBountyBody,
   RecolorSectionBody,
   ReorderBody,
@@ -243,6 +245,7 @@ export function buildRouter(store: BoardStore, backups: Backups): Router {
     if (body.emoji !== undefined) changes.emoji = body.emoji;
     if (body.cost !== undefined) changes.cost = body.cost;
     if (body.note !== undefined) changes.note = body.note || null;
+    if (body.onSale !== undefined) changes.onSale = body.onSale;
     res.json(store.editReward(req.params.id, changes, idemKey(req, "reward-edit")));
   });
 
@@ -251,8 +254,15 @@ export function buildRouter(store: BoardStore, backups: Backups): Router {
     res.status(204).end();
   });
 
+  // Start the weekend sale early, for the rest of the week.
+  router.post("/shop/sale/start", (req, res) => {
+    res.json(store.startSale(idemKey(req, "sale-start")));
+  });
+
+  // Buy at the price the owner was shown (409 when it has changed since — see purchaseReward).
   router.post("/shop/rewards/:id/purchase", (req, res) => {
-    res.json(store.purchaseReward(req.params.id, idemKey(req, "reward-purchase")));
+    const { price } = PurchaseRewardBody.parse(req.body ?? {});
+    res.json(store.purchaseReward(req.params.id, price, idemKey(req, "reward-purchase")));
   });
 
   // ---- settings & periods ----
@@ -314,6 +324,12 @@ export function buildRouter(store: BoardStore, backups: Backups): Router {
   router.post("/booster/pick", (req, res) => {
     const { card } = PickBoosterBody.parse(req.body);
     res.json(store.pickBooster(card, idemKey(req, "booster-pick")));
+  });
+
+  // Reroll one of this week's Boosters with a bought reroll. Returns the new hand, to pick one card from.
+  router.post("/booster/reroll", (req, res) => {
+    const { taskId } = RerollBoosterBody.parse(req.body);
+    res.json(store.rerollBooster(taskId, idemKey(req, "booster-reroll")));
   });
 
   // ---- backups ----

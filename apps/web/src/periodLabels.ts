@@ -44,3 +44,8 @@ export function dayLabel(dayKey: string): { weekday: string; date: string } {
     date: d.toLocaleDateString(undefined, { day: "numeric", timeZone: "UTC" }),
   };
 }
+
+/** A day by its date alone ("October 3"). */
+export function dateLabel(dayKey: string): string {
+  return longDate(dateOf(dayKey));
+}

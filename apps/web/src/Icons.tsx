@@ -393,6 +393,38 @@ export function BoostIcon({ size = 14 }: IconProps) {
   );
 }
 
+// A price tag — the weekend sale's line.
+export function TagIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round">
+      <path d="M2.5 3.3v4l6.2 6.2a1 1 0 0 0 1.4 0l3.4-3.4a1 1 0 0 0 0-1.4L7.3 2.5h-4a.8.8 0 0 0-.8.8Z" />
+      <circle cx="5.3" cy="5.3" r="1" />
+    </svg>
+  );
+}
+
+// A bar part-filled — a meter, like frost's on a frozen task.
+export function MeterIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round">
+      <rect x="1.5" y="5.5" width="13" height="5" rx="2.5" />
+      <path d="M4 8h4.5" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// A die — an Item reward in the shop.
+export function DieIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round">
+      <rect x="2.5" y="2.5" width="11" height="11" rx="2.2" />
+      <circle cx="5.6" cy="5.6" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="8" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="10.4" cy="10.4" r="0.9" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 // A calendar page — the Age Display toggle (how long a task has waited).
 export function AgeIcon({ size = 14 }: IconProps) {
   return (

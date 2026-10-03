@@ -120,6 +120,9 @@ interface SettingsViewProps {
   onSetDebugClock: (at: string | null) => void;
   // This device's tab placements — a backup's preview draws its board the way this board is laid out.
   layouts: Record<string, CardLayout>;
+  // Whether the weekend sale is on now, and starting it early (it then runs until the week ends).
+  saleRunning: boolean;
+  onStartSale: () => void;
 }
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -148,6 +151,43 @@ function fromHHMM(value: string): number | null {
   const [h, m] = value.split(":").map(Number);
   if (!Number.isInteger(h) || !Number.isInteger(m)) return null;
   return h * 60 + m;
+}
+
+// A moment of the week: a weekday and a time, side by side (the weekend sale's start and end).
+function WeekMomentField({
+  label,
+  day,
+  minutes,
+  onChange,
+}: {
+  label: string;
+  day: number;
+  minutes: number;
+  onChange: (day: number, minutes: number) => void;
+}) {
+  return (
+    <div className="field">
+      <span className="field-label">{label}</span>
+      <div className="week-moment">
+        <select value={day} aria-label={`${label}: day`} onChange={(e) => onChange(Number(e.target.value), minutes)}>
+          {WEEKDAYS.map((name, i) => (
+            <option key={name} value={i}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <input
+          type="time"
+          value={toHHMM(minutes)}
+          aria-label={`${label}: time`}
+          onChange={(e) => {
+            const m = fromHHMM(e.target.value);
+            if (m !== null) onChange(day, m);
+          }}
+        />
+      </div>
+    </div>
+  );
 }
 
 // Wind-down display-trigger list helpers (pure). Shown "before" first (earliest/largest at top),
@@ -188,6 +228,8 @@ function SettingsView({
   realNow,
   onSetDebugClock,
   layouts,
+  saleRunning,
+  onStartSale,
 }: SettingsViewProps) {
   const [confirming, setConfirming] = useState(false);
   const resetRef = useRef<HTMLDivElement>(null);
@@ -201,6 +243,8 @@ function SettingsView({
   const patchBounty = (patch: Partial<Settings["bounty"]>) => onSave({ bounty: { ...settings.bounty, ...patch } });
   const patchFreezer = (patch: Partial<Settings["freezer"]>) => onSave({ freezer: { ...settings.freezer, ...patch } });
   const patchBooster = (patch: Partial<Settings["booster"]>) => onSave({ booster: { ...settings.booster, ...patch } });
+  const patchSale = (patch: Partial<Settings["sale"]>) => onSave({ sale: { ...settings.sale, ...patch } });
+  const [confirmingSale, setConfirmingSale] = useState(false);
   const patchBackup = (patch: Partial<Settings["backup"]>) => onSave({ backup: { ...settings.backup, ...patch } });
   const [triggerDraft, setTriggerDraft] = useState("10");
 
@@ -485,6 +529,56 @@ function SettingsView({
               />
               <span className="field-hint">Added every time you tick its task.</span>
             </label>
+          </>
+        )}
+      </section>
+
+      <section className="settings-group">
+        <h2 className="settings-heading">Weekend sale</h2>
+        <p className="settings-note">Rewards on the weekend sale cost less until the week ends.</p>
+
+        <label className="field field-toggle">
+          <span className="field-label">Enable weekend sale</span>
+          <input
+            type="checkbox"
+            className="settings-switch"
+            checked={settings.sale.enabled}
+            onChange={(e) => patchSale({ enabled: e.target.checked })}
+          />
+        </label>
+
+        {settings.sale.enabled && (
+          <>
+            <label className="field">
+              <span className="field-label">Discount (%)</span>
+              <WholeField value={settings.sale.percentOff} min={1} max={100} onChange={(percentOff) => patchSale({ percentOff })} />
+            </label>
+            <WeekMomentField
+              label="Starts"
+              day={settings.sale.startDay}
+              minutes={settings.sale.startMinutes}
+              onChange={(startDay, startMinutes) => patchSale({ startDay, startMinutes })}
+            />
+            {saleRunning ? (
+              <p className="settings-note">On now, until the week ends.</p>
+            ) : (
+              <div className="popover-anchor">
+                <button type="button" className="ghost-btn" onClick={() => setConfirmingSale(true)}>
+                  Start the sale now
+                </button>
+                <ConfirmPopover
+                  open={confirmingSale}
+                  message="Start the weekend sale now? It runs until the week ends."
+                  confirmLabel="Start"
+                  danger={false}
+                  onConfirm={() => {
+                    setConfirmingSale(false);
+                    onStartSale();
+                  }}
+                  onCancel={() => setConfirmingSale(false)}
+                />
+              </div>
+            )}
           </>
         )}
       </section>

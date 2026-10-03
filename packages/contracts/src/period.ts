@@ -73,6 +73,17 @@ export const BoosterSettings = z.object({
 });
 export type BoosterSettings = z.infer<typeof BoosterSettings>;
 
+// The weekend sale's knobs (Settings → Weekend sale): whether it runs, the share it takes off a reward that's
+// on sale (a modifier on the price — see modifiers.ts), and when in each week it starts — a weekday and time,
+// by default Thursday evening, when the working week is done. It runs until the week is ended.
+export const SaleSettings = z.object({
+  enabled: z.boolean().default(true),
+  percentOff: z.number().int().min(1).max(100).default(50),
+  startDay: z.number().int().min(0).max(6).default(4),
+  startMinutes: z.number().int().min(0).max(1439).default(17 * 60),
+});
+export type SaleSettings = z.infer<typeof SaleSettings>;
+
 // The Freezer's knobs (Settings → Freezer; see freezer.ts): how long a Backlog task may wait before a week
 // close freezes it, how fast frost grows on a frozen one (a share of its points per week on ice, counted by
 // the day) and where it stops, the least a task whose frost is full (Subzero) pays once thawed, and the
@@ -119,6 +130,8 @@ export const Settings = z.object({
   freezer: FreezerSettings.default({}),
   // The weekly Booster (see booster.ts). Defaulted, so a board predating it parses unchanged.
   booster: BoosterSettings.default({}),
+  // The shop's weekend sale. Defaulted (and on), so a board predating it gets it at once.
+  sale: SaleSettings.default({}),
   // Database backups. Defaulted to how they ran before they were settings (every 2 days, 5 kept).
   backup: BackupSettings.default({}),
 });
@@ -260,6 +273,24 @@ export function isBoxLocked(entry: BoxSchedule, now: string, settings: Settings,
   const posNow = ((dow - settings.weekStartDay + 7) % 7) * 1440 + mod;
   const posBox = ((entry.dayOfWeek - settings.weekStartDay + 7) % 7) * 1440 + (entry.minutes ?? 0);
   return posNow < posBox;
+}
+
+/** The open week, as the weekend sale reads it: its open day (a day not yet ended is still today), and
+ *  whether the sale was started early by hand. */
+export interface SaleWeek {
+  openDay?: string;
+  startedEarly?: boolean;
+}
+
+/**
+ * Whether the weekend sale is on at `now`: it's enabled, and the open week has reached its start — the same
+ * gate as a weekly box's (isBoxLocked), so it follows the board's days: a day not yet ended is still today,
+ * and the sale runs until the week is ended, whatever the clock says — or it was started early this week.
+ */
+export function saleOn(now: string, settings: Settings, week: SaleWeek = {}): boolean {
+  if (!settings.sale.enabled) return false;
+  if (week.startedEarly) return true;
+  return !isBoxLocked({ dayOfWeek: settings.sale.startDay, minutes: settings.sale.startMinutes }, now, settings, week.openDay);
 }
 
 export type WindDownPhase = "idle" | "ramp" | "takeover";

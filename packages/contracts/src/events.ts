@@ -1,7 +1,9 @@
 import { z } from "zod";
 import {
   AppliedModifier,
+  GameItemId,
   HexColor,
+  RewardKind,
   SectionKind,
   SectionPeriod,
   StreakMatcher,
@@ -87,6 +89,7 @@ export const RewardEditFields = z.object({
   cost: Points.optional(),
   // Nullable so an edit can clear the note (and `previous` can record that there was none).
   note: z.string().nullable().optional(),
+  onSale: z.boolean().optional(),
 });
 export type RewardEditFields = z.infer<typeof RewardEditFields>;
 
@@ -231,7 +234,13 @@ export const BoardEvent = z.discriminatedUnion("type", [
   // A week close's Booster hand for the week `periodKey`: the tasks on its cards, face down, in the order dealt
   // — the result of the server's shuffle, recorded so a rebuild replays it and which card holds which task is
   // settled before any pick. The deal is the server's to know; the owner only sees a card once it's picked.
-  z.object({ type: z.literal("BoosterDealt"), periodKey: z.string(), taskIds: z.array(z.string()) }),
+  // A reroll's deal (`replaces`: the Booster it gives up) spends a bought reroll; the week's other Boosters
+  // stay, and one card is picked from it.
+  z.object({ type: z.literal("BoosterDealt"), periodKey: z.string(), taskIds: z.array(z.string()), replaces: z.string().optional() }),
+  // The weekend sale started early, by hand, for the week `periodKey` — it runs until that week is ended.
+  z.object({ type: z.literal("SaleStarted"), periodKey: z.string() }),
+  // Booster rerolls bought in the shop, banked until used, whatever the week (cf. BountyRerollsGranted).
+  z.object({ type: z.literal("BoosterRerollsGranted"), count: z.number().int().nonnegative() }),
   // One card of that hand picked: the task it held is a Booster until the week closes, adding `amount` (the
   // setting's at the time) to every tick of it.
   z.object({
@@ -379,6 +388,11 @@ export const BoardEvent = z.discriminatedUnion("type", [
     emoji: z.string(),
     cost: Points,
     note: z.string().optional(),
+    // Optional so a reward from before kinds still parses: it was repeatable, and — the shop's rewards then
+    // being its leisure ones — on sale. `item` is what a "game" reward gives.
+    kind: RewardKind.optional(),
+    item: GameItemId.optional(),
+    onSale: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("RewardEdited"),
@@ -390,7 +404,15 @@ export const BoardEvent = z.discriminatedUnion("type", [
   // Reorders a shop section's rewards — the reward counterpart of TasksReordered (a group's members
   // are kept contiguous by the client, so this is just the flat reward-id order).
   z.object({ type: z.literal("RewardsReordered"), shopSectionId: z.string(), orderedIds: z.array(z.string()) }),
-  z.object({ type: z.literal("RewardPurchased"), rewardId: z.string(), pointsSpent: Points }),
+  // `cost` is its price then and `modifiers` what changed it (the weekend sale), frozen like a completion's —
+  // both absent on purchases from before price modifiers, when what was spent was the price.
+  z.object({
+    type: z.literal("RewardPurchased"),
+    rewardId: z.string(),
+    pointsSpent: Points,
+    cost: Points.optional(),
+    modifiers: z.array(AppliedModifier).optional(),
+  }),
 ]);
 export type BoardEvent = z.infer<typeof BoardEvent>;
 export type BoardEventType = BoardEvent["type"];

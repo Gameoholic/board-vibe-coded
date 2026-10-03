@@ -1,14 +1,15 @@
-import type { AppliedModifier, ModifierKind, Section, Task } from "./domain.js";
+import type { AppliedModifier, ModifierKind, Reward, Section, Task } from "./domain.js";
 import { frostShare, isFullFrost } from "./freezer.js";
-import type { Settings } from "./period.js";
+import { saleOn, type SaleWeek, type Settings } from "./period.js";
 
 // Modifiers: everything that changes what a task pays — the Bounty, frost, Subzero, and every boost the
-// board grows later (see CONVENTIONS.md → "Modifiers"). Each is one entry here: when a task has it and its
+// board grows later (see CONVENTIONS.md → "Modifiers") — and what a reward costs (the weekend sale, under
+// "Prices" below). Each is one entry here: when a task has it and its
 // effect, which is one of four kinds. All of a task's modifiers compose into one payout, rounded once, so
 // they stack by construction and none knows about the others. How each one *looks* (its tag, colour, line)
 // is the web's (modifierLooks.ts), keyed by these ids — nothing else in the code knows a modifier by name.
 
-export type ModifierId = "bounty" | "frost" | "subzero" | "booster";
+export type ModifierId = "bounty" | "frost" | "subzero" | "booster" | "sale";
 
 export interface ModifierContext {
   settings: Settings;
@@ -23,15 +24,15 @@ export interface ModifierContext {
   piecesPaid?: number;
 }
 
-interface Modifier {
+interface Modifier<Target, Context> {
   id: ModifierId;
   kind: ModifierKind;
-  // Its value on `task` right now (see AppliedModifier), or null when the task doesn't have it.
-  valueOn(task: Task, ctx: ModifierContext): number | null;
+  // Its value on `target` right now (see AppliedModifier), or null when it doesn't have it.
+  valueOn(target: Target, ctx: Context): number | null;
 }
 
 // In the order a task's lines list them.
-const MODIFIERS: Modifier[] = [
+const MODIFIERS: Modifier<Task, ModifierContext>[] = [
   // The week's Bounty: a factor on everything else, its own or its task's (a piece's).
   {
     id: "bounty",
@@ -99,6 +100,39 @@ export function payout(points: number, modifiers: readonly AppliedModifier[]): n
     else floor = Math.max(floor, m.value - (m.piecesPaid ?? 0));
   }
   return Math.max(Math.round((points * (1 + shares) + flats) * factor), floor);
+}
+
+// ---- Prices ----
+// A reward's price takes modifiers the same way a task's pay does: the same four kinds, composed by the same
+// payout, so a future coupon stacks with the sale by construction. A purchase freezes the ones it was bought
+// at (RewardPurchased.modifiers), like a completion.
+
+export interface PriceContext extends SaleWeek {
+  settings: Settings;
+  // The moment it's priced at — the server's clock when it's bought, the board's when it's shown.
+  now: string;
+}
+
+const PRICE_MODIFIERS: Modifier<Pick<Reward, "onSale">, PriceContext>[] = [
+  // The weekend sale: a factor off the price of a reward that's on sale, while the sale is on.
+  {
+    id: "sale",
+    kind: "factor",
+    valueOn: (reward, ctx) => (reward.onSale && saleOn(ctx.now, ctx.settings, ctx) ? 1 - ctx.settings.sale.percentOff / 100 : null),
+  },
+];
+
+/** The modifiers on `reward`'s price right now, in their order. */
+export function priceModifiersOf(reward: Pick<Reward, "onSale">, ctx: PriceContext): AppliedModifier[] {
+  return PRICE_MODIFIERS.flatMap((m) => {
+    const value = m.valueOn(reward, ctx);
+    return value === null ? [] : [{ id: m.id, kind: m.kind, value }];
+  });
+}
+
+/** What `reward` costs right now: its price under its modifiers, composed and rounded once. */
+export function priceOf(reward: Pick<Reward, "cost" | "onSale">, ctx: PriceContext): number {
+  return payout(reward.cost, priceModifiersOf(reward, ctx));
 }
 
 /** The modifiers frozen on an old completion that only recorded a Bounty's factor (`boost`). */

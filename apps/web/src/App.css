@@ -596,21 +596,22 @@ main {
   background: var(--hover);
 }
 
-.sort-menu {
+/* A tab's Sort and Display menus (TabControls): the pinned rows, then the rest under "Show more". */
+.view-menu {
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
 
-/* A sort row = the selectable option (fills the row) plus a pin toggle that appears on hover. The
-   pin sits outside the option button so the two aren't nested buttons. */
-.sort-row {
+/* A menu row = the option (a sort to pick, or a display checkbox; it fills the row) plus a pin toggle that
+   appears on hover. The pin sits outside the option so the two controls aren't nested. */
+.view-row {
   display: flex;
   align-items: center;
   border-radius: 6px;
 }
 
-.sort-row:hover {
+.view-row:hover {
   background: var(--hover);
 }
 
@@ -644,7 +645,7 @@ main {
   flex-shrink: 0;
 }
 
-/* Pin toggle: hidden until the row is hovered, unless the sort is already pinned (then it stays
+/* Pin toggle: hidden until the row is hovered, unless the option is already pinned (then it stays
    visible so you can see what's pinned and unpin it). */
 .pin-btn {
   display: inline-flex;
@@ -663,7 +664,7 @@ main {
   transition: opacity 0.12s ease, color 0.12s ease;
 }
 
-.sort-row:hover .pin-btn,
+.view-row:hover .pin-btn,
 .pin-btn.pinned {
   opacity: 1;
 }
@@ -677,8 +678,8 @@ main {
   color: var(--text-dim);
 }
 
-/* "Show N more" divider-button and the collapsible list it reveals. */
-.sort-more-btn {
+/* "Show more" divider-button and the collapsible list it reveals. */
+.view-more-btn {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -698,31 +699,27 @@ main {
   text-align: left;
 }
 
-.sort-more-btn:hover {
+.view-more-btn:hover {
   color: var(--text);
 }
 
-.sort-more-btn svg {
+.view-more-btn svg {
   transition: transform 0.16s ease;
 }
 
-.sort-more-btn.open svg {
+.view-more-btn.open svg {
   transform: rotate(180deg);
 }
 
-.sort-more {
+.view-more {
   overflow: hidden;
 }
 
-/* Per-tab Display popover: a vertical list of view toggles (checkbox rows). */
-.display-menu {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
+/* A Display row's toggle: its checkbox, icon and words, filling the row beside its pin. */
 .display-option {
   display: flex;
+  flex: 1;
+  min-width: 0;
   align-items: center;
   gap: 8px;
   padding: 7px 8px;
@@ -731,10 +728,6 @@ main {
   font-weight: 500;
   color: var(--text);
   cursor: pointer;
-}
-
-.display-option:hover {
-  background: var(--hover);
 }
 
 .display-option input {
@@ -1227,7 +1220,8 @@ main {
   opacity: 0.5;
 }
 
-.task-item.done::after {
+.task-item.done::after,
+.reward-item.bought::after {
   content: "";
   position: absolute;
   /* Overlap the 2px row-gap so a run of done rows reads as one striped field. */
@@ -2714,6 +2708,12 @@ body.whip-dragging {
   width: fit-content;
 }
 
+/* A weekday and a time side by side (the weekend sale's start and end). */
+.week-moment {
+  display: flex;
+  gap: 8px;
+}
+
 /* A label + toggle-switch on one row (settings on/off knobs). */
 .field-toggle {
   flex-direction: row;
@@ -3947,6 +3947,78 @@ main.shop-open > .zoom-controls {
   pointer-events: none;
 }
 
+/* While the weekend sale is on: a tag beside the docked counter (under it on a narrow screen, where there's
+   no room beside it), clear of the tabs' first row and never in the way of a click. */
+.sale-banner {
+  position: absolute;
+  top: 59px;
+  right: calc(50% + 96px);
+  translate: 0 -50%;
+  z-index: 21;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  padding: 4px 12px;
+  background: var(--sale-soft);
+  border: 1px solid var(--sale-line);
+  border-radius: 999px;
+  color: var(--mod-sale);
+  font-size: 0.8rem;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.sale-banner-until {
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+@media (max-width: 720px) {
+  .sale-banner {
+    top: 108px;
+    right: auto;
+    left: 50%;
+    translate: -50% 0;
+  }
+}
+
+/* The shop's inventory (its toolbar's bag): each in-game item, and how many you have. */
+.inventory {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inventory-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  font-size: 0.85rem;
+}
+
+.inventory-emoji {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.inventory-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.inventory-none {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
 /* First-run: centred in the empty shop canvas, a card-like panel to name the first tab. */
 .shop-empty {
   position: absolute;
@@ -4012,6 +4084,43 @@ main.shop-open > .zoom-controls {
   line-height: 1.35;
 }
 
+/* What you have of a power-up (HeldChips): the ones you own, and the week's free ones in the sale's green. */
+.held-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.held-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.held-chip.free {
+  border-color: var(--sale-line);
+  background: var(--sale-soft);
+  color: var(--mod-sale);
+}
+
+/* A bought one-time reward, leaving its shelf or in the look-back: hatched like a done task. */
+.reward-item.bought .reward-name {
+  color: var(--text-dim);
+}
+
+.reward-item.bought .reward-emoji {
+  opacity: 0.5;
+}
+
 .reward-redeemed {
   margin-left: 6px;
   font-size: 0.72rem;
@@ -4041,10 +4150,30 @@ main.shop-open > .zoom-controls {
   filter: brightness(0.92);
 }
 
+/* A price a modifier changes (the weekend sale): in its colour, the old price struck through before it. */
+.shop-buy.modified {
+  background: var(--ink);
+}
+
+.shop-was {
+  margin-right: 5px;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
 .shop-buy:disabled {
   background: var(--hover-strong);
   color: var(--text-dim);
   cursor: not-allowed;
+}
+
+/* The add form's kind picker: one segment each, across the form. */
+.seg.reward-kind {
+  display: flex;
+}
+
+.reward-kind .seg-btn {
+  flex: 1;
 }
 
 .reward-form-name {

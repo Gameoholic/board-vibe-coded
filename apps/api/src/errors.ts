@@ -11,3 +11,5 @@ export class ApiError extends Error {
 
 export const notFound = (what: string) => new ApiError(404, `${what} not found`);
 export const badRequest = (message: string) => new ApiError(400, message);
+// The request was sound but the board has moved on since the client looked (a price that changed).
+export const conflict = (message: string) => new ApiError(409, message);

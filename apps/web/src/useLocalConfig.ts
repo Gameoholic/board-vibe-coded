@@ -21,14 +21,15 @@ export interface CanvasSettings {
 
 const DEFAULT_SETTINGS: CanvasSettings = { snap: true, gridSize: 20, showGrid: false };
 
-// Per-tab view preferences — how one tab's items are sorted and which optional row extras show.
-// Device-local like layouts/settings (a display transform, not board truth), keyed by tab id (board
-// and shop tabs alike). Both halves are tab-kind agnostic: `sortMode` is whatever mode that kind's
-// Sort menu offers, and `display` maps that kind's Display option keys to on/off (see TabControls —
-// an absent key falls back to the option's default).
+// Per-tab view preferences — how one tab's items are sorted, which optional row extras show, and which
+// menu options sit up front. Device-local like layouts/settings (a display transform, not board truth),
+// keyed by tab id (board and shop tabs alike). All tab-kind agnostic: `sortMode` is whatever key that tab's
+// Sort menu offers, `display` maps its Display keys to on/off, and `pinned` maps "sort:<key>" /
+// "display:<key>" to pinned or not (see TabControls — an absent key falls back to the tab's default).
 export interface TabPrefs {
   sortMode: string;
   display: Record<string, boolean>;
+  pinned?: Record<string, boolean>;
   // The broken-down tasks whose pieces are folded away, by id. Absent ≡ every one shows its pieces.
   collapsed?: string[];
 }
@@ -43,22 +44,19 @@ function normalizeTabPrefs(raw: Record<string, unknown>): TabPrefs {
     ...(typeof raw.showTimer === "boolean" ? { timer: raw.showTimer } : {}),
   };
   const collapsed = Array.isArray(raw.collapsed) ? raw.collapsed.filter((id): id is string => typeof id === "string") : undefined;
+  const pinned = raw.pinned && typeof raw.pinned === "object" ? (raw.pinned as Record<string, boolean>) : undefined;
   return {
     sortMode: typeof raw.sortMode === "string" ? raw.sortMode : DEFAULT_TAB_PREFS.sortMode,
     display,
+    ...(pinned ? { pinned } : {}),
     ...(collapsed ? { collapsed } : {}),
   };
 }
-
-// Which sort modes show in a task tab's Sort menu without expanding "Show more". A single global
-// set (not per-tab) so the menu is curated once. The rest stay one tap away under Show more.
-const DEFAULT_PINNED_SORTS = ["manual", "quick"];
 
 interface LocalConfig {
   layouts: Record<string, CardLayout>;
   settings: CanvasSettings;
   tabPrefs: Record<string, TabPrefs>;
-  pinnedSorts: string[];
 }
 
 const KEY = "board-config";
@@ -69,7 +67,9 @@ function load(): LocalConfig {
     if (raw) {
       const parsed = JSON.parse(raw);
       // Spread the stored values over the defaults so a missing key (or a stale pre-settings
-      // config) fills in rather than reading as undefined; settings merges the same way.
+      // config) fills in rather than reading as undefined; settings merges the same way. The one
+      // board-wide set of pinned sorts (`pinnedSorts`) was replaced by each tab's own pins, so it's dropped.
+      delete parsed.pinnedSorts;
       const tabPrefs = Object.fromEntries(
         Object.entries((parsed.tabPrefs ?? {}) as Record<string, Record<string, unknown>>).map(([id, p]) => [
           id,
@@ -78,14 +78,13 @@ function load(): LocalConfig {
       );
       return {
         layouts: {},
-        pinnedSorts: DEFAULT_PINNED_SORTS,
         ...parsed,
         tabPrefs,
         settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
       };
     }
   } catch {}
-  return { layouts: {}, settings: DEFAULT_SETTINGS, tabPrefs: {}, pinnedSorts: DEFAULT_PINNED_SORTS };
+  return { layouts: {}, settings: DEFAULT_SETTINGS, tabPrefs: {} };
 }
 
 function save(config: LocalConfig) {
@@ -162,18 +161,6 @@ export function useLocalConfig() {
     });
   }, []);
 
-  // Pin or unpin a sort mode from the always-visible part of the Sort menu (global across tabs).
-  const togglePinnedSort = useCallback((mode: string) => {
-    setConfig((prev) => {
-      const pinnedSorts = prev.pinnedSorts.includes(mode)
-        ? prev.pinnedSorts.filter((m) => m !== mode)
-        : [...prev.pinnedSorts, mode];
-      const next: LocalConfig = { ...prev, pinnedSorts };
-      save(next);
-      return next;
-    });
-  }, []);
-
   // Wipe the given cards' saved placements so they fall back to their tidy default grid
   // (defaultLayout) — one canvas's cards at a time, so resetting the shop leaves the board as it was.
   // Device-local only — it never touches the server, so it's a safe "put my tabs back" escape hatch.
@@ -187,7 +174,7 @@ export function useLocalConfig() {
     });
   }, []);
 
-  return { config, setCardLayout, setSettings, setTabPref, togglePinnedSort, resetLayouts };
+  return { config, setCardLayout, setSettings, setTabPref, resetLayouts };
 }
 
 export type LocalConfigApi = ReturnType<typeof useLocalConfig>;

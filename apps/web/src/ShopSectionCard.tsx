@@ -2,43 +2,28 @@ import { useMemo, useState } from "react";
 import CanvasCard, { CardAdd, CardTitle, type CardFrame } from "./CanvasCard";
 import ColorPicker from "./ColorPicker";
 import ConfirmPopover from "./ConfirmPopover";
-import { ArrowDownIcon, ArrowUpIcon, BagIcon, CircleCheckIcon, FlameIcon, PencilIcon, SparkleIcon } from "./Icons";
 import ItemList from "./ItemList";
 import Popover from "./Popover";
 import RewardItem, { RewardForm } from "./RewardItem";
-import { ADD_BUTTON_KEY, addButtonOption } from "./displayOptions";
 import { tabInk } from "./palette";
-import { DisplayMenu, SortMenu, tabView, type DisplayOption, type SortOption } from "./TabControls";
-import type { Group, Reward, ShopSection } from "./types";
+import { DisplayMenu, SortMenu, sortItems, tabView } from "./TabControls";
+import { ADD_BUTTON_KEY, GROUPING_KEY, canAfford, shopTabOffer } from "./tabViews";
+import { isBought, payout, priceModifiersOf } from "./types";
+import type { AppliedModifier, Group, InventoryItem, Reward, ShopSection } from "./types";
+import { useBoardClock } from "./useBoardClock";
 import type { TabPrefs } from "./useLocalConfig";
-import type { RewardInput } from "./useShop";
+import type { NewReward, RewardInput } from "./useShop";
 
 // A shop tab: the same tab base as a board tab (CanvasCard — move/resize, header, sort/display
 // controls, add button) around the same list base (ItemList — reorder and grouping). What's specific
-// here is only what's specific to rewards: their sorts and display toggles, the reward row, the add
-// form, and the tab settings (unlike the board's fixed tabs, shop tabs are renamed and deleted here).
+// here is only what's specific to rewards: the reward row, the add form, and the tab settings (unlike the
+// board's fixed tabs, shop tabs are renamed and deleted here). What its menus offer is tabViews.ts's.
 
-const REWARD_SORT_OPTIONS: SortOption[] = [
-  { mode: "manual", label: "Manual", icon: SparkleIcon },
-  { mode: "affordable", label: "Can afford first", icon: CircleCheckIcon },
-  { mode: "cost-asc", label: "Cost: low to high", icon: ArrowUpIcon },
-  { mode: "cost-desc", label: "Cost: high to low", icon: ArrowDownIcon },
-  { mode: "bought-desc", label: "Most bought", icon: FlameIcon },
-  { mode: "added-newest", label: "Date added: newest", icon: ArrowDownIcon },
-  { mode: "added-oldest", label: "Date added: oldest", icon: ArrowUpIcon },
-];
-
-// A reward row's optional extras (the Display menu). Both on by default — unlike a task's, they're
-// the reward's own details rather than add-on tooling. The "+" is hidden until wanted, as on most tabs.
-const REWARD_DISPLAY: DisplayOption[] = [
-  { key: "note", label: "Note", icon: PencilIcon, defaultOn: true },
-  { key: "bought", label: "Times bought", icon: BagIcon, defaultOn: true },
-  addButtonOption("reward"),
-];
-
-// Whether a reward can be bought right now. Mirrors the server's own check, only to disable the
-// button and drive the "Can afford first" sort; the server still has the final say.
-const affordable = (r: Reward, points: number, closed: boolean) => !closed && points >= r.cost;
+// A reward as it's priced now: what it costs, and the modifiers that make it so (the weekend sale).
+interface Priced {
+  price: number;
+  modifiers: AppliedModifier[];
+}
 
 interface ShopSectionCardProps {
   section: ShopSection;
@@ -46,17 +31,17 @@ interface ShopSectionCardProps {
   groups: Group[];
   points: number; // the owner's spendable points (thousandths) — gates the buy buttons
   closed: boolean; // spec: a negative balance closes the shop
+  inventory: InventoryItem[]; // how many of each item the owner has
+  saleStarted: boolean; // the weekend sale was started early this week
   frame: CardFrame;
   prefs: TabPrefs | undefined;
   onPrefsChange: (patch: Partial<TabPrefs>) => void;
-  pinnedSorts: string[];
-  onTogglePin: (mode: string) => void;
   onEditSection: (patch: Partial<Omit<ShopSection, "id">>) => void;
   onRemoveSection: () => void;
-  onAddReward: (input: RewardInput) => void;
+  onAddReward: (input: NewReward) => void;
   onEditReward: (id: string, input: RewardInput) => void;
   onRemoveReward: (id: string) => void;
-  onBuy: (reward: Reward) => void;
+  onBuy: (reward: Reward, price: number) => void;
   onReorder: (orderedIds: string[]) => void;
   onAddGroup: (rewardIds: string[]) => void;
   onExtendGroup: (groupId: string, rewardIds: string[]) => void;
@@ -71,11 +56,11 @@ function ShopSectionCard({
   groups,
   points,
   closed,
+  inventory,
+  saleStarted,
   frame,
   prefs,
   onPrefsChange,
-  pinnedSorts,
-  onTogglePin,
   onEditSection,
   onRemoveSection,
   onAddReward,
@@ -89,25 +74,42 @@ function ShopSectionCard({
   onEditGroup,
   onRemoveGroup,
 }: ShopSectionCardProps) {
-  const view = tabView(prefs, onPrefsChange, REWARD_DISPLAY);
+  const hasOnce = rewards.some((r) => r.kind === "once");
+  const offered = useMemo(() => shopTabOffer(hasOnce), [hasOnce]);
+  const view = tabView(prefs, onPrefsChange, offered);
   const showAddButton = view.shown(ADD_BUTTON_KEY);
-  const sortMode = view.sortMode;
-  const canBuy = (r: Reward) => affordable(r, points, closed);
+  const showOwned = view.shown("owned");
 
-  const sorted = useMemo(() => {
-    // Affordable first (cheapest first within each band), so what you can have now leads.
-    if (sortMode === "affordable") {
-      const band = (r: Reward) => Number(!affordable(r, points, closed));
-      return [...rewards].sort((a, b) => band(a) - band(b) || a.cost - b.cost);
+  // What each reward costs now, as the server will charge it. The board clock ticks each minute, so the
+  // weekend sale starts and ends on screen without a reload.
+  const { now, settings, openDay } = useBoardClock();
+  const priced = useMemo(() => {
+    const byId = new Map<string, Priced>();
+    for (const r of rewards) {
+      const modifiers = priceModifiersOf(r, { settings, now, openDay, startedEarly: saleStarted });
+      byId.set(r.id, { price: payout(r.cost, modifiers), modifiers });
     }
-    if (sortMode === "cost-asc") return [...rewards].sort((a, b) => a.cost - b.cost);
-    if (sortMode === "cost-desc") return [...rewards].sort((a, b) => b.cost - a.cost);
-    if (sortMode === "bought-desc") return [...rewards].sort((a, b) => b.redeemed - a.redeemed);
-    // createdAt is an ISO string, so lexicographic compare is chronological.
-    if (sortMode === "added-newest") return [...rewards].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    if (sortMode === "added-oldest") return [...rewards].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    return rewards;
-  }, [rewards, sortMode, points, closed]);
+    return byId;
+  }, [rewards, settings, now, openDay, saleStarted]);
+  const priceOf = (r: Reward) => priced.get(r.id)?.price ?? r.cost;
+
+  // A bought one-time reward has left its shelf (the server keeps it at the end of the tab's order) —
+  // unless the tab's Display shows them, as a flat look-back that doesn't reorder or group.
+  const listed = useMemo(() => rewards.filter((r) => showOwned || !isBought(r)), [rewards, showOwned]);
+  const unlisted = useMemo(() => rewards.filter((r) => !showOwned && isBought(r)).map((r) => r.id), [rewards, showOwned]);
+  // A reorder names the whole tab: the hidden bought ones keep their place at its end.
+  const reorder = (orderedIds: string[]) => onReorder([...orderedIds, ...unlisted]);
+  const eject = (rewardId: string, groupId: string, newOrder: string[]) => onEjectFromGroup(rewardId, groupId, [...newOrder, ...unlisted]);
+
+  const sorted = useMemo(
+    () =>
+      sortItems(listed, offered.sorts.find((o) => o.key === view.sortMode), {
+        price: (r: Reward) => priced.get(r.id)?.price ?? r.cost,
+        points,
+        closed,
+      }),
+    [listed, offered, view.sortMode, priced, points, closed],
+  );
 
   return (
     <CanvasCard
@@ -119,19 +121,14 @@ function ShopSectionCard({
       }
       actions={
         <>
-          <SortMenu
-            options={REWARD_SORT_OPTIONS}
-            mode={sortMode}
-            onSelect={view.setSortMode}
-            pinned={{ modes: pinnedSorts, onToggle: onTogglePin }}
-          />
-          <DisplayMenu options={REWARD_DISPLAY} shown={view.shown} onToggle={view.setShown} />
+          <SortMenu options={offered.sorts} view={view} />
+          <DisplayMenu options={offered.displays} view={view} />
         </>
       }
       footer={
         <CardAdd label="Add reward" shown={showAddButton}>
           {(open, close) => (
-            <Popover title="Add reward" open={open} onClose={close} align="left" width={280}>
+            <Popover title="Add reward" open={open} onClose={close} align="left" width={280} scrollable>
               <RewardForm
                 submitLabel="Add reward"
                 onCancel={close}
@@ -146,8 +143,8 @@ function ShopSectionCard({
       }
     >
       <ItemList
-        items={rewards}
-        manual={sortMode === "manual"}
+        items={listed}
+        manual={view.sortMode === "manual" && !showOwned}
         sorted={sorted}
         groups={groups}
         noun="rewards"
@@ -158,18 +155,22 @@ function ShopSectionCard({
             reward={reward}
             color={tabInk(section.color)}
             row={row}
-            affordable={canBuy(reward)}
+            price={priceOf(reward)}
+            modifiers={priced.get(reward.id)?.modifiers ?? []}
+            affordable={canAfford(priceOf(reward), { points, closed })}
             showNote={view.shown("note")}
             showBought={view.shown("bought")}
-            onBuy={() => onBuy(reward)}
+            held={reward.item ? inventory.find((i) => i.item === reward.item) : undefined}
+            onBuy={() => onBuy(reward, priceOf(reward))}
             onEdit={(input) => onEditReward(reward.id, input)}
             onRemove={() => onRemoveReward(reward.id)}
           />
         )}
-        onReorder={onReorder}
+        grouping={view.shown(GROUPING_KEY)}
+        onReorder={reorder}
         onAddGroup={onAddGroup}
         onExtendGroup={onExtendGroup}
-        onEjectFromGroup={onEjectFromGroup}
+        onEjectFromGroup={eject}
         onEditGroup={onEditGroup}
         onRemoveGroup={onRemoveGroup}
       />

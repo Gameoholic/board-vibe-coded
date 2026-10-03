@@ -4,10 +4,12 @@ import {
   DESCRIPTION_MAX,
   EMOJI_MAX,
   ESTIMATE_MAX,
+  GameItemId,
   HexColor,
   MINUTES_MAX,
   LABEL_MAX,
   QTY_MAX,
+  RewardKind,
   Section,
   StreakMatcher,
   StreakMode,
@@ -21,7 +23,7 @@ import {
   TierDef,
   Timer,
 } from "./domain.js";
-import { BackupSettings, BoosterSettings, BountySettings, FreezerSettings, PeriodKindSchema, TaskSchedule, WindDown } from "./period.js";
+import { BackupSettings, BoosterSettings, BountySettings, FreezerSettings, PeriodKindSchema, SaleSettings, TaskSchedule, WindDown } from "./period.js";
 import { PIECES_MAX } from "./pieces.js";
 import { Points } from "./points.js";
 import { PointsFormula, PointsSource } from "./pointsFormula.js";
@@ -176,6 +178,7 @@ export const PatchSettingsBody = z.object({
   freezer: FreezerSettings.optional(),
   backup: BackupSettings.optional(),
   booster: BoosterSettings.optional(),
+  sale: SaleSettings.optional(),
 });
 export type PatchSettingsBody = z.infer<typeof PatchSettingsBody>;
 
@@ -252,9 +255,14 @@ export const BoosterHand = z.object({
 });
 export type BoosterHand = z.infer<typeof BoosterHand>;
 
-// The open week's Booster hand (GET /api/booster) — null when none was dealt or Boosters are off.
-export const BoosterStatus = z.object({ hand: BoosterHand.nullable() });
+// The open week's Booster hand (GET /api/booster) — null when none was dealt or Boosters are off — and the
+// Booster rerolls bought and not yet used.
+export const BoosterStatus = z.object({ hand: BoosterHand.nullable(), rerollsLeft: z.number().int().nonnegative().default(0) });
 export type BoosterStatus = z.infer<typeof BoosterStatus>;
+
+// Reroll one of this week's Boosters: the hand is dealt again without it, to pick one more.
+export const RerollBoosterBody = z.object({ taskId: z.string().min(1) });
+export type RerollBoosterBody = z.infer<typeof RerollBoosterBody>;
 
 // Pick one card of this week's Booster hand, by its place in the hand.
 export const PickBoosterBody = z.object({ card: z.number().int().nonnegative() });
@@ -388,13 +396,20 @@ export type PatchShopSectionBody = z.infer<typeof PatchShopSectionBody>;
 // a free reward would be a purchase that spends nothing.
 const RewardCost = Points.refine((n) => n > 0, "cost must be positive");
 
-export const CreateRewardBody = z.object({
-  shopSectionId: z.string().min(1),
-  name: z.string().trim().min(1).max(TEXT_MAX),
-  emoji: z.string().trim().min(1).max(EMOJI_MAX),
-  cost: RewardCost,
-  note: z.string().trim().max(DESCRIPTION_MAX).optional(),
-});
+// A reward's kind is set when it's made (like a task's type): a "game" reward names the item it gives, and
+// no other kind does. Without `onSale`, the weekend sale takes a repeatable reward and nothing else.
+export const CreateRewardBody = z
+  .object({
+    shopSectionId: z.string().min(1),
+    name: z.string().trim().min(1).max(TEXT_MAX),
+    emoji: z.string().trim().min(1).max(EMOJI_MAX),
+    cost: RewardCost,
+    note: z.string().trim().max(DESCRIPTION_MAX).optional(),
+    kind: RewardKind.default("repeatable"),
+    item: GameItemId.optional(),
+    onSale: z.boolean().optional(),
+  })
+  .refine((b) => (b.kind === "game") === (b.item !== undefined), { message: "an Item reward needs an item, and only it has one" });
 export type CreateRewardBody = z.infer<typeof CreateRewardBody>;
 
 export const PatchRewardBody = z.object({
@@ -403,8 +418,14 @@ export const PatchRewardBody = z.object({
   cost: RewardCost.optional(),
   // Nullable so a patch can clear the note; absent leaves it untouched.
   note: z.string().trim().max(DESCRIPTION_MAX).nullable().optional(),
+  onSale: z.boolean().optional(),
 });
 export type PatchRewardBody = z.infer<typeof PatchRewardBody>;
+
+// Buy a reward. `price` is what the owner was shown: when the server's price differs (the sale started or
+// ended in between), nothing is bought — never a price they didn't see.
+export const PurchaseRewardBody = z.object({ price: Points.optional() });
+export type PurchaseRewardBody = z.infer<typeof PurchaseRewardBody>;
 
 // Debug clock: pin the server's notion of "now" to an ISO instant to simulate opening the app at
 // another time, or null to return to the real clock. A debug backdoor for a self-hosted single user.

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fromBoost, modifiersOf, onWholeTask, payout } from "../dist/modifiers.js";
-import { DEFAULT_SETTINGS } from "../dist/period.js";
+import { fromBoost, modifiersOf, onWholeTask, payout, priceModifiersOf, priceOf } from "../dist/modifiers.js";
+import { DEFAULT_SETTINGS, saleOn } from "../dist/period.js";
 import { taskPointValue } from "../dist/taskKinds.js";
 
 // Modifiers compose by construction: shares add up first, flats after them, factors multiply the lot, and a
@@ -106,4 +106,36 @@ test("the Booster: a flat amount on its task, paid on every tick of a tally or a
   assert.equal(taskPointValue(task({ progress: 0 })), 0);
   assert.equal(taskPointValue(task({ progress: 3 })), 600, "no modifiers: just its points");
   assert.equal(payout(1000, [flat(500), floor(100000)]), 100000, "a floor lifts a flat too");
+});
+
+// The board's timezone is Asia/Jerusalem (UTC+3 in early October 2026); 2026-10-01 is a Thursday.
+const THU_1659 = "2026-10-01T13:59:00.000Z";
+const THU_1700 = "2026-10-01T14:00:00.000Z";
+const SAT_2359 = "2026-10-03T20:59:00.000Z";
+const SUN_0300 = "2026-10-04T00:00:00.000Z";
+const withSale = (change) => ({ ...DEFAULT_SETTINGS, sale: { ...DEFAULT_SETTINGS.sale, ...change } });
+
+test("the weekend sale runs from Thursday 17:00 of the open week until the week is ended", () => {
+  assert.equal(saleOn(THU_1659, DEFAULT_SETTINGS), false);
+  assert.equal(saleOn(THU_1700, DEFAULT_SETTINGS), true);
+  assert.equal(saleOn(SAT_2359, DEFAULT_SETTINGS), true);
+  // By the board's days: an open day not yet ended is still today.
+  assert.equal(saleOn(THU_1700, DEFAULT_SETTINGS, { openDay: "2026-09-30" }), false, "Wednesday hasn't been ended");
+  assert.equal(saleOn(SUN_0300, DEFAULT_SETTINGS, { openDay: "2026-10-03" }), true, "Saturday hasn't been ended");
+  assert.equal(saleOn(SUN_0300, DEFAULT_SETTINGS, { openDay: "2026-10-04" }), false, "a new week");
+  // Started early, it's on whenever; switched off, never.
+  assert.equal(saleOn(THU_1659, DEFAULT_SETTINGS, { startedEarly: true }), true);
+  assert.equal(saleOn(THU_1700, withSale({ enabled: false })), false);
+  assert.equal(saleOn(THU_1700, withSale({ enabled: false }), { startedEarly: true }), false);
+});
+
+test("a price takes the sale as a factor, composed by the same payout and rounded once", () => {
+  const reward = (onSale, cost = 2000) => ({ cost, onSale });
+  assert.deepEqual(priceModifiersOf(reward(true), { settings: DEFAULT_SETTINGS, now: THU_1700 }), [{ id: "sale", kind: "factor", value: 0.5 }]);
+  assert.equal(priceOf(reward(true), { settings: DEFAULT_SETTINGS, now: THU_1700 }), 1000);
+  assert.equal(priceOf(reward(false), { settings: DEFAULT_SETTINGS, now: THU_1700 }), 2000, "a reward off the sale");
+  assert.equal(priceOf(reward(true), { settings: DEFAULT_SETTINGS, now: THU_1659 }), 2000, "before the sale");
+  assert.equal(priceOf(reward(true, 333), { settings: withSale({ percentOff: 50 }), now: THU_1700 }), 167, "half-up, once");
+  assert.equal(priceOf(reward(true), { settings: withSale({ percentOff: 100 }), now: THU_1700 }), 0);
+  assert.equal(payout(2000, [factor(0.5), factor(0.9)]), 900, "another price factor stacks by multiplying");
 });

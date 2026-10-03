@@ -16,9 +16,11 @@ import { groupsApi, withMembership, withOrder, withoutGroup } from "./listOps";
 // refusal, a fresh read — always replaces the optimistic guess. Order and group operations go through
 // the shared list plumbing (listOps), the same the board's tasks use.
 
-export type RewardInput = Pick<Reward, "emoji" | "name" | "cost" | "note">;
+// What the edit form changes; a new reward also says what kind it is (set once, like a task's type).
+export type RewardInput = Pick<Reward, "emoji" | "name" | "cost" | "note" | "onSale">;
+export type NewReward = RewardInput & Pick<Reward, "kind" | "item">;
 
-const EMPTY: Shop = { sections: [], rewards: [], groups: [], spent: 0 };
+const EMPTY: Shop = { sections: [], rewards: [], groups: [], spent: 0, inventory: [], saleStarted: false };
 // The retired device-local preview's storage key. The owner chose to start fresh when the shop moved
 // to the server, so any leftover is simply cleared.
 // ponytail: drop this once every device has loaded the app since the move.
@@ -110,16 +112,18 @@ export function useShop() {
     groupsApi.remove(id);
   }, []);
 
-  const addReward = useCallback(async (shopSectionId: string, input: RewardInput) => {
+  const addReward = useCallback(async (shopSectionId: string, input: NewReward) => {
     const res = await fetch("/api/shop/rewards", { method: "POST", ...jsonBody({ shopSectionId, ...input }) });
     const reward = RewardSchema.parse(await res.json());
     setShop((prev) => ({ ...prev, rewards: [...prev.rewards, reward] }));
   }, []);
 
-  // The edit form always sends every field; an empty note travels as null so the server clears it.
-  const editReward = useCallback((id: string, patch: RewardInput) => {
+  // The edit form always sends every field it edits (a kind is set once); an empty note travels as null so
+  // the server clears it.
+  const editReward = useCallback((id: string, { emoji, name, cost, note, onSale }: RewardInput) => {
+    const patch = { emoji, name, cost, note, onSale };
     setShop((prev) => ({ ...prev, rewards: prev.rewards.map((r) => (r.id === id ? { ...r, ...patch } : r)) }));
-    fetch(`/api/shop/rewards/${id}`, { method: "PATCH", ...jsonBody({ ...patch, note: patch.note ?? null }) });
+    fetch(`/api/shop/rewards/${id}`, { method: "PATCH", ...jsonBody({ ...patch, note: note ?? null }) });
   }, []);
 
   const removeReward = useCallback((id: string) => {
@@ -127,15 +131,19 @@ export function useShop() {
     fetch(`/api/shop/rewards/${id}`, { method: "DELETE" });
   }, []);
 
-  // Optimistic so the points drop lands with the purchase animation; the server's reply reconciles.
+  // Optimistic so the points drop lands with the purchase animation; the server's reply reconciles. `price`
+  // is what the owner was shown — the server refuses a different one (the sale began or ended meanwhile),
+  // and the fresh read then shows the real price. Resolves once the server has answered.
   const buy = useCallback(
-    (reward: Reward) => {
+    (reward: Reward, price: number): Promise<void> => {
       setShop((prev) => ({
         ...prev,
-        spent: prev.spent + reward.cost,
-        rewards: prev.rewards.map((r) => (r.id === reward.id ? { ...r, redeemed: r.redeemed + 1 } : r)),
+        spent: prev.spent + price,
+        rewards: prev.rewards.map((r) =>
+          r.id === reward.id ? { ...r, redeemed: r.redeemed + 1, boughtAt: new Date().toISOString() } : r,
+        ),
       }));
-      fetch(`/api/shop/rewards/${reward.id}/purchase`, { method: "POST" })
+      return fetch(`/api/shop/rewards/${reward.id}/purchase`, { method: "POST", ...jsonBody({ price }) })
         .then(async (res) => {
           if (!res.ok) throw new Error(`purchase refused (${res.status})`);
           setShop(ShopSchema.parse(await res.json()));
@@ -145,8 +153,20 @@ export function useShop() {
     [refresh],
   );
 
+  // Start the weekend sale early, for the rest of the week. The server says no once it's on, so its reply (or
+  // a fresh read) is the truth.
+  const startSale = useCallback(() => {
+    fetch("/api/shop/sale/start", { method: "POST" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`sale refused (${res.status})`);
+        setShop(ShopSchema.parse(await res.json()));
+      })
+      .catch(refresh);
+  }, [refresh]);
+
   return {
     shop,
+    startSale,
     addSection,
     editSection,
     removeSection,

@@ -64,9 +64,14 @@ export { canBreakDown, doneFromPieces, newPiecePoints, wholeWorth } from "@board
 // Modifiers — what changes what a task pays (the Bounty, frost, Subzero, the Booster) — and the one payout
 // they compose into, as the server pays a completion.
 export { modifiersOf, onWholeTask, payout } from "@board/contracts";
+// The shop: what a reward costs now (its price under the weekend sale), and whether a one-time one is bought.
+export { isBought, priceModifiersOf, priceOf, saleOn } from "@board/contracts";
+// Which habits a Booster hand may deal.
+export { canBoost } from "@board/contracts";
+export type { GameItemId, InventoryItem, PriceContext, RewardKind, SaleSettings, SaleWeek } from "@board/contracts";
 export type { AppliedModifier, ModifierContext, ModifierId, RecapFrost, RecapFrozen, FreezerSettings } from "@board/contracts";
 // The Freezer: the wait clock, frost, and who may freeze — the rules the server folds.
-export { daysSince, freezeRefusal, freezerOf, frostFill, frostShare, isFullFrost, waitDays, willFreezeAtWeekEnd } from "@board/contracts";
+export { daysSince, freezeRefusal, freezerOf, frostFill, frostShare, isFullFrost, waitDays, waitedMs, willFreezeAtWeekEnd } from "@board/contracts";
 // Pure per-box schedule gate + its human label — the display-only "do this at a certain hour" lock.
 export { isBoxLocked, boxScheduleLabel } from "@board/contracts";
 // Which streaks can count a task (a daily streak a daily tab's, a weekly one a weekly tab's, a counter any

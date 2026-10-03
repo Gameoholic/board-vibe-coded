@@ -5,152 +5,229 @@ import Popover from "./Popover";
 import { useClickOutside } from "./useClickOutside";
 import { DEFAULT_TAB_PREFS, type TabPrefs } from "./useLocalConfig";
 
-// A tab's view controls — the Sort and Display header buttons — shared by every tab kind. Each kind
-// declares its own options (what its items can be sorted by, which row extras can be shown); the
-// menus, the pinning, and how the choice persists per tab are written once here.
+// A tab's view controls — the Sort and Display header buttons — shared by every tab kind. Each tab says what
+// it offers (tabViews.ts): which sorts and display toggles, under which words, and which sit up front
+// (pinned) with the rest under "Show more". The menus, the pinning and how the choices persist per tab are
+// written once here; how a sort orders items is its option's own.
 
 type IconComponent = (props: { size?: number }) => React.ReactElement;
 
-export interface SortOption {
-  mode: string;
-  label: string;
-  icon: IconComponent;
-}
-
-export interface DisplayOption {
+/** One choice in a tab's Sort or Display menu. */
+export interface MenuOption {
   key: string;
   label: string;
   icon: IconComponent;
+  // Up front in its menu, or under "Show more" — the tab's call, which the owner can change per tab.
+  pinned?: boolean;
+}
+
+/** A sort, and how it orders a list's items given what it needs to know (`C`). Without `compare` it keeps
+ *  the list's own order (Manual). */
+export interface SortOption<T, C> extends MenuOption {
+  compare?: (ctx: C) => (a: T, b: T) => number;
+}
+
+/** An optional extra on a tab's rows. */
+export interface DisplayOption extends MenuOption {
   defaultOn?: boolean; // shown until the owner turns it off (absent ≡ off by default)
 }
 
-// A tab's current view read from its persisted prefs (undefined until first touched) with the tab
-// kind's display defaults applied, plus setters that write back through `onChange`.
-export function tabView(prefs: TabPrefs | undefined, onChange: (patch: Partial<TabPrefs>) => void, displayOptions: DisplayOption[]) {
+/** What a tab's two menus offer, in the order they list them. */
+export interface TabOffer<T, C> {
+  sorts: SortOption<T, C>[];
+  displays: DisplayOption[];
+}
+
+/** A kind's catalog: every option its tabs can offer, by name, each typed as an option of its menu (so a
+ *  tab can offer one with fields the entry itself leaves out, like `defaultOn`). Used as
+ *  `catalog<DisplayOption>()({ … })` — the first call names the option type, the second takes the entries. */
+export const catalog =
+  <O extends MenuOption>() =>
+  <K extends string>(entries: Record<K, O>): Record<K, O> =>
+    entries;
+
+/** A catalog option as one tab offers it: up front or not, and in its own words where the catalog's don't
+ *  fit ("Days frozen" for the Freezer's Age). The logic stays the catalog's. */
+export function offer<O extends MenuOption>(option: O, how: Partial<O> = {}): O {
+  return { ...option, ...how };
+}
+
+/** `items` in `sort`'s order — as they are for a sort without its own (Manual). */
+export function sortItems<T, C>(items: readonly T[], sort: SortOption<T, C> | undefined, ctx: C): T[] {
+  return sort?.compare ? [...items].sort(sort.compare(ctx)) : [...items];
+}
+
+type Menu = "sort" | "display";
+
+// A tab's current view: its persisted prefs (undefined until first touched) read against what the tab
+// offers — a sort it doesn't offer (any more) falls back to its first, a display it doesn't offer is off —
+// plus setters that write back through `onChange`. Pins are per tab, over each option's own default.
+export function tabView(
+  prefs: TabPrefs | undefined,
+  onChange: (patch: Partial<TabPrefs>) => void,
+  offered: { sorts: readonly MenuOption[]; displays: readonly DisplayOption[] },
+) {
   const p = prefs ?? DEFAULT_TAB_PREFS;
-  const shown = (key: string) => p.display[key] ?? displayOptions.find((o) => o.key === key)?.defaultOn ?? false;
+  const sortMode = offered.sorts.some((o) => o.key === p.sortMode) ? p.sortMode : (offered.sorts[0]?.key ?? DEFAULT_TAB_PREFS.sortMode);
+  const shown = (key: string) => {
+    const option = offered.displays.find((o) => o.key === key);
+    return !!option && (p.display[key] ?? option.defaultOn ?? false);
+  };
+  const isPinned = (menu: Menu, option: MenuOption) => p.pinned?.[`${menu}:${option.key}`] ?? !!option.pinned;
   return {
-    sortMode: p.sortMode,
+    sortMode,
     setSortMode: (mode: string) => onChange({ sortMode: mode }),
     shown,
     setShown: (key: string, on: boolean) => onChange({ display: { ...p.display, [key]: on } }),
+    isPinned,
+    togglePin: (menu: Menu, option: MenuOption) =>
+      onChange({ pinned: { ...p.pinned, [`${menu}:${option.key}`]: !isPinned(menu, option) } }),
   };
 }
 
-interface SortMenuProps {
-  options: SortOption[];
-  mode: string;
-  onSelect: (mode: string) => void;
-  // With pinning, only the pinned sorts (plus the active one, so it's never hidden) show up front and
-  // the rest sit under "Show more"; without it (a short list), every option shows.
-  pinned?: { modes: string[]; onToggle: (mode: string) => void };
-}
+export type TabView = ReturnType<typeof tabView>;
 
-export function SortMenu({ options, mode, onSelect, pinned }: SortMenuProps) {
-  const [open, setOpen] = useState(false);
+// The rows both menus share: the pinned ones up front — and those in use (`inUse`), so what's on is never
+// tucked away — the rest under "Show more", each row with its pin.
+function PinnedRows<O extends MenuOption>({
+  menu,
+  options,
+  view,
+  inUse,
+  renderOption,
+}: {
+  menu: Menu;
+  options: readonly O[];
+  view: TabView;
+  inUse: (option: O) => boolean;
+  renderOption: (option: O) => React.ReactNode;
+}) {
   const [moreOpen, setMoreOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useClickOutside(ref, () => setOpen(false), open);
+  const top = options.filter((o) => view.isPinned(menu, o) || inUse(o));
+  const more = options.filter((o) => !top.includes(o));
 
-  const topModes = new Set([...(pinned?.modes ?? []), mode]);
-  const topSorts = pinned ? options.filter((o) => topModes.has(o.mode)) : options;
-  const moreSorts = pinned ? options.filter((o) => !topModes.has(o.mode)) : [];
-
-  const renderOption = (opt: SortOption) => (
-    <div key={opt.mode} className={`sort-row${mode === opt.mode ? " active" : ""}`}>
-      <button
-        type="button"
-        className="sort-option"
-        onClick={() => {
-          onSelect(opt.mode);
-          setOpen(false);
-        }}
-      >
-        <span className="sort-option-left">
-          <opt.icon />
-          {opt.label}
-        </span>
-        {mode === opt.mode && <CheckIcon />}
-      </button>
-      {pinned && (
+  const row = (o: O) => {
+    const pinned = view.isPinned(menu, o);
+    return (
+      <div key={o.key} className="view-row">
+        {renderOption(o)}
         <button
           type="button"
-          className={`pin-btn${pinned.modes.includes(opt.mode) ? " pinned" : ""}`}
-          aria-label={pinned.modes.includes(opt.mode) ? `Unpin ${opt.label}` : `Pin ${opt.label}`}
-          aria-pressed={pinned.modes.includes(opt.mode)}
-          onClick={() => pinned.onToggle(opt.mode)}
+          className={`pin-btn${pinned ? " pinned" : ""}`}
+          aria-label={pinned ? `Unpin ${o.label}` : `Pin ${o.label}`}
+          aria-pressed={pinned}
+          onClick={() => view.togglePin(menu, o)}
         >
-          <PinIcon filled={pinned.modes.includes(opt.mode)} />
+          <PinIcon filled={pinned} />
         </button>
+      </div>
+    );
+  };
+
+  return (
+    <div className="view-menu">
+      {top.map(row)}
+      {more.length > 0 && (
+        <>
+          <button
+            type="button"
+            className={`view-more-btn${moreOpen ? " open" : ""}`}
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen((v) => !v)}
+          >
+            <span>{moreOpen ? "Show less" : "Show more"}</span>
+            <ChevronDownIcon />
+          </button>
+          <AnimatePresence initial={false}>
+            {moreOpen && (
+              <motion.div
+                className="view-more"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.16, ease: "easeOut" }}
+              >
+                {more.map(row)}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </>
       )}
     </div>
   );
+}
 
+export function SortMenu({ options, view }: { options: readonly MenuOption[]; view: TabView }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useClickOutside(ref, () => setOpen(false), open);
   return (
     <div className="popover-anchor" ref={ref}>
       <button type="button" className="sort-btn" aria-label="Sort" onClick={() => setOpen((v) => !v)}>
         <SortIcon />
       </button>
       <Popover title="Sort" open={open} onClose={() => setOpen(false)} align="right" width={212}>
-        <div className="sort-menu">
-          {topSorts.map(renderOption)}
-          {moreSorts.length > 0 && (
-            <>
-              <button
-                type="button"
-                className={`sort-more-btn${moreOpen ? " open" : ""}`}
-                aria-expanded={moreOpen}
-                onClick={() => setMoreOpen((v) => !v)}
-              >
-                <span>{moreOpen ? "Show less" : "Show more"}</span>
-                <ChevronDownIcon />
-              </button>
-              <AnimatePresence initial={false}>
-                {moreOpen && (
-                  <motion.div
-                    className="sort-more"
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.16, ease: "easeOut" }}
-                  >
-                    {moreSorts.map(renderOption)}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </>
+        <PinnedRows
+          menu="sort"
+          options={options}
+          view={view}
+          inUse={(o) => o.key === view.sortMode}
+          renderOption={(o) => (
+            <button
+              type="button"
+              className="sort-option"
+              onClick={() => {
+                view.setSortMode(o.key);
+                setOpen(false);
+              }}
+            >
+              <span className="sort-option-left">
+                <o.icon />
+                {o.label}
+              </span>
+              {o.key === view.sortMode && <CheckIcon />}
+            </button>
           )}
-        </div>
+        />
       </Popover>
     </div>
   );
 }
 
-interface DisplayMenuProps {
-  options: DisplayOption[];
-  shown: (key: string) => boolean;
-  onToggle: (key: string, on: boolean) => void;
-}
-
-export function DisplayMenu({ options, shown, onToggle }: DisplayMenuProps) {
+export function DisplayMenu({ options, view }: { options: readonly DisplayOption[]; view: TabView }) {
   const [open, setOpen] = useState(false);
+  // What was on as the menu opened stays up front while it's open — ticking one under "Show more" doesn't
+  // make it jump out from under the pointer.
+  const [onAtOpen, setOnAtOpen] = useState<ReadonlySet<string>>(new Set());
   const ref = useRef<HTMLDivElement>(null);
   useClickOutside(ref, () => setOpen(false), open);
   return (
     <div className="popover-anchor" ref={ref}>
-      <button type="button" className="sort-btn" aria-label="Display options" onClick={() => setOpen((v) => !v)}>
+      <button
+        type="button"
+        className="sort-btn"
+        aria-label="Display options"
+        onClick={() => {
+          setOnAtOpen(new Set(options.filter((o) => view.shown(o.key)).map((o) => o.key)));
+          setOpen((v) => !v);
+        }}
+      >
         <EyeIcon />
       </button>
-      <Popover title="Display" open={open} onClose={() => setOpen(false)} align="right" width={190}>
-        <div className="display-menu">
-          {options.map((opt) => (
-            <label key={opt.key} className="display-option">
-              <input type="checkbox" checked={shown(opt.key)} onChange={(e) => onToggle(opt.key, e.target.checked)} />
-              <opt.icon />
-              <span>{opt.label}</span>
+      <Popover title="Display" open={open} onClose={() => setOpen(false)} align="right" width={212}>
+        <PinnedRows
+          menu="display"
+          options={options}
+          view={view}
+          inUse={(o) => onAtOpen.has(o.key)}
+          renderOption={(o) => (
+            <label className="display-option">
+              <input type="checkbox" checked={view.shown(o.key)} onChange={(e) => view.setShown(o.key, e.target.checked)} />
+              <o.icon />
+              <span>{o.label}</span>
             </label>
-          ))}
-        </div>
+          )}
+        />
       </Popover>
     </div>
   );

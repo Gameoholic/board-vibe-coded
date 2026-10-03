@@ -5,14 +5,15 @@ import { daysSince, statusOf, waitDays, willFreezeAtWeekEnd } from "./types";
 import type { Task } from "./types";
 import { useBoardClock } from "./useBoardClock";
 
-// A task's age beside its name: the days it has waited ("5d", then "2w", then "3m") — on ice, in the Backlog
+// A task's age beside its name: the days it has waited ("today", "5d", then "2w", then "3m") — on ice, in the Backlog
 // and while Blocked; In progress pauses it. Its hover says when it was made, when it froze (or thawed), how
 // long it's been in its status, and — before a week close that would freeze it — that it will.
 
 const plural = (n: number) => `${n} day${n === 1 ? "" : "s"}`;
 
-/** Days as the chip shows them: days under a week, weeks up to a month, months after. */
+/** Days as the chip shows them: today, days under a week, weeks up to a month, months after. */
 function ageLabel(days: number): string {
+  if (days === 0) return "today";
   if (days < 7) return `${days}d`;
   if (days <= 30) return `${Math.floor(days / 7)}w`;
   return `${Math.floor(days / 30)}m`;

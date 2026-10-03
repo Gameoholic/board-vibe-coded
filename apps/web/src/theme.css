@@ -61,6 +61,9 @@
   --mod-subzero: #4f46e5;
   --mod-booster: #9333ea;
   --booster-ink: #7e22ce;
+  --mod-sale: #059669;
+  --sale-soft: #ecfdf5;
+  --sale-line: #a7f3d0;
   --frost-line: #bae6fd;
   --frost-top: #f2f9fe;
   --frost-bottom: #e6f4fd;
@@ -98,6 +101,9 @@
   --mod-subzero: #a5b4fc;
   --mod-booster: #c084fc;
   --booster-ink: #c084fc;
+  --mod-sale: #34d399;
+  --sale-soft: rgba(52, 211, 153, 0.12);
+  --sale-line: rgba(52, 211, 153, 0.4);
   --frost-line: rgba(56, 189, 248, 0.35);
   --frost-glint: rgba(56, 189, 248, 0.1);
   --frost-haze: rgba(56, 189, 248, 0.08);

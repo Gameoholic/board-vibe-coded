@@ -2,10 +2,14 @@ import { motion } from "framer-motion";
 import { useState } from "react";
 import CardCanvas from "./CardCanvas";
 import { ToolbarGroup } from "./CanvasToolbar";
-import { PlusIcon } from "./Icons";
+import { BagIcon, PlusIcon, TagIcon } from "./Icons";
+import { GAME_ITEMS } from "./gameItems";
 import { PALETTE } from "./palette";
+import { HeldChips } from "./RewardItem";
 import ShopSectionCard from "./ShopSectionCard";
-import type { Reward } from "./types";
+import { saleOn } from "./types";
+import type { InventoryItem, Reward } from "./types";
+import { useBoardClock } from "./useBoardClock";
 import type { LocalConfigApi } from "./useLocalConfig";
 import type { ShopApi } from "./useShop";
 
@@ -25,12 +29,14 @@ interface ShopViewProps {
   points: number; // the owner's spendable points (board total + banked − spent), thousandths-of-a-percent
   shop: ShopApi;
   local: LocalConfigApi; // device-local layouts, canvas settings and tab prefs — shared with the board
-  onBuy: (reward: Reward) => void;
+  onBuy: (reward: Reward, price: number) => void;
 }
 
 function ShopView({ points, shop, local, onBuy }: ShopViewProps) {
-  const { sections, rewards, groups } = shop.shop;
+  const { sections, rewards, groups, inventory, saleStarted } = shop.shop;
   const closed = points < 0; // spec: a negative balance closes the shop
+  const { now, settings, openDay } = useBoardClock();
+  const sale = saleOn(now, settings, { openDay, startedEarly: saleStarted }) && rewards.some((r) => r.onSale) ? settings.sale : null;
   const addTab = (name: string) => shop.addSection(name, PALETTE[sections.length % PALETTE.length]);
 
   return (
@@ -43,6 +49,13 @@ function ShopView({ points, shop, local, onBuy }: ShopViewProps) {
       {/* The points counter's parking slot (useFreeSpot `dock`): fixed at the top-centre of the frame,
           outside the canvas, so the counter stays put while the shop pans. */}
       <div className="hud-dock" />
+      {sale && (
+        <div className="sale-banner">
+          <TagIcon size={13} />
+          <span>Weekend sale · {sale.percentOff}% off</span>
+          <span className="sale-banner-until">until the week ends</span>
+        </div>
+      )}
 
       <CardCanvas
         name="shop"
@@ -54,17 +67,22 @@ function ShopView({ points, shop, local, onBuy }: ShopViewProps) {
         onSettingsChange={local.setSettings}
         topInset={DOCK_CLEARANCE}
         toolbar={
-          <ToolbarGroup icon={<PlusIcon size={16} />} label="New shop tab" title="New tab" width={240}>
-            {(close) => (
-              <NewTabForm
-                onCancel={close}
-                onAdd={(name) => {
-                  addTab(name);
-                  close();
-                }}
-              />
-            )}
-          </ToolbarGroup>
+          <>
+            <ToolbarGroup icon={<BagIcon size={16} />} label="Inventory" title="Inventory" width={280}>
+              {() => <Inventory items={inventory} />}
+            </ToolbarGroup>
+            <ToolbarGroup icon={<PlusIcon size={16} />} label="New shop tab" title="New tab" width={240}>
+              {(close) => (
+                <NewTabForm
+                  onCancel={close}
+                  onAdd={(name) => {
+                    addTab(name);
+                    close();
+                  }}
+                />
+              )}
+            </ToolbarGroup>
+          </>
         }
         renderCard={(section, frame) => (
           <ShopSectionCard
@@ -74,11 +92,11 @@ function ShopView({ points, shop, local, onBuy }: ShopViewProps) {
             groups={groups.filter((g) => g.sectionId === section.id)}
             points={points}
             closed={closed}
+            inventory={inventory}
+            saleStarted={saleStarted}
             frame={frame}
             prefs={local.config.tabPrefs[section.id]}
             onPrefsChange={(patch) => local.setTabPref(section.id, patch)}
-            pinnedSorts={local.config.pinnedSorts}
-            onTogglePin={local.togglePinnedSort}
             onEditSection={(patch) => shop.editSection(section.id, patch)}
             onRemoveSection={() => shop.removeSection(section.id)}
             onAddReward={(input) => shop.addReward(section.id, input)}
@@ -109,6 +127,24 @@ function ShopView({ points, shop, local, onBuy }: ShopViewProps) {
         </div>
       )}
     </motion.div>
+  );
+}
+
+// What items you have: each one, with those you bought (kept from week to week) and the week's free
+// ones (gone when it ends).
+function Inventory({ items }: { items: InventoryItem[] }) {
+  return (
+    <ul className="inventory">
+      {items.map((entry) => (
+        <li key={entry.item} className="inventory-item">
+          <span className="inventory-emoji" aria-hidden="true">
+            {GAME_ITEMS[entry.item].emoji}
+          </span>
+          <span className="inventory-name">{GAME_ITEMS[entry.item].label}</span>
+          {entry.owned > 0 || entry.free > 0 ? <HeldChips {...entry} /> : <span className="inventory-none">None</span>}
+        </li>
+      ))}
+    </ul>
   );
 }
 

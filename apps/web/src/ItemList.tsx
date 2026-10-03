@@ -39,7 +39,7 @@ interface ItemListProps<T extends ListItem> {
   sorted: T[];
   groups: Group[];
   noun: string; // plural, for labels ("tasks", "rewards")
-  emptyLabel: string;
+  emptyLabel?: string; // said when the list is empty (absent: nothing is)
   renderItem: (item: T, row: RowContext) => React.ReactNode; // must return a keyed ItemRow
   // Posts the list's new flat item-id order (group members kept contiguous by the block), with the ids
   // the drag moved — a row, or a whole group's members — so the tab can keep the items this list doesn't
@@ -51,8 +51,9 @@ interface ItemListProps<T extends ListItem> {
   onEditGroup: (id: string, label: string) => void;
   onRemoveGroup: (id: string) => void;
   dropOutside?: DropOutside;
-  // Whether new groups can be made here: the group handle's range-drag and dragging a row into a group.
-  // Groups already in the list show either way (and can still be ungrouped from their header). Default on.
+  // Whether the list has groups at all: on, they show and new ones can be made (the group handle's range-drag,
+  // dragging a row into one); off, it's one flat list — its groups hidden (their members still kept together by
+  // the fold) and none made. Default on.
   grouping?: boolean;
 }
 
@@ -92,9 +93,11 @@ function ItemList<T extends ListItem>({
   }
 
   // Build the render rows: a run of consecutive items sharing a groupId collapses into one group
-  // block; every other item is its own row. Only in manual order — otherwise groups are hidden.
+  // block; every other item is its own row. Only in manual order with grouping on — otherwise groups are
+  // hidden.
   const rows = useMemo<Row<T>[]>(() => {
     if (!manual) return sorted.map((item) => ({ kind: "item", item }));
+    if (!grouping) return ordered.map((item) => ({ kind: "item", item }));
     const byId = new Map(groups.map((g) => [g.id, g]));
     const out: Row<T>[] = [];
     for (let i = 0; i < ordered.length; ) {
@@ -110,7 +113,7 @@ function ItemList<T extends ListItem>({
       }
     }
     return out;
-  }, [manual, sorted, ordered, groups]);
+  }, [manual, grouping, sorted, ordered, groups]);
 
   // framer tracks rows by their values: an item row's value is the item, a group row's is its group.
   // On reorder, groups expand back to their member ids for the flat order.
@@ -318,7 +321,7 @@ function ItemList<T extends ListItem>({
       className="item-list"
     >
       <AnimatePresence initial={false}>
-        {rows.length === 0 && <li className="empty">{emptyLabel}</li>}
+        {rows.length === 0 && emptyLabel && <li className="empty">{emptyLabel}</li>}
         {rows.map((r) =>
           r.kind === "group" ? (
             <GroupBlock

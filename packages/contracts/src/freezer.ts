@@ -10,11 +10,16 @@ import { statusOf } from "./taskStatus.js";
 
 const DAY_MS = 86_400_000;
 
-/** Whole days a task has waited: in the Freezer, the Backlog, and while Blocked. In progress pauses the
+/** How long a task has waited, in ms: in the Freezer, the Backlog, and while Blocked. In progress pauses the
  *  count (it carries on from there afterwards); freezing or thawing starts it again from nothing. */
-export function waitDays(task: Pick<Task, "waitMs" | "waitingSince">, now: string): number {
+export function waitedMs(task: Pick<Task, "waitMs" | "waitingSince">, now: string): number {
   const running = task.waitingSince ? Math.max(0, Date.parse(now) - Date.parse(task.waitingSince)) : 0;
-  return Math.floor(((task.waitMs ?? 0) + running) / DAY_MS);
+  return (task.waitMs ?? 0) + running;
+}
+
+/** The whole days of that wait — a task's age, as its Age chip shows it. */
+export function waitDays(task: Pick<Task, "waitMs" | "waitingSince">, now: string): number {
+  return Math.floor(waitedMs(task, now) / DAY_MS);
 }
 
 /** The wait across a status change: going In progress pauses it (keeping the stretch so far), leaving In

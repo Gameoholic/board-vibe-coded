@@ -44,7 +44,7 @@ Ideas from a much larger earlier vision of this product. None is built; each is 
 | **Counters** | Like streaks but counting totals over a filter. |
 | **XP / Coins split** | XP = weekly score, resets weekly, never spendable. Coins = spendable, never reset. One check pays both. |
 | **Shop / wallet** | Spend coins; spending should visibly "hurt." Negative balance closes the shop. **Built, spending the board's points** (server-backed and event-logged, purchases freeze their cost — see `ARCHITECTURE.md` → "Shop"). Period rolls now **bank** the points of the tasks they uncheck. Still deferred: the XP/Coins split below, and banking *within* a period — until the day/week closes, a spent point can still be "un-earned" by unchecking its task. |
-| **Bounties / boosters** | Rolled periodically for extra motivation. The **weekly Bounty is built** — several at a time, rolling another on a win, rolled from the Freezer (see `PRODUCT.md`); a Registry-only **Booster** is in "Next up" above. Not built: **rerolls as a shop item** — the ledger is ready (`BountyRerollsGranted { source: "purchase" }`, banked until used, spent after the week's free ones; see ARCHITECTURE "Weekly Bounty"); what's left is a reward kind whose purchase commits that grant. |
+| **Bounties / boosters** | Rolled periodically for extra motivation. The **weekly Bounty is built** — several at a time, rolling another on a win, rolled from the Freezer (see `PRODUCT.md`); the Registry's weekly **Booster** is built too, and so are **rerolls for both as shop items** (item rewards — see `PRODUCT.md` "The shop"). |
 | **Weekly target & pace** | Target computed from the week's day types, calibrated from real data — never hardcoded. |
 | **Day types** (`WORK`/`NORMAL`/`PAUSED`) | `PAUSED` pauses the whole system (no target contribution, no streak breaks) but still allows logging. Builds directly on the now-built period close: a `dayType` field on `PeriodClosed` (see `ARCHITECTURE.md` → "Settings & period close"). |
 | **Dashboards / modules / charts / heatmap** | Composable module system (task list · streak card · counter · target ring · chart · heatmap · calendar · …). |
@@ -62,4 +62,10 @@ Ideas from a much larger earlier vision of this product. None is built; each is 
 ## Loose ideas
 
 - **Live tab icon** (owner-approved, not built yet): the tab icon fills from the bottom as today's points come in, with the points that fill it to the top set in Settings.
+- **More items** (the owner asked for ideas; each would be one entry in the shop's item registry — see ARCHITECTURE "Shop"):
+  - **Extra Bounty** — roll one more Bounty this week (another ×2 target).
+  - **Extra Booster pick** — take one more card from this week's hand.
+  - **Coupon** — a share off the next reward you buy (a price modifier, so it stacks with the sale).
+  - **Mystery reward** — buy a sealed card and scratch it to reveal one of your rewards (the saved scratch-card reveal).
+  - **Streak shield** — would cover one missed day; it cuts against "streaks are real" (only a paused day protects one), so it's the owner's call.
 - (Add here as they come up — keep each to a line, with a pointer if the reasoning lives elsewhere.)

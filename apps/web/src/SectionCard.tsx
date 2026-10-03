@@ -2,20 +2,6 @@ import { behaviorOf, formatPercent, parsePercent } from "@board/contracts";
 import { useCallback, useMemo, useState } from "react";
 import CanvasCard, { CardAdd, CardTitle, type CardFrame } from "./CanvasCard";
 import ColorPicker from "./ColorPicker";
-import {
-  AgeIcon,
-  ArrowDownIcon,
-  ArrowUpIcon,
-  CircleCheckIcon,
-  CircleIcon,
-  HourglassIcon,
-  GroupBracketIcon,
-  InProgressIcon,
-  ScissorsIcon,
-  SparkleIcon,
-  TimerIcon,
-  ZapIcon,
-} from "./Icons";
 import type { MenuPoint } from "./ActionMenu";
 import type { BlockReason } from "./BlockForm";
 import ItemList, { type DropOutside } from "./ItemList";
@@ -26,85 +12,31 @@ import ScheduleEditor, { scheduleFromRows, type Cadence, type ScheduleRow } from
 import StatusBand from "./StatusBand";
 import StreakForm, { type StreakPayload } from "./StreakForm";
 import StreakItem from "./StreakItem";
-import { ADD_BUTTON_KEY, addButtonOption } from "./displayOptions";
 import { tabInk } from "./palette";
-import { DisplayMenu, SortMenu, tabView, type DisplayOption, type SortOption } from "./TabControls";
-import TaskItem from "./TaskItem";
+import { DisplayMenu, SortMenu, sortItems, tabView } from "./TabControls";
+import { MODIFIER_LOOKS } from "./modifierLooks";
+import { ADD_BUTTON_KEY, GROUPING_KEY, STREAKS_OFFER, taskTabOffer } from "./tabViews";
+import TaskItem, { type RowReroll } from "./TaskItem";
 import type { FlyOrigin } from "./FlyingPoints";
 import type { RowPieces } from "./Pieces";
 import { useBoardClock } from "./useBoardClock";
 import type { TabPrefs } from "./useLocalConfig";
-import { behaviorOfType, canBreakDown, canPrune, freezeRefusal, freezerOf, frostShare, isBoxLocked, isRetired, modifiersOf, payout, statusOf, wholeWorth } from "./types";
+import { canBoost, canBreakDown, canPrune, freezeRefusal, freezerOf, frostShare, isRetired, modifiersOf, payout, statusOf, wholeWorth } from "./types";
 import { runBetween, withUnlistedKept } from "./listOps";
 import { pruneUntil, streaksBrokenByPruning } from "./pruning";
 import { IN_PROGRESS_NUDGE_ABOVE, STATUS_BANDS, statusLabel } from "./taskStatus";
 import { uid } from "./uid";
-import type { AppliedModifier, Group, Section, Settings, StreakView, Task, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
+import type { AppliedModifier, Group, Section, StreakView, Task, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
 
 // A board tab: the shared tab base (CanvasCard — move/resize, header, sort/display controls, add
 // button) around a board list. A "tasks" tab lists tasks on the shared list base (ItemList — reorder
-// and grouping); a "streaks" tab lists streaks. What's specific here is only what's specific to tasks:
-// their sorts and display toggles, the task row, and the add-task form.
+// and grouping); a "streaks" tab lists streaks. What's specific here is only what's specific to tasks: the
+// task row and the add-task form. What its Sort and Display menus offer is its tab's (tabViews.ts).
 
 // The create/edit task payload, in one alias so the schedule field threads through every call site.
 type PointsSource = "builder" | "manual";
 type TaskCreatePayload = { type: TaskType; text: string; points?: number; estimate?: string; estimateMinutes?: number; estimateEffortIndex?: number; pointsSource?: PointsSource; description?: string; tiers?: TierDef[]; count?: number; schedule?: TaskSchedule };
 type TaskEditPayload = { text?: string; points?: number; estimateMinutes?: number | null; estimateEffortIndex?: number | null; pointsSource?: PointsSource; description?: string | null; tiers?: Task["tiers"]; count?: number; schedule?: TaskSchedule };
-
-type SortMode = "manual" | "quick" | "points-desc" | "points-asc" | "status-incomplete" | "status-complete" | "time-asc" | "time-desc" | "added-newest" | "added-oldest";
-type StreakSortMode = "manual" | "count-desc" | "count-asc";
-type AnySortMode = SortMode | StreakSortMode;
-
-const SORT_OPTIONS: SortOption[] = [
-  { mode: "manual", label: "Manual", icon: SparkleIcon },
-  { mode: "quick", label: "Get done quick", icon: ZapIcon },
-  { mode: "points-desc", label: "Points: high to low", icon: ArrowDownIcon },
-  { mode: "points-asc", label: "Points: low to high", icon: ArrowUpIcon },
-  { mode: "status-incomplete", label: "Incomplete first", icon: CircleIcon },
-  { mode: "status-complete", label: "Completed first", icon: CircleCheckIcon },
-  { mode: "time-asc", label: "Time: short to long", icon: TimerIcon },
-  { mode: "time-desc", label: "Time: long to short", icon: TimerIcon },
-  { mode: "added-newest", label: "Date added: newest", icon: ArrowDownIcon },
-  { mode: "added-oldest", label: "Date added: oldest", icon: ArrowUpIcon },
-];
-
-const STREAK_SORT_OPTIONS: SortOption[] = [
-  { mode: "manual", label: "Manual", icon: SparkleIcon },
-  { mode: "count-desc", label: "Streak: high to low", icon: ArrowDownIcon },
-  { mode: "count-asc", label: "Streak: low to high", icon: ArrowUpIcon },
-];
-
-// A task tab's optional row extras (the Display menu). Keys are what TabPrefs.display stores.
-const TASK_DISPLAY: DisplayOption[] = [
-  { key: "estimate", label: "Time estimate", icon: HourglassIcon },
-  { key: "timer", label: "Timer", icon: TimerIcon },
-];
-
-// Offered only on a tab whose tasks leave the list when done (one-time tasks) — the way back to them,
-// to look or to uncheck a mis-click. Off by default: done means gone.
-const COMPLETED_DISPLAY: DisplayOption = { key: "completed", label: "Completed tasks", icon: CircleCheckIcon };
-
-// Offered only on a tab whose tasks can be pruned — the way back to them before their day/week is up,
-// to look or to unprune one. Off by default: pruned means out of the way.
-const PRUNED_DISPLAY: DisplayOption = { key: "pruned", label: "Pruned tasks", icon: ScissorsIcon };
-
-// The tab's tasks in Status bands: In progress on top, the Backlog (whose order is the priority), and
-// Blocked folded at the bottom. Offered on every task tab; on by default where tasks are done once (a
-// to-do list, not a routine) — read off the tab's allowed types, never its name.
-const STATUS_DISPLAY: DisplayOption = { key: "status", label: "Status", icon: InProgressIcon };
-
-// Making groups — the group handle beside each row, and dragging a row into a group. Offered on every task
-// tab; off by default where tasks are done once (a to-do list rarely wants it), read off the allowed types.
-const GROUPING_DISPLAY: DisplayOption = { key: "grouping", label: "Grouping", icon: GroupBracketIcon };
-
-// How long each task has waited, beside its name (AgeChip). Offered where tasks are done once — a to-do list
-// and its Freezer — and on by default there.
-const AGE_DISPLAY: DisplayOption = { key: "age", label: "Age", icon: AgeIcon, defaultOn: true };
-
-const ADD_TASK_BUTTON = addButtonOption("task");
-
-// A streak tab's one Display option.
-const STREAK_DISPLAY: DisplayOption[] = [addButtonOption("streak")];
 
 const byOrder = (a: Task, b: Task) => (a.order ?? 0) - (b.order ?? 0);
 
@@ -113,18 +45,7 @@ const byOrder = (a: Task, b: Task) => (a.order ?? 0) - (b.order ?? 0);
 type Band = TaskStatus | "done";
 const bandOf = (task: Task): Band => (isRetired(task) ? "done" : statusOf(task));
 
-// Sort by a task's ceiling (its highest reachable value) and completion — both read from the type's
-// behaviour so no sort logic branches on task.type.
-const maxValue = (task: Task): number => behaviorOf(task).maxValue(task);
 const isTaskDone = (task: Task): boolean => behaviorOf(task).isDone(task);
-// A checkbox task's estimated minutes (tiered tasks store their estimate per-tier, not at task level).
-const estMinutes = (task: Task): number | undefined => task.estimateMinutes;
-// Whether the box you'd act on next is currently schedule-locked (its time-of-day / weekday hasn't
-// come). Used by the "Get done quick" sort to sink not-yet-doable tasks — you can't knock them out now.
-const taskLocked = (task: Task, now: string, settings: Settings, openDay?: string): boolean => {
-  const entry = task.schedule?.[behaviorOf(task).filled(task)];
-  return !!entry && isBoxLocked(entry, now, settings, openDay);
-};
 
 interface SectionCardProps {
   section: Section;
@@ -152,9 +73,12 @@ interface SectionCardProps {
   onBreakDown: (task: Task, texts: string[]) => void;
   onSetParent: (taskId: string, parentId: string | null) => void;
   onReorderPieces: (parentId: string, orderedIds: string[]) => void;
-  // This week's rerolls left, and rerolling one of its Bounties (from the row's menu).
+  // This week's rerolls left, and rerolling one of its Bounties (from the row's menu) — and the same for its
+  // Boosters, with the rerolls bought in the shop.
   rerollsLeft: number;
   onRerollBounty: (taskId: string) => void;
+  boosterRerollsLeft: number;
+  onRerollBooster: (taskId: string) => void;
   // Reorder posts the section's full flat task-id order (group members kept contiguous by the block).
   onReorderItems: (orderedIds: string[]) => void;
   onAddGroup: (taskIds: string[]) => void;
@@ -178,8 +102,6 @@ interface SectionCardProps {
   prefs: TabPrefs | undefined;
   onPrefsChange: (patch: Partial<TabPrefs>) => void;
   // Sort modes pinned to the top of the Sort menu (global, from useLocalConfig), and a toggle.
-  pinnedSorts: string[];
-  onTogglePin: (mode: string) => void;
 }
 
 function SectionCard({
@@ -205,6 +127,8 @@ function SectionCard({
   onReorderPieces,
   rerollsLeft,
   onRerollBounty,
+  boosterRerollsLeft,
+  onRerollBooster,
   onReorderItems,
   onAddGroup,
   onExtendGroup,
@@ -221,8 +145,6 @@ function SectionCard({
   onRecolor,
   prefs,
   onPrefsChange,
-  pinnedSorts,
-  onTogglePin,
 }: SectionCardProps) {
   // The tab's colour as drawn (lifted on a dark theme); the colour picker still shows the colour as picked.
   const ink = tabInk(section.color);
@@ -234,35 +156,27 @@ function SectionCard({
   // Scheduled-box cadence inferred from the tab's recurrence: a "week" section schedules by weekday,
   // everything else by time-of-day. This is what makes daily/weekly automatic (not a per-task option).
   const scheduleCadence: Cadence = section.period === "week" ? "weekly" : "daily";
-  // Sort + display toggles come from the persisted per-tab prefs (see useLocalConfig). They're a
-  // pure display transform, not board truth, so they live per device — but survive reloads.
-  // The "Completed tasks" toggle only exists on a tab whose tasks retire when done (read off the tab's
-  // allowed types, so it's there before the first one-time task is even added).
-  const retiresTasks = section.allowedTypes.some((a) => behaviorOfType(a.type).retiresWhenDone);
-  // Likewise "Pruned tasks": only on a tab that recurs and allows a prunable type (see canPrune).
-  const prunesTasks = section.period != null && section.allowedTypes.some((a) => behaviorOfType(a.type).prunable);
-  const taskDisplay = isFreezer
-    ? [...TASK_DISPLAY, { ...GROUPING_DISPLAY, defaultOn: false }, AGE_DISPLAY]
-    : [
-        { ...STATUS_DISPLAY, defaultOn: retiresTasks },
-        ...TASK_DISPLAY,
-        { ...GROUPING_DISPLAY, defaultOn: !retiresTasks },
-        ...(retiresTasks ? [COMPLETED_DISPLAY, AGE_DISPLAY] : []),
-        ...(prunesTasks ? [PRUNED_DISPLAY] : []),
-        // Shown by default on a to-do list of one-time tasks, where adding is the main thing you do.
-        { ...ADD_TASK_BUTTON, defaultOn: retiresTasks },
-      ];
-  const displayOptions = isStreaks ? STREAK_DISPLAY : taskDisplay;
-  const view = tabView(prefs, onPrefsChange, displayOptions);
-  const sortMode = view.sortMode as AnySortMode;
+  // What its Sort and Display menus offer is its tab's (tabViews.ts); the choices persist per tab, per device
+  // (useLocalConfig) — a display transform, not board truth. An option the tab doesn't offer reads as off.
+  const taskOffer = useMemo(() => taskTabOffer(section), [section]);
+  const offered = isStreaks ? STREAKS_OFFER : taskOffer;
+  const view = tabView(prefs, onPrefsChange, offered);
   const showEstimate = view.shown("estimate");
   const showTimer = view.shown("timer");
   const showAddButton = view.shown(ADD_BUTTON_KEY);
-  const showCompleted = retiresTasks && !isFreezer && view.shown("completed");
-  const showPruned = prunesTasks && view.shown("pruned");
-  const showStatus = !isStreaks && !isFreezer && view.shown("status");
-  const showAge = retiresTasks && view.shown("age");
-  const grouping = view.shown("grouping");
+  const showCompleted = view.shown("completed");
+  const showPruned = view.shown("pruned");
+  const showStatus = view.shown("status");
+  const showAge = view.shown("age");
+  const grouping = view.shown(GROUPING_KEY);
+  // The row extras a tab may let you turn off — a modifier's line (a Display option keyed by the modifier's
+  // id), the meter on it, the thaw bonus — show wherever the tab doesn't offer them as a toggle.
+  const extraShown = (key: string) => !offered.displays.some((o) => o.key === key) || view.shown(key);
+  const lines = {
+    hidden: new Set(Object.keys(MODIFIER_LOOKS).filter((id) => !extraShown(id))),
+    meters: extraShown("meters"),
+  };
+  const sortMode = view.sortMode;
   // Board clock (ticks ~1/min) — read to lock-aware-sort "Get done quick", and for what tasks pay (frost is
   // in Settings); a tick re-renders the card, which is cheap and lets a task slide up the moment it unlocks.
   const { now, settings: boardSettings, openDay } = useBoardClock();
@@ -292,6 +206,18 @@ function SectionCard({
     const parent = task.parentId ? tasks.find((t) => t.id === task.parentId) : undefined;
     return modifiersOf(task, { settings: boardSettings, section: inSection, ...(parent ? { parent } : {}), hasPieces: piecesOf.has(task.id) });
   };
+  // Whether a Booster reroll has another habit to deal (none that's already a Booster).
+  const boosterSpare = useMemo(
+    () => allTasks.some((t) => !t.booster && allSections.some((s) => s.id === t.sectionId && canBoost(t, s))),
+    [allTasks, allSections],
+  );
+  // What a row's menu can reroll, while rerolls for it are left: a Bounty still to win, or a Booster.
+  const rerollOf = (task: Task): RowReroll | undefined =>
+    task.bounty && !isTaskDone(task) && rerollsLeft > 0
+      ? { label: "Reroll Bounty", left: rerollsLeft, onReroll: () => onRerollBounty(task.id) }
+      : task.booster && boosterRerollsLeft > 0 && boosterSpare
+        ? { label: "Reroll Booster", left: boosterRerollsLeft, onReroll: () => onRerollBooster(task.id) }
+        : undefined;
   // What thawing a frozen task gains, said on its thaw button and menu: the thaw bonus if it has frost, and
   // what it will pay once it's out, when that's more than now (full frost: Subzero) — all of it, pieces and all.
   const thawGains = (task: Task): string | undefined => {
@@ -305,14 +231,15 @@ function SectionCard({
   };
 
   // Finished one-time tasks leave the list (they stay done and keep their points), and pruned tasks
-  // are hidden until their tab's next day/week — unless the tab's Display shows them.
+  // are out of it until their tab's next day/week. The tab's Display can show either: finished ones at the
+  // end of the list, as a flat look-back that doesn't reorder or group; pruned ones in a look-back list of
+  // their own under it (`prunedTasks`), so the rest of the tab still drags and groups.
   const listedTasks = useMemo(
-    () => topTasks.filter((t) => (showCompleted || !isRetired(t)) && (showPruned || !t.pruned)),
-    [topTasks, showCompleted, showPruned],
+    () => topTasks.filter((t) => (showCompleted || !isRetired(t)) && !t.pruned),
+    [topTasks, showCompleted],
   );
-  // Like the Completed view, a listing that shows pruned tasks (at the bottom) is a flat look-back: it
-  // doesn't reorder or group, so no hidden-for-now task is ever dragged out of its place.
-  const flatView = showCompleted || (showPruned && topTasks.some((t) => t.pruned));
+  const prunedTasks = useMemo(() => (showPruned ? topTasks.filter((t) => t.pruned).sort(byOrder) : []), [topTasks, showPruned]);
+  const flatView = showCompleted;
 
   // A list only sees the tasks it shows, but a reorder must name the whole tab. Finished one-time tasks
   // already trail, so they're appended; the rest keep their place — pruned ones are back tomorrow, and
@@ -343,48 +270,21 @@ function SectionCard({
     onExtendGroup(groupId, adjacent ? run.filter((id) => !members.includes(id)) : ids);
   }
 
-  const displayedTasks = useMemo(() => {
-    const list = listedTasks;
-    // "Get done quick": shortest doable tasks first so you can knock them out. Ranked in bands —
-    // 0 doable+timed (sorted by time asc), 1 schedule-locked (not yet unlockable — sunk to just above
-    // the untimed), 2 no time assigned, 3 completed (very bottom). Within a band, shorter time first.
-    if (sortMode === "quick") {
-      const rank = (t: Task) =>
-        isTaskDone(t) ? 3 : taskLocked(t, now, boardSettings, openDay) ? 1 : estMinutes(t) == null ? 2 : 0;
-      return [...list].sort(
-        (a, b) => rank(a) - rank(b) || (estMinutes(a) ?? Infinity) - (estMinutes(b) ?? Infinity),
-      );
-    }
-    if (sortMode === "points-desc") return [...list].sort((a, b) => maxValue(b) - maxValue(a));
-    if (sortMode === "points-asc") return [...list].sort((a, b) => maxValue(a) - maxValue(b));
-    if (sortMode === "status-incomplete")
-      return [...list].sort((a, b) => Number(isTaskDone(a)) - Number(isTaskDone(b)));
-    if (sortMode === "status-complete")
-      return [...list].sort((a, b) => Number(isTaskDone(b)) - Number(isTaskDone(a)));
-    // Time sorts: tasks without an estimate sink to the bottom either way.
-    if (sortMode === "time-asc")
-      return [...list].sort((a, b) => (estMinutes(a) ?? Infinity) - (estMinutes(b) ?? Infinity));
-    if (sortMode === "time-desc")
-      return [...list].sort((a, b) => (estMinutes(b) ?? -1) - (estMinutes(a) ?? -1));
-    // Date added: createdAt is an ISO string, so lexicographic compare is chronological.
-    if (sortMode === "added-newest")
-      return [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    if (sortMode === "added-oldest")
-      return [...list].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    // Manual: the stored order (used as the flat list while the Completed view is on).
-    return [...list].sort(byOrder);
-  }, [listedTasks, sortMode, now, boardSettings, openDay]);
-  // While they're shown, pruned tasks sit at the bottom whatever the sort — out of today's way.
-  const shownTasks = useMemo(
-    () => (showPruned ? [...displayedTasks.filter((t) => !t.pruned), ...displayedTasks.filter((t) => t.pruned)] : displayedTasks),
-    [displayedTasks, showPruned],
+  // The tab's sort over its tasks in their own order (so Manual, and ties, keep it).
+  const displayedTasks = useMemo(
+    () =>
+      sortItems(
+        [...listedTasks].sort(byOrder),
+        taskOffer.sorts.find((o) => o.key === sortMode),
+        { now, settings: boardSettings, openDay },
+      ),
+    [listedTasks, taskOffer, sortMode, now, boardSettings, openDay],
   );
 
-  const displayedStreaks = useMemo(() => {
-    if (sortMode === "count-desc") return [...streaks].sort((a, b) => b.count - a.count);
-    if (sortMode === "count-asc") return [...streaks].sort((a, b) => a.count - b.count);
-    return streaks;
-  }, [streaks, sortMode]);
+  const displayedStreaks = useMemo(
+    () => sortItems(streaks, STREAKS_OFFER.sorts.find((o) => o.key === sortMode), undefined),
+    [streaks, sortMode],
+  );
 
   // Which Status band is under a screen point (bands carry data-band; compared by rect, since the row
   // being dragged sits on top of whatever is under the pointer).
@@ -433,7 +333,7 @@ function SectionCard({
   const frozenRow = (task: Task) => {
     const whole = (task.parentId && tasks.find((t) => t.id === task.parentId)) || task;
     const bonus = frostShare(whole, boardSettings) > 0 ? boardSettings.freezer.thawBonus : 0;
-    return { onThaw: () => onSetFrozen(whole, false), gains: thawGains(whole), ...(bonus > 0 ? { thawBonus: bonus } : {}) };
+    return { onThaw: () => onSetFrozen(whole, false), gains: thawGains(whole), ...(bonus > 0 && extraShown("thaw-bonus") ? { thawBonus: bonus } : {}) };
   };
 
   // A task's row — a piece's too (under its task, whose tick handler it's given so the task sees the tick
@@ -451,7 +351,8 @@ function SectionCard({
       onSetLevel={setLevel}
       pieces={piecesFor(task)}
       modifiers={modsOf(task)}
-      reroll={task.bounty && rerollsLeft > 0 ? { left: rerollsLeft, onReroll: () => onRerollBounty(task.id) } : undefined}
+      lines={lines}
+      reroll={rerollOf(task)}
       onIce={isFreezer ? frozenRow(task) : undefined}
       freeze={freezer ? { onFreeze: () => onSetFrozen(task, true), refusal: freezeRefusal(task) } : undefined}
       showAge={showAge && !task.parentId}
@@ -488,7 +389,7 @@ function SectionCard({
   const taskList = (
     items: Task[],
     sorted: Task[],
-    { inList = isListed, emptyLabel = "Nothing here yet", dropOutside }: { inList?: (t: Task) => boolean; emptyLabel?: string; dropOutside?: DropOutside } = {},
+    { inList = isListed, emptyLabel, dropOutside }: { inList?: (t: Task) => boolean; emptyLabel?: string; dropOutside?: DropOutside } = {},
   ) => {
     const pinned = items.find((t) => t.id === bountyId);
     if (!pinned) return itemList(items, sorted, { inList, emptyLabel, dropOutside });
@@ -504,12 +405,12 @@ function SectionCard({
   const itemList = (
     items: Task[],
     sorted: Task[],
-    { inList, emptyLabel, dropOutside, pinned = false }: { inList: (t: Task) => boolean; emptyLabel: string; dropOutside?: DropOutside; pinned?: boolean },
+    { inList, emptyLabel, dropOutside, pinned = false }: { inList: (t: Task) => boolean; emptyLabel?: string; dropOutside?: DropOutside; pinned?: boolean },
   ) => (
     <ItemList
       items={items}
-      // The Completed / Pruned views are a flat look-back (those tasks sit ungrouped at the end), so
-      // they don't reorder or group — that happens in the normal view. Nor does a pinned Bounty.
+      // The Completed view is a flat look-back (those tasks sit ungrouped at the end), so it doesn't reorder
+      // or group — that happens in the normal view. Nor does a pinned Bounty.
       manual={sortMode === "manual" && !flatView && !pinned}
       sorted={sorted}
       groups={groups}
@@ -527,6 +428,26 @@ function SectionCard({
     />
   );
 
+  // The tab's pruned tasks while its Display shows them: dimmed, under the list, a look-back in their own order
+  // — no drag or grouping here (they're back in their places when their day or week ends), Unprune from a row.
+  const prunedList = () => (
+    <ItemList
+      items={prunedTasks}
+      manual={false}
+      sorted={prunedTasks}
+      groups={groups}
+      noun="tasks"
+      renderItem={renderTask}
+      onReorder={() => {}}
+      onAddGroup={() => {}}
+      onExtendGroup={() => {}}
+      onEjectFromGroup={() => {}}
+      onEditGroup={onEditGroup}
+      onRemoveGroup={onRemoveGroup}
+      grouping={false}
+    />
+  );
+
   // Status on: the tab as bands — each the same list over its own tasks (sorted, reordered and grouped
   // like the whole tab; a group whose tasks sit in two bands shows in both), all on one grid so the [%]
   // column lines up across them. Status never moves a task in the tab's order, so a task goes back to
@@ -536,7 +457,7 @@ function SectionCard({
     const bandList = (band: Band, emptyLabel?: string) =>
       taskList(
         listedTasks.filter((t) => bandOf(t) === band),
-        shownTasks.filter((t) => bandOf(t) === band),
+        displayedTasks.filter((t) => bandOf(t) === band),
         { inList: inBand(band), emptyLabel, dropOutside: band === "done" ? undefined : dropFrom(band) },
       );
     const count = (band: Band) => listedTasks.filter((t) => bandOf(t) === band).length;
@@ -550,7 +471,7 @@ function SectionCard({
           count={inProgress}
           hint={inProgress > IN_PROGRESS_NUDGE_ABOVE ? `${inProgress} in progress. Finish or park one?` : undefined}
         >
-          {bandList("in-progress", "Nothing in progress")}
+          {bandList("in-progress")}
         </StatusBand>
         <StatusBand tabId={section.id} band="backlog" label={statusLabel("backlog")} count={count("backlog")}>
           {bandList("backlog")}
@@ -586,15 +507,8 @@ function SectionCard({
       }
       actions={
         <>
-          {/* Streak tabs only have three sorts — no need to condense, so they show them all. Task tabs
-              pin a top set (plus the active sort) and tuck the rest under "Show more". */}
-          <SortMenu
-            options={isStreaks ? STREAK_SORT_OPTIONS : SORT_OPTIONS}
-            mode={sortMode}
-            onSelect={view.setSortMode}
-            pinned={isStreaks ? undefined : { modes: pinnedSorts, onToggle: onTogglePin }}
-          />
-          <DisplayMenu options={displayOptions} shown={view.shown} onToggle={view.setShown} />
+          <SortMenu options={offered.sorts} view={view} />
+          <DisplayMenu options={offered.displays} view={view} />
         </>
       }
       footer={
@@ -652,6 +566,7 @@ function SectionCard({
               onRemove={onRemoveStreak}
             />
           )}
+          grouping={grouping}
           onReorder={onReorderStreakItems}
           onAddGroup={onAddStreakGroup}
           onExtendGroup={onExtendStreakGroup}
@@ -662,7 +577,10 @@ function SectionCard({
       ) : showStatus ? (
         statusBands()
       ) : (
-        <div className="list-stack">{taskList(listedTasks, shownTasks, isFreezer ? { emptyLabel: "Nothing on ice" } : {})}</div>
+        <div className="list-stack">
+          {taskList(listedTasks, displayedTasks, { emptyLabel: isFreezer ? "Nothing on ice" : "Nothing here yet" })}
+          {prunedTasks.length > 0 && prunedList()}
+        </div>
       )}
     </CanvasCard>
   );

@@ -1,5 +1,5 @@
 import { formatPercent } from "@board/contracts";
-import { BoostIcon, CrystalIcon, SnowflakeIcon, TargetIcon } from "./Icons";
+import { BoostIcon, CrystalIcon, SnowflakeIcon, TagIcon, TargetIcon } from "./Icons";
 import type { AppliedModifier, ModifierId, Settings, Task } from "./types";
 import { frostFill } from "./types";
 
@@ -65,6 +65,15 @@ export const MODIFIER_LOOKS: Record<ModifierId, ModifierLook> = {
     line: (m) => `+${formatPercent(m.value)} boost`,
     tagOnIce: true,
     aura: () => "boost",
+    plainTag: true,
+  },
+  // A reward's, on its price: what share it takes off.
+  sale: {
+    tag: "Sale",
+    color: "var(--mod-sale)",
+    icon: TagIcon,
+    line: (m) => `${Math.round((1 - m.value) * 100)}% off`,
+    tagOnIce: true,
     plainTag: true,
   },
 };

@@ -6,11 +6,13 @@ interface ConfirmPopoverProps {
   // The affirmative button's label — defaults to "Delete" since that's the common case (task/streak
   // removal); other destructive actions (e.g. reset) pass their own verb.
   confirmLabel?: string;
+  // Whether the action destroys something (red, the default) or is an ordinary yes (buying a reward).
+  danger?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-function ConfirmPopover({ open, message, confirmLabel = "Delete", onConfirm, onCancel }: ConfirmPopoverProps) {
+function ConfirmPopover({ open, message, confirmLabel = "Delete", danger = true, onConfirm, onCancel }: ConfirmPopoverProps) {
   return (
     <AnimatePresence>
       {open && (
@@ -28,7 +30,7 @@ function ConfirmPopover({ open, message, confirmLabel = "Delete", onConfirm, onC
               <button type="button" className="ghost-btn" onClick={onCancel}>
                 Cancel
               </button>
-              <button type="button" className="danger-btn" onClick={onConfirm}>
+              <button type="button" className={danger ? "danger-btn" : "btn-primary"} onClick={onConfirm}>
                 {confirmLabel}
               </button>
             </div>

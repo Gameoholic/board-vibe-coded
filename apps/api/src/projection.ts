@@ -31,6 +31,8 @@ import {
   freezerOf,
   freezesAtWeekEnd,
   fromBoost,
+  type GameItemId,
+  type InventoryItem,
   frostFill,
   frostShare,
   gatherGroups,
@@ -42,6 +44,7 @@ import {
   streakRefusal,
   waitDays,
   type Group,
+  isBought,
   isRetired,
   newPiecePoints,
   paidAt,
@@ -55,6 +58,9 @@ import {
   type RecapPurchase,
   periodKeyFor,
   type PeriodStatus,
+  type PriceContext,
+  priceModifiersOf,
+  saleOn,
   pickWeighted,
   rerollSource,
   PIECES_MAX,
@@ -90,7 +96,7 @@ import {
 } from "@board/contracts";
 import { now as clockNow } from "./clock.js";
 import type { AppendResult, EventStore } from "./db.js";
-import { badRequest, notFound } from "./errors.js";
+import { badRequest, conflict, notFound } from "./errors.js";
 
 // The 2m floor (the builder's smallest bucket, shown as "<2m") is enforced at input, but events
 // predating it may carry a sub-2m duration. Clamp on read so folded state never holds one — the log
@@ -126,6 +132,18 @@ function taskDefinition(t: Task): Omit<TaskCreated, "type" | "taskId" | "section
     ...(t.schedule?.some(Boolean) ? { schedule: t.schedule } : {}),
     ...(t.parentId ? { parentId: t.parentId } : {}),
   };
+}
+
+interface BoosterPickState {
+  card: number;
+  taskId: string;
+  amount: number;
+}
+interface BoosterHandState {
+  taskIds: string[];
+  picked: BoosterPickState[];
+  kept: BoosterPickState[];
+  reroll: boolean;
 }
 
 // The list a task is ordered in: its tab's, or — for a piece — the task it sits inside.
@@ -193,8 +211,13 @@ export class BoardStore {
   private bankedRerolls = 0;
   // Each week's Booster hand, per week key: the tasks on its cards in the order dealt, and the cards picked so
   // far — each one's task a Booster, adding what it was picked at. On while its week is the open one (see
-  // boosterOn), so a week close ends them with no event.
-  private boosterHands = new Map<string, { taskIds: string[]; picked: { card: number; taskId: string; amount: number }[] }>();
+  // boosterOn), so a week close ends them with no event. A reroll deals a new hand (`reroll`: one card to
+  // pick) and the week's other Boosters are `kept` beside it.
+  private boosterHands = new Map<string, BoosterHandState>();
+  // Booster rerolls bought in the shop and not yet used.
+  private bankedBoosterRerolls = 0;
+  // The weeks whose weekend sale was started early, by hand (it runs until that week is ended).
+  private saleStartedIn = new Set<string>();
   // What each open period has seen so far, for its recap, day by day: per task, the net points its ticks
   // gained (at the boost each was paid at), and each purchase. Started afresh with each period.
   private tallies: Record<PeriodKind, PeriodTally> = { day: newTally(), week: newTally() };
@@ -263,8 +286,38 @@ export class BoardStore {
       rewards: this.rewards.map((r) => this.readReward(r)).sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
       groups: this.groups.filter((g) => shopIds.has(g.sectionId)).map((g) => ({ ...g })),
       spent: this.spent,
+      inventory: (Object.keys(this.gameItems) as GameItemId[]).map((item) => ({ item, ...this.gameItems[item].held() })),
+      saleStarted: this.saleStartedEarly(),
     };
   }
+
+  // Whether the open week's weekend sale was started early, by hand.
+  private saleStartedEarly(): boolean {
+    const week = this.openPeriods.week?.key;
+    return !!week && this.saleStartedIn.has(week);
+  }
+
+  // What a reward is priced at now: the server's clock, and the open week as the sale reads it.
+  private priceContext(): PriceContext {
+    return { settings: this.settings, now: clockNow().toISOString(), openDay: this.openPeriods.day?.key, startedEarly: this.saleStartedEarly() };
+  }
+
+  // The items an Item reward (kind "game") gives, one entry each: how many the owner has (bought and kept from week
+  // to week, and the open week's free ones left), and what buying one commits. A new item is one entry here (and
+  // its look on the web); nothing else names one.
+  private readonly gameItems: Record<GameItemId, { held(): Omit<InventoryItem, "item">; grant(): void }> = {
+    "bounty-reroll": {
+      held: () => {
+        const { free, banked } = this.rerollsLeft();
+        return { owned: banked, free };
+      },
+      grant: () => this.commit({ type: "BountyRerollsGranted", count: 1, source: "purchase", periodKey: this.openPeriods.week?.key ?? "" }),
+    },
+    "booster-reroll": {
+      held: () => ({ owned: Math.max(0, this.bankedBoosterRerolls), free: 0 }),
+      grant: () => this.commit({ type: "BoosterRerollsGranted", count: 1 }),
+    },
+  };
 
   // A reward as served: its position in its shop section stamped on, like readTask does for tasks.
   private readReward(reward: Reward): Reward {
@@ -354,8 +407,14 @@ export class BoardStore {
   private boosterOn(task: Pick<Task, "id">): Task["booster"] {
     const week = this.openPeriods.week?.key;
     if (!week || !this.settings.booster.enabled) return undefined;
-    const pick = this.boosterHands.get(week)?.picked.find((p) => p.taskId === task.id);
+    const pick = this.weekBoosters(week).find((p) => p.taskId === task.id);
     return pick ? { amount: pick.amount, periodKey: week } : undefined;
+  }
+
+  // Every Booster a week has now: the ones a reroll kept, and the ones picked from its latest hand.
+  private weekBoosters(week: string): BoosterPickState[] {
+    const hand = this.boosterHands.get(week);
+    return hand ? [...hand.kept, ...hand.picked] : [];
   }
 
   // The open week's Bounties still to win, in the order rolled.
@@ -1021,6 +1080,9 @@ export class BoardStore {
       emoji: body.emoji,
       cost: body.cost,
       ...(body.note ? { note: body.note } : {}),
+      kind: body.kind,
+      ...(body.item ? { item: body.item } : {}),
+      onSale: body.onSale ?? body.kind === "repeatable",
     };
     this.commit(event, idempotencyKey);
     return this.readReward(this.requireReward(event.rewardId));
@@ -1033,6 +1095,7 @@ export class BoardStore {
     if (changes.emoji !== undefined) previous.emoji = reward.emoji;
     if (changes.cost !== undefined) previous.cost = reward.cost;
     if (changes.note !== undefined) previous.note = reward.note ?? null;
+    if (changes.onSale !== undefined) previous.onSale = reward.onSale;
     this.commit({ type: "RewardEdited", rewardId: id, changes, previous }, idempotencyKey);
     return this.readReward(this.requireReward(id));
   }
@@ -1051,13 +1114,36 @@ export class BoardStore {
     return this.getShop();
   }
 
-  // Buy a reward. Affordability is checked against the server's own view of the points (the client is
-  // never trusted for them), then the cost is frozen onto the purchase. Returns the whole shop so the
-  // client reconciles `spent` and the bought-count in one go.
-  purchaseReward(id: string, idempotencyKey?: string | null): Shop {
+  // Buy a reward at what it costs now (its price under its modifiers — the weekend sale), checked against the
+  // server's own view of the points (the client is never trusted for them); the price, and what changed it,
+  // are frozen onto the purchase. `shown` is the price the owner saw: if the server's differs (the sale began
+  // or ended in between), nothing is bought. A one-time reward is bought once; an Item reward gives its item
+  // too, only when the purchase is new (a retried request gives nothing twice). Returns the whole shop so the
+  // client reconciles `spent`, the bought-count and what's held in one go.
+  purchaseReward(id: string, shown?: number, idempotencyKey?: string | null): Shop {
     const reward = this.requireReward(id);
-    if (this.pointsAvailable() < reward.cost) throw badRequest("not enough points");
-    this.commit({ type: "RewardPurchased", rewardId: id, pointsSpent: reward.cost }, idempotencyKey);
+    if (isBought(reward)) throw badRequest("already bought");
+    const modifiers = priceModifiersOf(reward, this.priceContext());
+    const price = payout(reward.cost, modifiers);
+    if (shown !== undefined && shown !== price) throw conflict("the price changed");
+    if (this.pointsAvailable() < price) throw badRequest("not enough points");
+    const result = this.commit(
+      { type: "RewardPurchased", rewardId: id, pointsSpent: price, cost: reward.cost, ...(modifiers.length > 0 ? { modifiers } : {}) },
+      idempotencyKey,
+    );
+    if (result.created && reward.item) this.gameItems[reward.item].grant();
+    return this.getShop();
+  }
+
+  // Start the weekend sale early — on holiday, say — for the rest of the open week. Only while a week is
+  // open, the sale is enabled, and it isn't on already.
+  startSale(idempotencyKey?: string | null): Shop {
+    const week = this.openPeriods.week?.key;
+    if (!week) throw badRequest("no week has started");
+    if (!this.settings.sale.enabled) throw badRequest("the weekend sale is off");
+    const { now, openDay, startedEarly } = this.priceContext();
+    if (saleOn(now, this.settings, { openDay, startedEarly })) throw badRequest("the sale is already on");
+    this.commit({ type: "SaleStarted", periodKey: week }, idempotencyKey);
     return this.getShop();
   }
 
@@ -1327,13 +1413,22 @@ export class BoardStore {
   // random handful of a big Registry), recorded with which card holds which task — so a pick is a real draw.
   private dealBooster(periodKey: string): void {
     if (!this.settings.booster.enabled) return;
+    const taskIds = this.boosterDeal();
+    if (taskIds.length > 0) this.commit({ type: "BoosterDealt", periodKey, taskIds });
+  }
+
+  // A hand: the Registry's habits shuffled face down (a random handful of a big Registry), leaving out `not`.
+  private boosterDeal(not: ReadonlySet<string> = new Set()): string[] {
     const candidates = this.tasks.filter((t) => {
       const section = this.sections.find((s) => s.id === t.sectionId);
-      return !!section && canBoost(t, section);
+      return !!section && canBoost(t, section) && !not.has(t.id);
     });
-    if (candidates.length === 0) return;
-    const taskIds = shuffled(candidates.map((t) => t.id), this.random).slice(0, BOOSTER_HAND_MAX);
-    this.commit({ type: "BoosterDealt", periodKey, taskIds });
+    return shuffled(candidates.map((t) => t.id), this.random).slice(0, BOOSTER_HAND_MAX);
+  }
+
+  // How many cards of `hand` are picked: the week's Boosters from its first, one from a reroll's.
+  private boosterPicks(hand: BoosterHandState): number {
+    return Math.min(hand.reroll ? 1 : this.settings.booster.max, hand.taskIds.length);
   }
 
   // The open week's Booster hand as the owner sees it: face down until picked, and every card turned over once
@@ -1343,7 +1438,7 @@ export class BoardStore {
     const hand = week && this.settings.booster.enabled ? this.boosterHands.get(week) : undefined;
     if (!hand) return null;
     const textOf = (taskId: string) => this.tasks.find((t) => t.id === taskId)?.text ?? "";
-    const picks = Math.min(this.settings.booster.max, hand.taskIds.length);
+    const picks = this.boosterPicks(hand);
     return {
       cards: hand.taskIds.length,
       names: hand.taskIds.map(textOf).sort((a, b) => a.localeCompare(b)),
@@ -1353,9 +1448,9 @@ export class BoardStore {
     };
   }
 
-  // The open week's Booster hand.
+  // The open week's Booster hand, and the bought rerolls left.
   boosterStatus(): BoosterStatus {
-    return { hand: this.boosterHand() };
+    return { hand: this.boosterHand(), rerollsLeft: Math.max(0, this.bankedBoosterRerolls) };
   }
 
   // Pick a card of this week's Booster hand: the task the deal put there is a Booster for the rest of the week,
@@ -1364,10 +1459,25 @@ export class BoardStore {
     const week = this.openPeriods.week?.key;
     const hand = week && this.settings.booster.enabled ? this.boosterHands.get(week) : undefined;
     if (!week || !hand) throw badRequest("there's no Booster to pick this week");
-    if (hand.picked.length >= Math.min(this.settings.booster.max, hand.taskIds.length)) throw badRequest("this week's Booster is already picked");
+    if (hand.picked.length >= this.boosterPicks(hand)) throw badRequest("this week's Booster is already picked");
     const taskId = hand.taskIds[card];
     if (taskId === undefined || hand.picked.some((p) => p.card === card)) throw badRequest("that card can't be picked");
     this.commit({ type: "BoosterPicked", periodKey: week, card, taskId, amount: this.settings.booster.amount }, idempotencyKey);
+    return this.boosterHand()!;
+  }
+
+  // Reroll one of this week's Boosters with a bought reroll: it stops being one, and a new hand is dealt — the
+  // Registry less every Booster the week has, that one included — to pick one card from. Only once the week's
+  // hand is all picked, and while there's something else to deal. Returns the new hand.
+  rerollBooster(taskId: string, idempotencyKey?: string | null): BoosterHand {
+    const week = this.openPeriods.week?.key;
+    const hand = week && this.settings.booster.enabled ? this.boosterHands.get(week) : undefined;
+    if (!week || !hand || !this.weekBoosters(week).some((p) => p.taskId === taskId)) throw badRequest("that task isn't a Booster this week");
+    if (hand.picked.length < this.boosterPicks(hand)) throw badRequest("this week's hand isn't picked yet");
+    if (this.bankedBoosterRerolls <= 0) throw badRequest("no Booster rerolls left");
+    const taskIds = this.boosterDeal(new Set(this.weekBoosters(week).map((p) => p.taskId)));
+    if (taskIds.length === 0) throw badRequest("there's nothing else to deal");
+    this.commit({ type: "BoosterDealt", periodKey: week, taskIds, replaces: taskId }, idempotencyKey);
     return this.boosterHand()!;
   }
 
@@ -1553,6 +1663,9 @@ export class BoardStore {
           emoji: r.emoji,
           cost: r.cost,
           ...(r.note ? { note: r.note } : {}),
+          kind: r.kind,
+          ...(r.item ? { item: r.item } : {}),
+          onSale: r.onSale,
         });
       }
     }
@@ -1591,6 +1704,8 @@ export class BoardStore {
     this.freeRerolls.clear();
     this.bankedRerolls = 0;
     this.boosterHands.clear();
+    this.bankedBoosterRerolls = 0;
+    this.saleStartedIn.clear();
     this.tallies = { day: newTally(), week: newTally() };
     this.weekStartStreaks = null;
     this.frostFrom.clear();
@@ -1895,9 +2010,19 @@ export class BoardStore {
         else this.freeRerolls.set(event.periodKey, { granted: event.count, used: this.freeRerolls.get(event.periodKey)?.used ?? 0 });
         return;
       }
-      case "BoosterDealt":
-        this.boosterHands.set(event.periodKey, { taskIds: event.taskIds, picked: [] });
+      case "BoosterRerollsGranted":
+        this.bankedBoosterRerolls += event.count;
         return;
+      case "SaleStarted":
+        this.saleStartedIn.add(event.periodKey);
+        return;
+      case "BoosterDealt": {
+        // A reroll's deal keeps the week's other Boosters beside the new hand, and spends a bought reroll.
+        const kept = event.replaces !== undefined ? this.weekBoosters(event.periodKey).filter((p) => p.taskId !== event.replaces) : [];
+        this.boosterHands.set(event.periodKey, { taskIds: event.taskIds, picked: [], kept, reroll: event.replaces !== undefined });
+        if (event.replaces !== undefined) this.bankedBoosterRerolls -= 1;
+        return;
+      }
       case "BoosterPicked":
         this.boosterHands.get(event.periodKey)?.picked.push({ card: event.card, taskId: event.taskId, amount: event.amount });
         return;
@@ -2047,13 +2172,14 @@ export class BoardStore {
         return;
       case "PeriodStarted":
         this.openPeriods[event.kind] = { key: event.periodKey, startedAt: occurredAt };
-        // A week starting starts its Bounties, free rerolls and Booster hand afresh — the debug clock can reopen
+        // A week starting starts its Bounties, free rerolls, Booster hand and early sale afresh — the debug clock can reopen
         // a week, and whatever an earlier run of it held ended when that run closed.
         if (event.kind === "week") {
           this.bounties.delete(event.periodKey);
           this.bountiedIn.delete(event.periodKey);
           this.freeRerolls.delete(event.periodKey);
           this.boosterHands.delete(event.periodKey);
+          this.saleStartedIn.delete(event.periodKey);
         }
         return;
       case "PeriodClosed":
@@ -2094,7 +2220,9 @@ export class BoardStore {
         this.groups = this.groups.filter((g) => g.sectionId !== event.shopSectionId);
         this.itemOrder.delete(event.shopSectionId);
         return;
-      case "RewardCreated":
+      case "RewardCreated": {
+        // A reward from before kinds was repeatable, and on sale — the sale's default for a repeatable one.
+        const kind = event.kind ?? "repeatable";
         this.rewards.push({
           id: event.rewardId,
           shopSectionId: event.shopSectionId,
@@ -2102,26 +2230,32 @@ export class BoardStore {
           emoji: event.emoji,
           cost: event.cost,
           ...(event.note ? { note: event.note } : {}),
+          kind,
+          ...(event.item ? { item: event.item } : {}),
+          onSale: event.onSale ?? kind === "repeatable",
           redeemed: 0,
           createdAt: occurredAt,
         });
         this.orderList(event.shopSectionId).push(event.rewardId);
         return;
+      }
       case "RewardsReordered":
         this.itemOrder.set(
           event.shopSectionId,
           orderBy(this.orderList(event.shopSectionId), (id) => id, event.orderedIds),
         );
         this.settleGroups(event.shopSectionId);
+        this.settleRetired(event.shopSectionId);
         return;
       case "RewardEdited": {
         const reward = this.rewards.find((r) => r.id === event.rewardId);
         if (!reward) return;
-        const { name, emoji, cost, note } = event.changes;
+        const { name, emoji, cost, note, onSale } = event.changes;
         if (name !== undefined) reward.name = name;
         if (emoji !== undefined) reward.emoji = emoji;
         if (cost !== undefined) reward.cost = cost;
         if (note !== undefined) reward.note = note ?? undefined;
+        if (onSale !== undefined) reward.onSale = onSale;
         return;
       }
       case "RewardDeleted": {
@@ -2135,7 +2269,11 @@ export class BoardStore {
         // The frozen pointsSpent, not the reward's current cost — a later price edit never rewrites it.
         this.spent += event.pointsSpent;
         const reward = this.rewards.find((r) => r.id === event.rewardId);
-        if (reward) reward.redeemed += 1;
+        if (!reward) return;
+        reward.redeemed += 1;
+        reward.boughtAt = occurredAt;
+        // A one-time reward leaves its shelf once it's bought — like a one-time task once it's done.
+        this.settleRetiredItem(reward, reward.shopSectionId, isBought(reward));
         return;
       }
     }
@@ -2149,26 +2287,31 @@ export class BoardStore {
   }
 
   // Finished one-time tasks leave their list (TaskBehavior.retiresWhenDone) but stay in state — still
-  // done, still worth their points. Two derived rules keep the list base working around them, both
-  // fold rules over the log rather than events, so a rebuild lands exactly here too:
-  //  - a task that retires drops out of its group (a hidden member would split the group's run), and
-  //  - a section's retired tasks always trail its order (a stable partition), so the tasks still
-  //    listed are one contiguous run that reorders and groups without a hidden task stranded inside.
+  // done, still worth their points — and so do bought one-time rewards. Two derived rules keep the list
+  // base working around them, both fold rules over the log rather than events, so a rebuild lands exactly
+  // here too:
+  //  - an item that retires drops out of its group (a hidden member would split the group's run), and
+  //  - a section's retired items always trail its order (a stable partition), so the items still
+  //    listed are one contiguous run that reorders and groups without a hidden one stranded inside.
   private settleDoneChange(taskId: string): void {
     const task = this.tasks.find((t) => t.id === taskId);
-    if (!task) return;
-    if (isRetired(task) && task.groupId) {
-      const groupId = task.groupId;
-      task.groupId = undefined;
+    if (task) this.settleRetiredItem(task, task.sectionId, isRetired(task));
+  }
+
+  private settleRetiredItem(item: ListItem, sectionId: string, retired: boolean): void {
+    if (retired && item.groupId) {
+      const groupId = item.groupId;
+      item.groupId = undefined;
       this.dropGroupIfEmpty(groupId);
     }
-    this.settleRetired(task.sectionId);
+    this.settleRetired(sectionId);
   }
 
   private settleRetired(sectionId: string): void {
-    const retired = new Set(
-      this.tasks.filter((t) => t.sectionId === sectionId && isRetired(t)).map((t) => t.id),
-    );
+    const retired = new Set([
+      ...this.tasks.filter((t) => t.sectionId === sectionId && isRetired(t)).map((t) => t.id),
+      ...this.rewards.filter((r) => r.shopSectionId === sectionId && isBought(r)).map((r) => r.id),
+    ]);
     if (retired.size === 0) return;
     const list = this.orderList(sectionId);
     this.itemOrder.set(sectionId, [...list.filter((id) => !retired.has(id)), ...list.filter((id) => retired.has(id))]);
