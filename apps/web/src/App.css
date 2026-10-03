@@ -1,8 +1,4 @@
 :root {
-  --surface: #ffffff;
-  --border: #e5e7eb;
-  --text: #0f172a;
-  --text-dim: #94a3b8;
   --radius: 14px;
   /* A list's four column tracks (see .item-list): one home, shared by a task tab's Status bands. */
   --list-tracks: minmax(24px, max-content) minmax(0, max-content) 1fr auto;
@@ -61,7 +57,7 @@ main {
   padding: 5px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.9);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
   backdrop-filter: blur(4px);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
   color: var(--text-dim);
@@ -75,13 +71,13 @@ main {
 
 .toolbar-btn:hover {
   color: var(--text);
-  background: #fff;
+  background: var(--surface);
 }
 
 .toolbar-btn.open {
   color: var(--text);
-  background: #fff;
-  border-color: #cbd5e1;
+  background: var(--surface);
+  border-color: var(--border-strong);
 }
 
 /* Zoom controls, bottom-right corner inside the board — sibling of .board-viewport (like
@@ -152,8 +148,8 @@ main {
   padding: 6px 10px;
   border: 1px solid #f59e0b;
   border-radius: 999px;
-  background: #fffbeb;
-  color: #92400e;
+  background: var(--warn-soft);
+  color: var(--warn-ink);
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
@@ -161,7 +157,7 @@ main {
 }
 
 .debug-badge:hover {
-  background: #fef3c7;
+  background: var(--warn-soft-2);
 }
 
 .debug-badge-dot {
@@ -173,8 +169,8 @@ main {
 
 .debug-badge-exit {
   padding-left: 8px;
-  border-left: 1px solid #f5cf8b;
-  color: #b45309;
+  border-left: 1px solid var(--warn-line);
+  color: var(--warn-text);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   font-size: 0.72rem;
@@ -214,7 +210,7 @@ main {
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: #fafafa;
+  background: var(--canvas);
   /* No idle grab cursor — panning is middle-button only, so the grabbing cursor shows only while
      actively panning (.grabbing below), not on plain hover. */
   cursor: default;
@@ -294,7 +290,7 @@ main {
 .resize-corner::after {
   content: "";
   position: absolute;
-  background: #94a3b8;
+  background: var(--text-dim);
   border-radius: 2px;
 }
 
@@ -392,7 +388,7 @@ main {
   margin-top: 12px;
   border: 1px solid var(--border);
   border-radius: 50%;
-  background: #f8fafc;
+  background: var(--surface-2);
   color: var(--text-dim);
   font-family: inherit;
   font-size: 1rem;
@@ -421,7 +417,7 @@ main {
 }
 
 .add-item-fab:hover {
-  background: #f1f5f9;
+  background: var(--hover);
   color: var(--text);
 }
 
@@ -456,7 +452,7 @@ main {
   background: rgba(100, 116, 139, 0.06);
 }
 .group-block.group-drag-over::before {
-  background: #94a3b8;
+  background: var(--text-dim);
 }
 
 /* Visual feedback when a grouped task is being dragged OUT of its group. */
@@ -464,7 +460,7 @@ main {
   background: rgba(239, 68, 68, 0.04);
 }
 .group-block.group-ejecting::before {
-  background: #fca5a5;
+  background: var(--danger-line);
 }
 
 /* Floating label that follows the cursor when a grouped task is dragged outside the group bounds,
@@ -597,7 +593,7 @@ main {
 
 .sort-btn:hover {
   color: var(--text);
-  background: #f1f5f9;
+  background: var(--hover);
 }
 
 .sort-menu {
@@ -615,7 +611,7 @@ main {
 }
 
 .sort-row:hover {
-  background: #f1f5f9;
+  background: var(--hover);
 }
 
 .sort-option {
@@ -674,7 +670,7 @@ main {
 
 .pin-btn:hover {
   color: var(--text);
-  background: #e2e8f0;
+  background: var(--hover-strong);
 }
 
 .pin-btn.pinned {
@@ -691,7 +687,7 @@ main {
   margin-top: 2px;
   padding: 7px 8px;
   border: none;
-  border-top: 1px solid #eef2f6;
+  border-top: 1px solid var(--divider);
   border-radius: 0 0 6px 6px;
   background: none;
   font-family: inherit;
@@ -738,7 +734,7 @@ main {
 }
 
 .display-option:hover {
-  background: #f1f5f9;
+  background: var(--hover);
 }
 
 .display-option input {
@@ -764,7 +760,7 @@ main {
 
 .icon-btn:hover {
   color: var(--text);
-  background: #f1f5f9;
+  background: var(--hover);
 }
 
 .popover-anchor {
@@ -817,7 +813,7 @@ main {
   height: 20px;
   border: none;
   border-radius: 999px;
-  background: #e2e8f0;
+  background: var(--hover-strong);
   cursor: pointer;
   padding: 0;
   transition: background 0.16s ease;
@@ -847,7 +843,7 @@ main {
 .seg {
   display: inline-flex;
   flex-shrink: 0;
-  background: #f1f5f9;
+  background: var(--hover);
   border-radius: 8px;
   padding: 2px;
   gap: 2px;
@@ -893,16 +889,16 @@ main {
 }
 
 .settings-action:hover {
-  background: #f1f5f9;
+  background: var(--hover);
 }
 
 .settings-action.danger {
-  border-color: #fca5a5;
-  color: #dc2626;
+  border-color: var(--danger-line);
+  color: var(--danger-text);
 }
 
 .settings-action.danger:hover {
-  background: #fef2f2;
+  background: var(--danger-soft);
 }
 
 .checkbox-row {
@@ -969,7 +965,7 @@ main {
 
 /* The row's own hover — not while the pointer is on a row inside it (a piece under its task). */
 .item-row:hover:not(:has(.item-row:hover, .task-pieces:hover)) {
-  background: #f8fafc;
+  background: var(--surface-2);
 }
 
 .task-item input[type="checkbox"] {
@@ -1011,7 +1007,7 @@ main {
   color: var(--text);
   background: none;
   border: none;
-  border-bottom: 1.5px solid #94a3b8;
+  border-bottom: 1.5px solid var(--text-dim);
   outline: none;
   padding: 0;
   width: 100%;
@@ -1142,7 +1138,7 @@ main {
 
 .action-menu-item:focus {
   outline: none;
-  background: #f1f5f9;
+  background: var(--hover);
 }
 
 .action-menu-label {
@@ -1162,7 +1158,7 @@ main {
 }
 
 .action-menu-item.danger:focus {
-  background: #fef2f2;
+  background: var(--danger-soft);
 }
 
 .action-menu-key {
@@ -1197,7 +1193,7 @@ main {
 
 /* The row the open menu belongs to keeps its hover look, so it's clear what the menu acts on. */
 .item-row.menu-open {
-  background: #f8fafc;
+  background: var(--surface-2);
 }
 
 /* On touch, a hold opens the menu — so it mustn't also start a text selection or the iOS callout. */
@@ -1325,7 +1321,7 @@ main {
 .item-row .remove:hover,
 .group-header .remove:hover {
   color: #ef4444;
-  background: #fef2f2;
+  background: var(--danger-soft);
 }
 
 .confirm-backdrop {
@@ -1688,13 +1684,13 @@ main {
 }
 
 .timer-btn:hover {
-  border-color: #94a3b8;
+  border-color: var(--text-dim);
 }
 
 .timer-btn.running {
   color: #ef4444;
   border-color: #ef4444;
-  background: #fef2f2;
+  background: var(--danger-soft);
 }
 
 .timer-popover {
@@ -1732,7 +1728,7 @@ main {
   padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #f8fafc;
+  background: var(--surface-2);
   font-family: inherit;
   font-size: 0.82rem;
   color: var(--text);
@@ -1741,7 +1737,7 @@ main {
 
 .timer-manual-input:focus {
   outline: none;
-  border-color: #94a3b8;
+  border-color: var(--text-dim);
   background: var(--surface);
 }
 
@@ -1814,7 +1810,7 @@ main {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #f8fafc;
+  background: var(--surface-2);
   font-family: inherit;
   font-size: 0.9rem;
   color: var(--text);
@@ -1830,7 +1826,7 @@ main {
 .field select:focus,
 .field-textarea:focus {
   outline: none;
-  border-color: #94a3b8;
+  border-color: var(--text-dim);
   background: var(--surface);
 }
 
@@ -1849,7 +1845,7 @@ main {
 .popover-actions button[type="submit"] {
   border: none;
   background: var(--text);
-  color: #fff;
+  color: var(--surface);
   font-family: inherit;
   font-weight: 600;
   font-size: 0.85rem;
@@ -1919,7 +1915,7 @@ main {
   top: calc(100% + 6px);
   right: 0;
   z-index: 100;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
@@ -1969,14 +1965,14 @@ main {
 }
 
 .calc-pill:hover {
-  border-color: #94a3b8;
+  border-color: var(--text-dim);
   color: var(--text);
 }
 
 .calc-pill.active {
   background: var(--text);
   border-color: var(--text);
-  color: #fff;
+  color: var(--surface);
 }
 
 .calc-custom-wrap {
@@ -2109,7 +2105,7 @@ main {
   flex-direction: column;
   align-items: center;
   padding: 16px 18px;
-  background: rgba(255, 255, 255, 0.55);
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
   border-radius: 16px;
   pointer-events: none;
 }
@@ -2322,7 +2318,7 @@ main {
   gap: 4px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: #f1f5f9;
+  background: var(--hover);
   color: var(--text-dim);
   font-size: 0.82rem;
   font-weight: 600;
@@ -2387,9 +2383,9 @@ button.cond-connector {
 }
 
 button.cond-connector:hover {
-  border-color: #94a3b8;
+  border-color: var(--text-dim);
   color: var(--text);
-  background: #f8fafc;
+  background: var(--surface-2);
 }
 
 .cond-connector-hint {
@@ -2410,12 +2406,12 @@ button.cond-connector:hover {
 
 /* A linked task the streak's type no longer fits (a weekly task on a daily streak): marked to remove. */
 .cond-row.misfit {
-  border-color: #fca5a5;
-  background: #fef2f2;
+  border-color: var(--danger-line);
+  background: var(--danger-soft);
 }
 
 .cond-row.misfit .cond-name {
-  color: #b91c1c;
+  color: var(--danger-text);
   text-decoration: line-through;
 }
 
@@ -2470,7 +2466,7 @@ button.cond-connector:hover {
 
 .cond-remove:hover {
   color: #ef4444;
-  background: #fef2f2;
+  background: var(--danger-soft);
 }
 
 /* Pick-whip handle: press and drag a line onto any task row to link it (After Effects style). */
@@ -2494,15 +2490,15 @@ button.cond-connector:hover {
 }
 
 .whip-handle:hover {
-  border-color: #94a3b8;
+  border-color: var(--text-dim);
   color: var(--text);
-  background: #f8fafc;
+  background: var(--surface-2);
 }
 
 .whip-handle.dragging {
   cursor: grabbing;
   border-style: solid;
-  border-color: #94a3b8;
+  border-color: var(--text-dim);
   color: var(--text);
 }
 
@@ -2529,10 +2525,10 @@ body.whip-dragging {
 
 /* Drop-target feedback painted directly on the hovered task row during a whip drag. */
 .task-item.whip-target {
-  outline: 2px solid var(--whip-color, #94a3b8);
+  outline: 2px solid var(--whip-color, var(--text-dim));
   outline-offset: 1px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--whip-color, #94a3b8) 9%, transparent);
+  background: color-mix(in srgb, var(--whip-color, var(--text-dim)) 9%, transparent);
 }
 
 .task-item.whip-target.whip-target-dupe {
@@ -2563,8 +2559,8 @@ body.whip-dragging {
 /* Fill preview on tier-dots and plain checkboxes during a whip drag. */
 .tier-dot.whip-box-fill,
 .task-item input[type="checkbox"].whip-box-fill {
-  background: color-mix(in srgb, var(--whip-color, #94a3b8) 55%, var(--surface)) !important;
-  border-color: var(--whip-color, #94a3b8) !important;
+  background: color-mix(in srgb, var(--whip-color, var(--text-dim)) 55%, var(--surface)) !important;
+  border-color: var(--whip-color, var(--text-dim)) !important;
 }
 
 /* ---- App navigation rail (view switcher: Board / Shop / Settings) ---- */
@@ -2603,18 +2599,54 @@ body.whip-dragging {
 
 .nav-btn:hover:not(.disabled) {
   color: var(--text);
-  background: #f1f5f9;
+  background: var(--hover);
 }
 
 .nav-btn.active {
   color: var(--text);
-  background: #f1f5f9;
+  background: var(--hover);
   border-color: var(--border);
 }
 
 .nav-btn.disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* The theme switch sits at the rail's foot: the light/dark toggle, and a slim chevron under it for every theme. */
+.nav-theme {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.nav-btn.nav-more {
+  height: 20px;
+  border-radius: 6px;
+}
+
+/* A theme in the theme menu: its surface, ringed by its page colour, with a dot of its ink. Every colour
+   comes from the theme the swatch's own data-theme names (theme.css). */
+.theme-swatch {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow:
+    inset 0 0 0 3px var(--bg),
+    0 0 0 1px var(--border-strong);
+}
+
+.theme-swatch::after {
+  content: "";
+  position: absolute;
+  inset: 5.5px;
+  border-radius: 50%;
+  background: var(--text);
 }
 
 /* ---- Field hint (used by settings + streak "count from") ---- */
@@ -2653,7 +2685,7 @@ body.whip-dragging {
 }
 
 .settings-group.danger {
-  border-color: #fecaca;
+  border-color: var(--danger-line-soft);
 }
 
 .settings-heading {
@@ -2677,7 +2709,7 @@ body.whip-dragging {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
   color: var(--text);
   width: fit-content;
 }
@@ -2775,7 +2807,7 @@ body.whip-dragging {
 
 .backup-slot:hover,
 .backup-slot.is-shown {
-  background: #f8fafc;
+  background: var(--surface-2);
 }
 
 .backup-slot-when {
@@ -2790,7 +2822,7 @@ body.whip-dragging {
 
 .backup-slot-drop {
   font-size: 0.72rem;
-  color: #b45309;
+  color: var(--warn-text);
 }
 
 .backup-slot-size {
@@ -2848,7 +2880,7 @@ body.whip-dragging {
   position: relative;
   overflow: hidden;
   margin: 0 auto;
-  background: #f7f7f9;
+  background: var(--bg);
   border-radius: 10px;
 }
 
@@ -3325,7 +3357,7 @@ body.whip-dragging {
 
 .recap-week-total {
   justify-content: space-between;
-  background: #f8fafc;
+  background: var(--surface-2);
   border-color: var(--text-dim);
 }
 
@@ -3380,7 +3412,7 @@ body.whip-dragging {
 }
 
 .recap-streak-delta.up {
-  color: #16a34a;
+  color: var(--good-text);
 }
 
 .recap-streak-delta.down {
@@ -3514,11 +3546,11 @@ body.whip-dragging {
 }
 
 .rebalance-change.up {
-  color: #16a34a;
+  color: var(--good-text);
 }
 
 .rebalance-change.down {
-  color: #dc2626;
+  color: var(--danger-text);
 }
 
 .rebalance-old {
@@ -3943,10 +3975,10 @@ main.shop-open > .zoom-controls {
   width: max-content;
   max-width: min(520px, 90%);
   padding: 10px 16px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-line-soft);
   border-radius: 10px;
-  color: #b91c1c;
+  color: var(--danger-text);
   font-size: 0.85rem;
   line-height: 1.45;
   text-align: center;
@@ -3984,7 +4016,7 @@ main.shop-open > .zoom-controls {
   margin-left: 6px;
   font-size: 0.72rem;
   font-weight: 700;
-  color: #16a34a;
+  color: var(--good-text);
   font-variant-numeric: tabular-nums;
 }
 
@@ -4010,7 +4042,7 @@ main.shop-open > .zoom-controls {
 }
 
 .shop-buy:disabled {
-  background: #e2e8f0;
+  background: var(--hover-strong);
   color: var(--text-dim);
   cursor: not-allowed;
 }
@@ -4072,7 +4104,7 @@ main.shop-open > .zoom-controls {
   margin-top: 1px;
   font-size: 0.7rem;
   font-weight: 600;
-  color: #0284c7;
+  color: var(--mod-frost);
 }
 
 /* Shown, not pickable — its warning says why ("A Bounty can't be frozen"). */
@@ -4192,7 +4224,7 @@ main.shop-open > .zoom-controls {
   padding: 0 4px 4px;
   font-size: 0.74rem;
   font-weight: 600;
-  color: #b45309;
+  color: var(--warn-text);
 }
 
 /* A row's band note under its name: how long it's been in hand, or what it's waiting on. */
@@ -4240,7 +4272,7 @@ main.shop-open > .zoom-controls {
   bottom: -1px;
   right: 100%;
   width: 18px;
-  background: linear-gradient(to right, transparent, #f8fafc);
+  background: linear-gradient(to right, transparent, var(--surface-2));
   pointer-events: none;
 }
 
@@ -4272,7 +4304,7 @@ main.shop-open > .zoom-controls {
 
 .status-pill button:hover {
   color: var(--text);
-  background: #f8fafc;
+  background: var(--surface-2);
 }
 
 .status-pill button.on {
@@ -4370,7 +4402,7 @@ main.shop-open > .zoom-controls {
 }
 
 .pieces-blocked {
-  color: #b45309;
+  color: var(--warn-text);
   font-weight: 600;
 }
 
@@ -4658,7 +4690,7 @@ main.shop-open > .zoom-controls {
   border: 1.5px solid currentColor;
   border-radius: 4px;
   background: rgba(79, 70, 229, 0.09);
-  color: #4f46e5;
+  color: var(--mod-subzero);
   font-size: 0.6rem;
   font-weight: 900;
   letter-spacing: 0.12em;
@@ -4776,17 +4808,17 @@ main.shop-open > .zoom-controls {
    Light blue like a block of ice. Its rows can't be done: their box is a thaw button, warming on hover. */
 .board-card.freezer-card {
   background:
-    radial-gradient(160px 100px at 0 0, rgba(255, 255, 255, 0.95), transparent 70%),
-    radial-gradient(220px 120px at 100% 0, rgba(186, 230, 253, 0.5), transparent 70%),
-    linear-gradient(180deg, #f2f9fe, #e6f4fd);
-  border-color: #bae6fd;
+    radial-gradient(160px 100px at 0 0, var(--frost-glint), transparent 70%),
+    radial-gradient(220px 120px at 100% 0, var(--frost-haze), transparent 70%),
+    linear-gradient(180deg, var(--frost-top), var(--frost-bottom));
+  border-color: var(--frost-line);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 1px 0 var(--frost-glint),
     0 1px 3px rgba(2, 132, 199, 0.08);
 }
 
 .freezer-card .item-row:hover:not(:has(.item-row:hover, .task-pieces:hover)) {
-  background: rgba(2, 132, 199, 0.06);
+  background: var(--frost-hover);
 }
 
 .thaw-cell {
@@ -4802,7 +4834,7 @@ main.shop-open > .zoom-controls {
   border: 1.5px solid #38bdf8;
   border-radius: 5px;
   background: var(--surface);
-  color: #0284c7;
+  color: var(--mod-frost);
   cursor: pointer;
   transition:
     background 0.15s,
@@ -4814,13 +4846,13 @@ main.shop-open > .zoom-controls {
 .thaw-btn:focus-visible {
   outline: none;
   border-color: #f97316;
-  background: #fff7ed;
-  color: #ea580c;
+  background: var(--heat-soft);
+  color: var(--heat-ink);
 }
 
 /* Under a frosted task's frost: the thaw bonus it would pay, in the thaw button's warm orange. */
 .modifier-line.thaw-line {
-  --c: #ea580c;
+  --c: var(--heat-ink);
 }
 
 /* A task's age beside its name (AgeChip): days, then weeks, then months; amber in the week it'll freeze. */
@@ -4829,7 +4861,7 @@ main.shop-open > .zoom-controls {
   padding: 0 5px;
   border: 1px solid var(--border);
   border-radius: 5px;
-  background: #f8fafc;
+  background: var(--surface-2);
   font-size: 0.68rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -4839,15 +4871,15 @@ main.shop-open > .zoom-controls {
 }
 
 .age-chip.on-ice {
-  border-color: #bae6fd;
-  background: rgba(255, 255, 255, 0.75);
-  color: #0284c7;
+  border-color: var(--frost-line);
+  background: var(--frost-chip);
+  color: var(--mod-frost);
 }
 
 .age-chip.soon {
-  border-color: #fed7aa;
-  background: #fff7ed;
-  color: #c2410c;
+  border-color: var(--heat-line);
+  background: var(--heat-soft);
+  color: var(--heat-text);
 }
 
 /* While the pointer is over the chip's spot (AgeChip sets `age-peek`), the row's Status pill steps aside —
@@ -4901,13 +4933,13 @@ main.shop-open > .zoom-controls {
   font-size: 0.95rem;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
-  color: #0284c7;
+  color: var(--mod-frost);
   text-shadow: 0 1px 0 var(--surface);
 }
 
 .freeze-fx-text.subzero {
   font-size: 1.2rem;
-  color: #4f46e5;
+  color: var(--mod-subzero);
 }
 
 .freeze-fx-stamp {
@@ -4924,7 +4956,7 @@ main.shop-open > .zoom-controls {
 }
 
 .freeze-fx-stamp.subzero {
-  color: #4f46e5;
+  color: var(--mod-subzero);
   box-shadow: 0 0 30px rgba(56, 189, 248, 0.55);
 }
 
@@ -5054,7 +5086,7 @@ main.shop-open > .zoom-controls {
 .recap-wash {
   position: absolute;
   inset: 0;
-  background: rgba(247, 247, 249, 0.86);
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
@@ -5663,7 +5695,7 @@ main.shop-open > .zoom-controls {
 
 .bounty-explain p {
   margin: 0;
-  color: #475569;
+  color: var(--text-2);
   font-size: 1rem;
 }
 
@@ -5896,18 +5928,18 @@ main.shop-open > .zoom-controls {
 
 .booster-prompt {
   margin: 0;
-  color: #7e22ce;
+  color: var(--booster-ink);
   font-size: 1rem;
   font-weight: 700;
 }
 
 .booster-prompt.failed {
-  color: #dc2626;
+  color: var(--danger-text);
 }
 
 .booster-explain {
   margin: 0;
-  color: #475569;
+  color: var(--text-2);
   font-size: 1rem;
 }
 

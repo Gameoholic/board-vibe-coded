@@ -27,6 +27,7 @@ import StatusBand from "./StatusBand";
 import StreakForm, { type StreakPayload } from "./StreakForm";
 import StreakItem from "./StreakItem";
 import { ADD_BUTTON_KEY, addButtonOption } from "./displayOptions";
+import { tabInk } from "./palette";
 import { DisplayMenu, SortMenu, tabView, type DisplayOption, type SortOption } from "./TabControls";
 import TaskItem from "./TaskItem";
 import type { FlyOrigin } from "./FlyingPoints";
@@ -223,6 +224,8 @@ function SectionCard({
   pinnedSorts,
   onTogglePin,
 }: SectionCardProps) {
+  // The tab's colour as drawn (lifted on a dark theme); the colour picker still shows the colour as picked.
+  const ink = tabInk(section.color);
   const isStreaks = section.kind === "streaks";
   // A Freezer holds what froze out of its tab: no statuses, nothing done or added there — only thawed out.
   const isFreezer = !!section.freezerFor;
@@ -439,7 +442,7 @@ function SectionCard({
     <TaskItem
       key={task.id}
       task={task}
-      color={section.color}
+      color={ink}
       scheduleCadence={scheduleCadence}
       showEstimate={showEstimate}
       showTimer={showTimer}
@@ -539,7 +542,7 @@ function SectionCard({
     const count = (band: Band) => listedTasks.filter((t) => bandOf(t) === band).length;
     const inProgress = count("in-progress");
     return (
-      <div className="status-bands" style={{ "--tab-color": section.color } as React.CSSProperties}>
+      <div className="status-bands" style={{ "--tab-color": ink } as React.CSSProperties}>
         <StatusBand
           tabId={section.id}
           band="in-progress"
@@ -577,7 +580,7 @@ function SectionCard({
       frame={frame}
       className={isFreezer ? "freezer-card" : undefined}
       title={
-        <CardTitle name={section.name} color={section.color} popoverTitle="Color" popoverWidth={172}>
+        <CardTitle name={section.name} color={ink} popoverTitle="Color" popoverWidth={172}>
           <ColorPicker value={section.color} onChange={(color) => onRecolor(section.id, color)} />
         </CardTitle>
       }
@@ -604,7 +607,7 @@ function SectionCard({
                 <StreakForm
                   allTasks={allTasks}
                   allSections={allSections}
-                  accentColor={section.color}
+                  accentColor={ink}
                   submitLabel="Add streak"
                   onSubmit={(payload) => {
                     onAddStreak(payload);
@@ -643,7 +646,7 @@ function SectionCard({
               streak={streak}
               allTasks={allTasks}
               allSections={allSections}
-              sectionColor={section.color}
+              sectionColor={ink}
               row={row}
               onEdit={(payload) => onEditStreak(streak.id, payload)}
               onRemove={onRemoveStreak}

@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { placeCards } from "./canvas";
 import { listedByDefault } from "./listOps";
+import { tabInk } from "./palette";
 import { behaviorOf } from "./types";
 import type { Section, StreakView, Task } from "./types";
 import type { CardLayout } from "./useLocalConfig";
@@ -67,9 +68,9 @@ export default function BoardSnapshot({ sections, tasks, streaks, layouts, width
             <div
               key={section.id}
               className="snapshot-card"
-              style={{ left: at.x - left, top: at.y - top, width: at.w, minHeight: at.h, zIndex: at.z, "--task-color": section.color } as React.CSSProperties}
+              style={{ left: at.x - left, top: at.y - top, width: at.w, minHeight: at.h, zIndex: at.z, "--task-color": tabInk(section.color) } as React.CSSProperties}
             >
-              <div className="snapshot-title" style={{ color: section.color }}>
+              <div className="snapshot-title" style={{ color: tabInk(section.color) }}>
                 {section.name}
               </div>
               <ul>

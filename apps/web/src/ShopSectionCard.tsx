@@ -7,6 +7,7 @@ import ItemList from "./ItemList";
 import Popover from "./Popover";
 import RewardItem, { RewardForm } from "./RewardItem";
 import { ADD_BUTTON_KEY, addButtonOption } from "./displayOptions";
+import { tabInk } from "./palette";
 import { DisplayMenu, SortMenu, tabView, type DisplayOption, type SortOption } from "./TabControls";
 import type { Group, Reward, ShopSection } from "./types";
 import type { TabPrefs } from "./useLocalConfig";
@@ -112,7 +113,7 @@ function ShopSectionCard({
     <CanvasCard
       frame={frame}
       title={
-        <CardTitle name={section.name} color={section.color} popoverTitle="Tab" popoverWidth={220}>
+        <CardTitle name={section.name} color={tabInk(section.color)} popoverTitle="Tab" popoverWidth={220}>
           <TabSettings section={section} rewardCount={rewards.length} onEdit={onEditSection} onRemove={onRemoveSection} />
         </CardTitle>
       }
@@ -155,7 +156,7 @@ function ShopSectionCard({
           <RewardItem
             key={reward.id}
             reward={reward}
-            color={section.color}
+            color={tabInk(section.color)}
             row={row}
             affordable={canBuy(reward)}
             showNote={view.shown("note")}

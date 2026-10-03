@@ -94,6 +94,38 @@ function save(config: LocalConfig) {
   } catch {}
 }
 
+// Where each canvas's camera was left: its zoom, and the world point at the viewport's top-left (world
+// px, so it's independent of the zoom). Device-local like layouts, keyed by canvas name ("board", "shop").
+// Kept out of the LocalConfig state on purpose: it's written on every pan and only read when a canvas
+// mounts, so routing it through React state would re-render the whole board on each scroll.
+export interface Camera {
+  scale: number;
+  x: number;
+  y: number;
+}
+
+const CAMERA_KEY = "board-camera";
+
+function loadCameras(): Record<string, Camera> {
+  try {
+    const raw = localStorage.getItem(CAMERA_KEY);
+    if (raw) return JSON.parse(raw) as Record<string, Camera>;
+  } catch {}
+  return {};
+}
+
+export function loadCamera(name: string): Camera | null {
+  const cam = loadCameras()[name];
+  const valid = cam && [cam.scale, cam.x, cam.y].every((n) => typeof n === "number" && Number.isFinite(n));
+  return valid ? cam : null;
+}
+
+export function saveCamera(name: string, camera: Camera) {
+  try {
+    localStorage.setItem(CAMERA_KEY, JSON.stringify({ ...loadCameras(), [name]: camera }));
+  } catch {}
+}
+
 export function useLocalConfig() {
   const [config, setConfig] = useState<LocalConfig>(load);
 

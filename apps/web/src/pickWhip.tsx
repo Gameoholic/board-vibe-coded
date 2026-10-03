@@ -7,8 +7,9 @@ import { createPortal } from "react-dom";
 // tasks a streak counts) and the Blocked form (the task one waits on): the caller says what a point on
 // the board resolves to and what dropping there does; the drag, the line and the row highlight are here.
 
-// Neutral ink for the line — deliberately not an accent colour (the streak's colour read as red).
-const WHIP_COLOR = "#334155";
+// Neutral ink for the line — deliberately not an accent colour (the streak's colour read as red). A theme
+// token, so it stays visible on a dark board; that's why the line below sets its colours through `style`.
+const WHIP_COLOR = "var(--ink-soft)";
 // A target that's already linked: the line and the row turn amber, and dropping updates the link.
 const DUPE_COLOR = "#f59e0b";
 // A target that can't be linked: the line and the row turn red, the reason rides the line's end, and
@@ -138,10 +139,10 @@ function whipLine<T extends WhipTarget>(whip: WhipState<T>) {
   const stroke = whip.target?.refused ? REFUSED_COLOR : whip.target?.dupe ? DUPE_COLOR : WHIP_COLOR;
   return (
     <>
-      <path d={path} fill="none" stroke={stroke} strokeWidth={8} strokeLinecap="round" opacity={0.18} />
-      <path d={path} fill="none" stroke={stroke} strokeWidth={2} strokeLinecap="round" />
-      <circle cx={ex} cy={ey} r={whip.target ? 6 : 4} fill={stroke} />
-      {whip.target && <circle cx={ex} cy={ey} r={10} fill="none" stroke={stroke} strokeWidth={1.5} opacity={0.5} />}
+      <path d={path} fill="none" style={{ stroke }} strokeWidth={8} strokeLinecap="round" opacity={0.18} />
+      <path d={path} fill="none" style={{ stroke }} strokeWidth={2} strokeLinecap="round" />
+      <circle cx={ex} cy={ey} r={whip.target ? 6 : 4} style={{ fill: stroke }} />
+      {whip.target && <circle cx={ex} cy={ey} r={10} fill="none" style={{ stroke }} strokeWidth={1.5} opacity={0.5} />}
     </>
   );
 }

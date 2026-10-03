@@ -4,6 +4,7 @@ import { useState, type CSSProperties } from "react";
 import { BoosterDeal } from "./BoosterDeal";
 import { BountyExplain, BountyRoll } from "./BountyRoll";
 import { FlameIcon, SnowflakeIcon } from "./Icons";
+import { tabInk } from "./palette";
 import { dayLabel, labelFor } from "./periodLabels";
 import type { BoosterHand, PeriodRecap, RecapDay, RecapFrost, RecapFrozen, RecapStreak, RecapTab, RolledBounty } from "./types";
 
@@ -200,7 +201,7 @@ function TabCount({ tab, named = false }: { tab: RecapTab; named?: boolean }) {
   return (
     <span className="recap-tab" title={`${tab.name}: ${tab.cleared} cleared`}>
       {named && <span className="recap-tab-name">{tab.name}</span>}
-      <b style={{ color: tab.color }}>{tab.cleared}</b>
+      <b style={{ color: tabInk(tab.color) }}>{tab.cleared}</b>
       <span className="recap-tab-pct">({formatPercent(tab.earned)})</span>
     </span>
   );
@@ -234,7 +235,7 @@ function DayPage({ day }: { day: RecapDay }) {
         <ul className="recap-day-tabs">
           {day.tabs.map((tab, i) => (
             <motion.li key={tab.sectionId} {...pop(i)}>
-              <i style={{ background: tab.color }} />
+              <i style={{ background: tabInk(tab.color) }} />
               <TabCount tab={tab} named />
             </motion.li>
           ))}
@@ -274,7 +275,7 @@ function WeekDaysPage({ recap }: { recap: PeriodRecap }) {
         <div className="recap-legend">
           {[...legend.values()].map((tab) => (
             <span key={tab.sectionId}>
-              <i style={{ background: tab.color }} />
+              <i style={{ background: tabInk(tab.color) }} />
               {tab.name}
             </span>
           ))}

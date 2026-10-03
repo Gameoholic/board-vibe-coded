@@ -3,6 +3,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { clampScale, ZOOM_STEP } from "./canvas";
 import { ScaleProvider } from "./useCanvasScale";
 import { useCanvasSettings } from "./useCanvasSettings";
+import { loadCamera, saveCamera } from "./useLocalConfig";
+import type { Camera } from "./useLocalConfig";
 
 interface BoardCanvasProps {
   // Which canvas this is ("board", "shop") — stamped as data-canvas on the viewport so styles and DOM
@@ -19,14 +21,44 @@ interface BoardCanvasProps {
 function BoardCanvas({ name, worldW, worldH, children }: BoardCanvasProps) {
   const { showGrid, gridSize } = useCanvasSettings();
   const viewportRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(1);
+  // The camera picks up where it was left on this device, so a reload or a trip to Settings doesn't
+  // throw you back to the top-left at 100%. Read once, when the canvas mounts.
+  const [initial] = useState(() => {
+    const cam = loadCamera(name);
+    const s = cam ? clampScale(cam.scale) : 1;
+    return { scale: s, scroll: cam ? { left: cam.x * s, top: cam.y * s } : null };
+  });
+  const [scale, setScale] = useState(initial.scale);
   // Live scale for the pointer-gesture closures (they capture the scale at pinch-start without
   // re-subscribing). Mirrors the state; written every render.
   const scaleRef = useRef(scale);
   scaleRef.current = scale;
-  // Where to leave the scrollbars after a zoom so the point under the cursor stays put. Applied
-  // in a layout effect once the scaler has resized, then cleared.
-  const pendingScroll = useRef<{ left: number; top: number } | null>(null);
+  // Where to leave the scrollbars after a zoom so the point under the cursor stays put (or, on mount,
+  // where the saved camera was). Applied in a layout effect once the scaler has resized, then cleared.
+  const pendingScroll = useRef<{ left: number; top: number } | null>(initial.scroll);
+
+  // Remembering the camera as it moves: the latest position goes in a ref on every scroll (cheap), and
+  // into storage once the movement pauses — or on unmount, so leaving mid-pan still keeps it.
+  const unsavedCamera = useRef<Camera | null>(null);
+  const saveTimer = useRef<number | undefined>(undefined);
+  const rememberCamera = useCallback(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    const s = scaleRef.current;
+    unsavedCamera.current = { scale: s, x: vp.scrollLeft / s, y: vp.scrollTop / s };
+    window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      if (unsavedCamera.current) saveCamera(name, unsavedCamera.current);
+      unsavedCamera.current = null;
+    }, 250);
+  }, [name]);
+  useEffect(
+    () => () => {
+      window.clearTimeout(saveTimer.current);
+      if (unsavedCamera.current) saveCamera(name, unsavedCamera.current);
+    },
+    [name],
+  );
 
   // Active dragging pointers (touch fingers, or the middle mouse button). One → pan; two → pinch.
   // The gesture callbacks below read these refs so a finger going up/down mid-gesture just changes
@@ -52,6 +84,9 @@ function BoardCanvas({ name, worldW, worldH, children }: BoardCanvasProps) {
     }
     clampScroll();
   }, [scale, worldW, worldH, clampScroll]);
+
+  // A zoom that leaves the scroll where it was fires no scroll event, so the new scale is remembered here.
+  useEffect(() => rememberCamera(), [scale, rememberCamera]);
 
   // Re-scale the world around an anchor point (in viewport-local px), keeping whatever's under
   // that anchor fixed on screen — the shared core of both wheel zoom (anchor = cursor) and the
@@ -174,7 +209,13 @@ function BoardCanvas({ name, worldW, worldH, children }: BoardCanvasProps) {
 
   return (
     <>
-    <div className="board-viewport" data-canvas={name} ref={viewportRef} onPointerDown={onPanStart}>
+    <div
+      className="board-viewport"
+      data-canvas={name}
+      ref={viewportRef}
+      onPointerDown={onPanStart}
+      onScroll={rememberCamera}
+    >
       <div className="board-scaler" style={{ width: worldW * scale, height: worldH * scale }}>
         {/* The scale is applied here by framer (not CSS) so it registers in framer's projection
             tree — otherwise the Reorder.Item layout animations inside measure through an
@@ -193,7 +234,7 @@ function BoardCanvas({ name, worldW, worldH, children }: BoardCanvasProps) {
             // aligned to where cards snap. Toggled off by default (see canvas settings).
             ...(showGrid
               ? {
-                  backgroundImage: "radial-gradient(circle, #d8dee9 1px, transparent 1px)",
+                  backgroundImage: "radial-gradient(circle, var(--grid-dot) 1px, transparent 1px)",
                   backgroundSize: `${gridSize}px ${gridSize}px`,
                 }
               : null),

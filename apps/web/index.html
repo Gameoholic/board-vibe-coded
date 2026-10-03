@@ -12,6 +12,18 @@
       rel="stylesheet"
     />
     <title>Board</title>
+    <script>
+      // Sets the theme before first paint, so a dark device never flashes light while the app loads.
+      // Mirrors useTheme.ts (its "board-theme" key and how a choice resolves): keep the two in step.
+      (function () {
+        try {
+          var pref = JSON.parse(localStorage.getItem("board-theme") || "null") || {};
+          var choice = pref.choice || "system";
+          var systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.dataset.theme = choice === "system" ? (systemDark ? pref.dark || "dark" : "light") : choice;
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

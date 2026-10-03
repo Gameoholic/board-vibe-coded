@@ -1,4 +1,5 @@
 import { BagIcon, BoardIcon, GearIcon } from "./Icons";
+import ThemeSwitch from "./ThemeSwitch";
 
 // The app's "places" — the board is home, settings is its own place. "shop" isn't a separate place but
 // a mode of the board's (App: the tabs poof away and the shop appears on the same canvas); it gets a
@@ -45,6 +46,7 @@ function AppNav({ view, onChange }: AppNavProps) {
           </button>
         );
       })}
+      <ThemeSwitch />
     </nav>
   );
 }

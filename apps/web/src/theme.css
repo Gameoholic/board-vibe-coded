@@ -1,0 +1,310 @@
+/* The themes. Every colour the app's chrome uses is a token here, and a theme is just another set of values
+   for the same tokens — so a component never knows which theme it's in, and a new theme is one block (plus
+   its entry in useTheme.ts's THEMES).
+
+   The theme is a data-theme attribute on <html> (useTheme.ts sets it; index.html's boot script sets it
+   before first paint, so a dark device never flashes light). Each block also matches any element carrying
+   data-theme, which is how the theme menu's swatches show a theme's colours without restating them.
+
+   Not themed, on purpose: the paper objects of the celebrations (the recap's sticky notes, the Booster's
+   cards, the wind-down panel) — they're things on the board, and look the same in any light. The paper ones
+   are listed with the light theme below, so the ink written on them stays dark on their pale paper even
+   when the app around them is dark. Tab colours stay as picked, except that a dark theme lifts one too dark
+   to read (--ink-floor, used by palette.ts's tabInk). Shadows stay ink; on a dark theme they simply read as
+   depth rather than as a visible edge. */
+
+:root,
+[data-theme="light"],
+.recap-note,
+.booster-face {
+  color-scheme: light;
+
+  /* Neutrals: the page, the canvas behind the tabs, surfaces from flattest to most raised, and lines. */
+  --bg: #f7f7f9;
+  --canvas: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --hover: #f1f5f9;
+  --hover-strong: #e2e8f0;
+  --border: #e5e7eb;
+  --border-strong: #cbd5e1;
+  --divider: #eef2f6;
+  --grid-dot: #d8dee9;
+
+  /* Ink, from strongest to faintest. --ink-soft is neutral ink for drawn lines (the pick-whip). */
+  --text: #0f172a;
+  --text-2: #475569;
+  --text-dim: #94a3b8;
+  --ink-soft: #334155;
+  /* The least lightness (oklch) a tab's colour is drawn at: 0 keeps every colour as picked. */
+  --ink-floor: 0;
+
+  /* States. */
+  --danger-text: #dc2626;
+  --danger-soft: #fef2f2;
+  --danger-line: #fca5a5;
+  --danger-line-soft: #fecaca;
+  --good-text: #16a34a;
+  --warn-text: #b45309;
+  --warn-ink: #92400e;
+  --warn-soft: #fffbeb;
+  --warn-soft-2: #fef3c7;
+  --warn-line: #f5cf8b;
+  --heat-text: #c2410c;
+  --heat-ink: #ea580c;
+  --heat-soft: #fff7ed;
+  --heat-line: #fed7aa;
+
+  /* The modifiers' colours (modifierLooks.ts), and the frost world around them. */
+  --mod-bounty: #dc2626;
+  --mod-frost: #0284c7;
+  --mod-subzero: #4f46e5;
+  --mod-booster: #9333ea;
+  --booster-ink: #7e22ce;
+  --frost-line: #bae6fd;
+  --frost-top: #f2f9fe;
+  --frost-bottom: #e6f4fd;
+  --frost-glint: rgba(255, 255, 255, 0.95);
+  --frost-haze: rgba(186, 230, 253, 0.5);
+  --frost-hover: rgba(2, 132, 199, 0.06);
+  --frost-chip: rgba(255, 255, 255, 0.75);
+}
+
+/* What every dark theme shares (every theme but Light is dark): brighter states and modifier colours so they
+   still read on a dark surface, and tab colours lifted to a readable lightness. Each theme below then only
+   sets its neutrals. */
+[data-theme]:not([data-theme="light"]) {
+  color-scheme: dark;
+
+  --ink-floor: 0.72;
+
+  --danger-text: #f87171;
+  --danger-soft: rgba(239, 68, 68, 0.13);
+  --danger-line: rgba(248, 113, 113, 0.5);
+  --danger-line-soft: rgba(248, 113, 113, 0.3);
+  --good-text: #4ade80;
+  --warn-text: #fbbf24;
+  --warn-ink: #fcd34d;
+  --warn-soft: rgba(245, 158, 11, 0.12);
+  --warn-soft-2: rgba(245, 158, 11, 0.2);
+  --warn-line: rgba(245, 158, 11, 0.4);
+  --heat-text: #fb923c;
+  --heat-ink: #fb923c;
+  --heat-soft: rgba(249, 115, 22, 0.12);
+  --heat-line: rgba(249, 115, 22, 0.4);
+
+  --mod-bounty: #f87171;
+  --mod-frost: #38bdf8;
+  --mod-subzero: #a5b4fc;
+  --mod-booster: #c084fc;
+  --booster-ink: #c084fc;
+  --frost-line: rgba(56, 189, 248, 0.35);
+  --frost-glint: rgba(56, 189, 248, 0.1);
+  --frost-haze: rgba(56, 189, 248, 0.08);
+  --frost-hover: rgba(56, 189, 248, 0.08);
+  --frost-chip: rgba(56, 189, 248, 0.08);
+}
+
+/* ---- The board's own dark themes ---- */
+
+/* Dark: near-black with a navy tint, the board's slate ink turned around. */
+[data-theme="dark"] {
+  --bg: #0b0e15;
+  --canvas: #0e121b;
+  --surface: #151a25;
+  --surface-2: #1a2030;
+  --hover: #212839;
+  --hover-strong: #2a3246;
+  --border: #262d3d;
+  --border-strong: #384157;
+  --divider: #222939;
+  --grid-dot: #2a3244;
+  --text: #e6e9f0;
+  --text-2: #a9b2c3;
+  --text-dim: #6c768b;
+  --ink-soft: #94a3b8;
+  --frost-top: #121e2c;
+  --frost-bottom: #102536;
+}
+
+/* Slate: a dimmer, softer grey-blue — less contrast than Dark. */
+[data-theme="slate"] {
+  --bg: #1b2230;
+  --canvas: #1e2635;
+  --surface: #263042;
+  --surface-2: #2b3649;
+  --hover: #323e53;
+  --hover-strong: #3b485f;
+  --border: #364258;
+  --border-strong: #4a5770;
+  --divider: #313c50;
+  --grid-dot: #3a465d;
+  --text: #e2e8f0;
+  --text-2: #b3bdcc;
+  --text-dim: #8592a8;
+  --ink-soft: #b3bdcc;
+  --frost-top: #1f3044;
+  --frost-bottom: #1c3a52;
+}
+
+/* Black: true black for OLED screens, with dark grey tabs. */
+[data-theme="black"] {
+  --bg: #000000;
+  --canvas: #000000;
+  --surface: #0e0e10;
+  --surface-2: #141417;
+  --hover: #1b1b1f;
+  --hover-strong: #242429;
+  --border: #232327;
+  --border-strong: #36363c;
+  --divider: #1d1d21;
+  --grid-dot: #26262b;
+  --text: #ececef;
+  --text-2: #a1a1aa;
+  --text-dim: #6b6b74;
+  --ink-soft: #a1a1aa;
+  --frost-top: #06131c;
+  --frost-bottom: #081b28;
+}
+
+/* Charcoal: plain neutral greys, no tint at all. */
+[data-theme="charcoal"] {
+  --bg: #161616;
+  --canvas: #1a1a1a;
+  --surface: #222222;
+  --surface-2: #282828;
+  --hover: #2f2f2f;
+  --hover-strong: #383838;
+  --border: #333333;
+  --border-strong: #474747;
+  --divider: #2c2c2c;
+  --grid-dot: #3a3a3a;
+  --text: #ececec;
+  --text-2: #b0b0b0;
+  --text-dim: #7a7a7a;
+  --ink-soft: #b0b0b0;
+  --frost-top: #14212b;
+  --frost-bottom: #112a3a;
+}
+
+/* ---- Well-known editor themes, on their own published palettes ---- */
+
+/* Nord: the arctic polar-night greys and snow-storm whites. */
+[data-theme="nord"] {
+  --bg: #2b313c;
+  --canvas: #2e3440;
+  --surface: #3b4252;
+  --surface-2: #404859;
+  --hover: #434c5e;
+  --hover-strong: #4c566a;
+  --border: #4a5366;
+  --border-strong: #5c677d;
+  --divider: #444c5e;
+  --grid-dot: #4c566a;
+  --text: #eceff4;
+  --text-2: #d8dee9;
+  --text-dim: #8a94a8;
+  --ink-soft: #d8dee9;
+  --frost-top: #34485a;
+  --frost-bottom: #3a5266;
+}
+
+/* One Dark: Atom's blue-grey. */
+[data-theme="one-dark"] {
+  --bg: #21252b;
+  --canvas: #23272e;
+  --surface: #282c34;
+  --surface-2: #2c313a;
+  --hover: #323842;
+  --hover-strong: #3a404b;
+  --border: #3a3f4b;
+  --border-strong: #4b5263;
+  --divider: #333842;
+  --grid-dot: #3e4451;
+  --text: #dcdfe4;
+  --text-2: #abb2bf;
+  --text-dim: #7f848e;
+  --ink-soft: #abb2bf;
+  --frost-top: #1f3140;
+  --frost-bottom: #1d3a4c;
+}
+
+/* Tokyo Night: deep indigo night with soft periwinkle text. */
+[data-theme="tokyo-night"] {
+  --bg: #16161e;
+  --canvas: #1a1b26;
+  --surface: #1f2335;
+  --surface-2: #24283b;
+  --hover: #292e42;
+  --hover-strong: #343a55;
+  --border: #2c3149;
+  --border-strong: #3b4261;
+  --divider: #262b3f;
+  --grid-dot: #343a55;
+  --text: #c0caf5;
+  --text-2: #a9b1d6;
+  --text-dim: #636b94;
+  --ink-soft: #a9b1d6;
+  --frost-top: #1a2a40;
+  --frost-bottom: #1a3350;
+}
+
+/* Solarized: the dark teal base with its warm cream text. */
+[data-theme="solarized"] {
+  --bg: #00212b;
+  --canvas: #002b36;
+  --surface: #073642;
+  --surface-2: #0a3d4a;
+  --hover: #0f4654;
+  --hover-strong: #164f5e;
+  --border: #164b58;
+  --border-strong: #2a5f6b;
+  --divider: #0e4250;
+  --grid-dot: #1d5664;
+  --text: #eee8d5;
+  --text-2: #93a1a1;
+  --text-dim: #657b83;
+  --ink-soft: #93a1a1;
+  --frost-top: #063f50;
+  --frost-bottom: #054a5e;
+}
+
+/* Gruvbox: warm retro browns with parchment text. */
+[data-theme="gruvbox"] {
+  --bg: #1d2021;
+  --canvas: #232323;
+  --surface: #282828;
+  --surface-2: #2e2c2b;
+  --hover: #3c3836;
+  --hover-strong: #504945;
+  --border: #3c3836;
+  --border-strong: #504945;
+  --divider: #353230;
+  --grid-dot: #45403d;
+  --text: #ebdbb2;
+  --text-2: #d5c4a1;
+  --text-dim: #928374;
+  --ink-soft: #d5c4a1;
+  --frost-top: #1f2d30;
+  --frost-bottom: #223a3e;
+}
+
+/* Monokai: the classic olive-black with bright white text. */
+[data-theme="monokai"] {
+  --bg: #1e1f1c;
+  --canvas: #22231f;
+  --surface: #272822;
+  --surface-2: #2d2e27;
+  --hover: #34352d;
+  --hover-strong: #3e3d32;
+  --border: #3a3b33;
+  --border-strong: #4e4f45;
+  --divider: #313229;
+  --grid-dot: #45463c;
+  --text: #f8f8f2;
+  --text-2: #cfcfc2;
+  --text-dim: #75715e;
+  --ink-soft: #cfcfc2;
+  --frost-top: #1d2a2e;
+  --frost-bottom: #1d3540;
+}

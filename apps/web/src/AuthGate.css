@@ -30,7 +30,7 @@
 }
 
 .auth-gate-hint code {
-  background: #f1f5f9;
+  background: var(--hover);
   padding: 2px 5px;
   border-radius: 4px;
 }
@@ -45,5 +45,5 @@
 }
 
 .auth-gate-error {
-  color: #dc2626;
+  color: var(--danger-text);
 }

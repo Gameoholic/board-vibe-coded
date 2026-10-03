@@ -34,7 +34,7 @@ export interface ModifierLook {
 export const MODIFIER_LOOKS: Record<ModifierId, ModifierLook> = {
   bounty: {
     tag: "Bounty",
-    color: "#dc2626",
+    color: "var(--mod-bounty)",
     icon: TargetIcon,
     line: (m) => `×${m.value} bounty`,
     tagOnIce: true,
@@ -42,7 +42,7 @@ export const MODIFIER_LOOKS: Record<ModifierId, ModifierLook> = {
   },
   frost: {
     tag: "Frosted",
-    color: "#0284c7",
+    color: "var(--mod-frost)",
     icon: SnowflakeIcon,
     line: (m, points) => `+${formatPercent(Math.round(points * m.value))} frost`,
     tagOnIce: false,
@@ -52,7 +52,7 @@ export const MODIFIER_LOOKS: Record<ModifierId, ModifierLook> = {
   },
   subzero: {
     tag: "Subzero",
-    color: "#4f46e5",
+    color: "var(--mod-subzero)",
     icon: CrystalIcon,
     line: (m) => `=${formatPercent(m.value)} subzero`,
     tagOnIce: true,
@@ -60,7 +60,7 @@ export const MODIFIER_LOOKS: Record<ModifierId, ModifierLook> = {
   },
   booster: {
     tag: "Boosted",
-    color: "#9333ea",
+    color: "var(--mod-booster)",
     icon: BoostIcon,
     line: (m) => `+${formatPercent(m.value)} boost`,
     tagOnIce: true,
