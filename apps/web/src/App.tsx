@@ -860,7 +860,10 @@ function App() {
     if (eff !== undefined) local.estimateEffort = eff ?? undefined;
     // An all-unscheduled array means "no schedule" locally (mirrors the server's normalisation).
     if (Array.isArray(local.schedule) && !local.schedule.some(Boolean)) local.schedule = undefined;
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...local } : t)));
+    // Fewer tiers than the one that's ticked: it comes down to the last (the server's fold, mirrored).
+    const settled = (t: Task): Task =>
+      local.tiers && t.activeTier != null && t.activeTier >= local.tiers.length ? { ...t, activeTier: local.tiers.length - 1 } : t;
+    setTasks((prev) => prev.map((t) => (t.id === id ? settled({ ...t, ...local }) : t)));
     fetch(`/api/tasks/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

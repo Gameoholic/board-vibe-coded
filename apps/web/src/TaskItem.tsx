@@ -1,4 +1,4 @@
-import { behaviorOf, DEFAULT_EFFORT_ID, formatPercent, parsePercent, POINTS_PER_PERCENT } from "@board/contracts";
+import { behaviorOf, formatPercent, parsePercent, POINTS_PER_PERCENT } from "@board/contracts";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FlyOrigin } from "./FlyingPoints";
 import type { RowAction } from "./ActionMenu";
@@ -13,7 +13,8 @@ import { deleteAction, editAction } from "./rowActions";
 import PointsBracket from "./PointsBracket";
 import DescriptionField from "./DescriptionField";
 import Form from "./Form";
-import PointsBuilder, { type BuilderEstimate, POINTS_FORM_WIDTH, TierBuilderRow, type TierRow } from "./PointsBuilder";
+import PointsBuilder, { type BuilderEstimate, POINTS_FORM_WIDTH, TiersField } from "./PointsBuilder";
+import { tierRowOf, tiersFromRows, type TierRow } from "./tierRows";
 import Popover from "./Popover";
 import ScheduleEditor, { rowsFromSchedule, scheduleFromRows, type Cadence, type ScheduleRow } from "./ScheduleEditor";
 import StatusPill from "./StatusPill";
@@ -24,7 +25,6 @@ import Tooltip from "./Tooltip";
 import { boxScheduleLabel, isBoxLocked, isRetired, onWholeTask, statusOf, wholeWorth } from "./types";
 import type { AppliedModifier, BoxSchedule, Task, TaskPriority, TaskSchedule, TaskStatus, TierDef } from "./types";
 import { formatMinutes } from "./duration";
-import { uid } from "./uid";
 import { useBoardClock } from "./useBoardClock";
 import { useClickOutside } from "./useClickOutside";
 
@@ -131,22 +131,9 @@ function TaskEditForm({ task, cadence, onSave, onCancel }: TaskEditFormProps) {
   const [name, setName] = useState(task.text);
   const [description, setDescription] = useState(task.description ?? "");
   const [points, setPoints] = useState(String((task.points ?? 0) / POINTS_PER_PERCENT));
-  // A tiered task edits each tier through the same builder the add form uses. Rows follow the task's
-  // tiers one-to-one (the tier count is fixed here); each builder reports its estimate on mount.
-  const [tierRows, setTierRows] = useState<TierRow[]>(() =>
-    (task.tiers ?? []).map((t) => ({
-      id: uid(),
-      points: String(t.points / POINTS_PER_PERCENT),
-      est: { minutes: t.minutes ?? null, effort: t.effort ?? DEFAULT_EFFORT_ID, source: t.pointsSource ?? "manual" },
-    })),
-  );
-  // Stable (no deps) — each tier's builder treats them as effect dependencies.
-  const setTierPoints = useCallback((id: string, value: string) => {
-    setTierRows((prev) => prev.map((row) => (row.id === id ? { ...row, points: value } : row)));
-  }, []);
-  const setTierEstimate = useCallback((id: string, est: BuilderEstimate) => {
-    setTierRows((prev) => prev.map((row) => (row.id === id ? { ...row, est } : row)));
-  }, []);
+  // A tiered task's tiers, in the editor the add form uses: each row starts as a saved tier, and tiers can
+  // be added and removed here too.
+  const [tierRows, setTierRows] = useState<TierRow[]>(() => (task.tiers ?? []).map(tierRowOf));
   const [amount, setAmount] = useState(String(task.count ?? 1));
   const boxCount = Math.max(1, Number(amount) || 1);
   const [scheduleRows, setScheduleRows] = useState<ScheduleRow[]>(() => rowsFromSchedule(task.schedule, boxCount));
@@ -164,13 +151,9 @@ function TaskEditForm({ task, cadence, onSave, onCancel }: TaskEditFormProps) {
     const trimmedDesc = description.trim();
     if (trimmedDesc !== (task.description ?? "")) patch.description = trimmedDesc || null;
     if (task.tiers) {
-      // Same rules as a checkbox task's builder, per tier: stamp the builder's reported source, and the
-      // estimate only when a duration is currently chosen (otherwise the tier keeps what it had).
-      patch.tiers = task.tiers.map((t, i) => {
-        const row = tierRows[i];
-        const estimate = row.est.minutes != null ? { minutes: row.est.minutes, effort: row.est.effort } : {};
-        return { ...t, points: parsePercent(row.points) ?? t.points, pointsSource: row.est.source, ...estimate };
-      });
+      const tiers = tiersFromRows(tierRows);
+      if (!tiers) return;
+      patch.tiers = tiers;
     } else {
       const v = parsePercent(points);
       if (v !== null) patch.points = v;
@@ -207,28 +190,7 @@ function TaskEditForm({ task, cadence, onSave, onCancel }: TaskEditFormProps) {
       </label>
 
       {task.tiers ? (
-        <div className="field">
-          <span className="field-label">Tiers</span>
-          <div className="tier-rows">
-            {tierRows.map((row, i) => {
-              // Seed only builder-sourced tiers, like a checkbox task's edit: a manual tier's % must
-              // stay exactly as typed rather than show a duration that no longer produced it.
-              const tier = task.tiers?.[i];
-              const seeded = tier?.pointsSource === "builder";
-              return (
-                <TierBuilderRow
-                  key={row.id}
-                  row={row}
-                  index={i}
-                  onPointsChange={setTierPoints}
-                  onEstimateChange={setTierEstimate}
-                  initialMinutes={seeded ? tier?.minutes : undefined}
-                  initialEffort={seeded ? tier?.effort : undefined}
-                />
-              );
-            })}
-          </div>
-        </div>
+        <TiersField rows={tierRows} onChange={setTierRows} />
       ) : (
         <PointsBuilder
           points={points}

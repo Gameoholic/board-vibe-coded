@@ -43,7 +43,8 @@ The owner's standing rule, repeated here because it keeps being broken: **nothin
 
 | Need | Use |
 | --- | --- |
-| Time + effort → `%` ("1h at Ugh difficulty = 3.75%") | `PointsBuilder` (`TierBuilderRow` per tier) |
+| Time + effort → `%` ("1h at Ugh difficulty = 3.75%") | `PointsBuilder` |
+| A tiered task's tiers (a builder each, add one, remove one) | `TiersField` — its rows are `tierRows.ts` (`newTierRow`, `tierRowOf`, `tiersFromRows`) |
 | The folded description | `DescriptionField` |
 | Per-box scheduled times | `ScheduleEditor` |
 | High / Medium / Low | `PriorityField` |
@@ -89,6 +90,7 @@ Retuning any of these is one edit in one file; nothing else repeats them.
 | Flying-points sizes · freeze-effect sizes | `flyerTiers.ts` · `freezeFxTiers.ts` |
 | Shop items' names and emoji | `gameItems.ts` |
 | A duration as written and as typed | `duration.ts` |
+| A tier as a form's row, and back (its label by place) | `tierRows.ts` |
 | Day and week keys as words | `periodLabels.ts` |
 | Canvas geometry (grid, snap, default placement, the docked counter's room) | `canvas.ts` |
 | The phone breakpoint | `usePhoneScreen.ts` (`PHONE_SCREEN`) — and `App.css`'s "Phones and touch", kept in step by hand |

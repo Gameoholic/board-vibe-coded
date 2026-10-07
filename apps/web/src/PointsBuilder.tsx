@@ -1,6 +1,7 @@
 import { DEFAULT_EFFORT_ID, effortMultOf, effortRank, formatPercent, parsePercent, pointsFromMinutes } from "@board/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatMinutes, readDuration } from "./duration";
+import { newTierRow, tierLabel, type TierRow } from "./tierRows";
 import { useBoardClock } from "./useBoardClock";
 
 // How wide a form holding the builder is: room for its sentence on one line ("1h 30m at Normal difficulty =
@@ -233,61 +234,83 @@ export default function PointsBuilder({ points, onPointsChange, onBuilderChange,
   );
 }
 
-// One tier of a tiered task in a form: a stable id (so removing a tier never shifts the wrong builder),
-// its % text, and its builder's report — minutes null ≡ no duration picked → no estimate stored.
-export interface TierRow {
-  id: string;
-  points: string;
-  est: BuilderEstimate;
-}
-
 interface TierBuilderRowProps {
   row: TierRow;
   index: number;
   onPointsChange: (id: string, points: string) => void;
   onEstimateChange: (id: string, est: BuilderEstimate) => void;
-  // The add form's remove control; the edit form passes none, since there the tier count is fixed.
-  onRemove?: (id: string) => void;
-  canRemove?: boolean;
-  // Edit form: the tier's saved duration/effort, preselected in its builder (see PointsBuilder).
-  initialMinutes?: number;
-  initialEffort?: string;
+  onRemove: (id: string) => void;
+  canRemove: boolean;
 }
 
-// One tier's builder — the same PointsBuilder sentence a checkbox task gets, under a "Tier N" head —
-// shared by the add and edit forms. Its own component so its callbacks are stable per row (the builder
-// treats them as effect dependencies) and each tier's duration/effort stays its own.
-export function TierBuilderRow({
-  row,
-  index,
-  onPointsChange,
-  onEstimateChange,
-  onRemove,
-  canRemove = true,
-  initialMinutes,
-  initialEffort,
-}: TierBuilderRowProps) {
+// One tier's builder — the same PointsBuilder sentence a checkbox task gets, under a "Tier N" head. Its own
+// component so its callbacks are stable per row (the builder treats them as effect dependencies) and each
+// tier's duration/effort stays its own.
+function TierBuilderRow({ row, index, onPointsChange, onEstimateChange, onRemove, canRemove }: TierBuilderRowProps) {
   const handlePoints = useCallback((v: string) => onPointsChange(row.id, v), [row.id, onPointsChange]);
   const handleBuilder = useCallback((est: BuilderEstimate) => onEstimateChange(row.id, est), [row.id, onEstimateChange]);
+  // A saved tier's duration and effort are preselected only where the builder made its %: one typed by hand
+  // must stay exactly as typed rather than show a duration that no longer produced it.
+  const seed = row.tier?.pointsSource === "builder" ? row.tier : undefined;
   return (
     <div className="tier-builder-row">
       <PointsBuilder
         points={row.points}
         onPointsChange={handlePoints}
         onBuilderChange={handleBuilder}
-        initialMinutes={initialMinutes}
-        initialEffort={initialEffort}
+        initialMinutes={seed?.minutes}
+        initialEffort={seed?.effort}
         heading={
           <div className="tier-builder-head">
-            <span className="tier-row-label">Tier {index + 1}</span>
-            {onRemove && (
-              <button type="button" className="icon-btn" aria-label="Remove tier" onClick={() => onRemove(row.id)} disabled={!canRemove}>
-                ✕
-              </button>
-            )}
+            <span className="tier-row-label">{tierLabel(index)}</span>
+            <button type="button" className="icon-btn" aria-label="Remove tier" onClick={() => onRemove(row.id)} disabled={!canRemove}>
+              ✕
+            </button>
           </div>
         }
       />
+    </div>
+  );
+}
+
+interface TiersFieldProps {
+  rows: TierRow[];
+  // Must be a stable setter (a useState dispatcher): each tier's builder treats what's made from it as an
+  // effect dependency.
+  onChange: React.Dispatch<React.SetStateAction<TierRow[]>>;
+}
+
+// A tiered task's tiers in a form: a builder each, a tier added under them, and any of them removed down to
+// the last. The one tiers editor — the add form and the edit form both hold only the rows (tierRows.ts).
+export function TiersField({ rows, onChange }: TiersFieldProps) {
+  const setPoints = useCallback(
+    (id: string, points: string) => onChange((prev) => prev.map((row) => (row.id === id ? { ...row, points } : row))),
+    [onChange],
+  );
+  const setEstimate = useCallback(
+    (id: string, est: BuilderEstimate) => onChange((prev) => prev.map((row) => (row.id === id ? { ...row, est } : row))),
+    [onChange],
+  );
+  const remove = useCallback((id: string) => onChange((prev) => (prev.length > 1 ? prev.filter((row) => row.id !== id) : prev)), [onChange]);
+  return (
+    <div className="field">
+      <span className="field-label">Tiers</span>
+      <div className="tier-rows">
+        {rows.map((row, i) => (
+          <TierBuilderRow
+            key={row.id}
+            row={row}
+            index={i}
+            canRemove={rows.length > 1}
+            onPointsChange={setPoints}
+            onEstimateChange={setEstimate}
+            onRemove={remove}
+          />
+        ))}
+      </div>
+      <button type="button" className="ghost-btn form-add-btn" onClick={() => onChange((prev) => [...prev, newTierRow()])}>
+        + Add tier
+      </button>
     </div>
   );
 }

@@ -2015,7 +2015,12 @@ export class BoardStore {
           else if (c.estimateEffortIndex !== undefined) t.estimateEffort = legacyEffortId(c.estimateEffortIndex);
           if (c.pointsSource !== undefined) t.pointsSource = c.pointsSource;
           if (c.description !== undefined) t.description = c.description ?? undefined;
-          if (c.tiers !== undefined) t.tiers = storedTiers(c.tiers);
+          if (c.tiers !== undefined) {
+            t.tiers = storedTiers(c.tiers);
+            // Fewer tiers than the one that's ticked: it comes down to the last, as a box count shrunk
+            // below what's ticked clamps progress.
+            if (t.activeTier != null && t.activeTier >= t.tiers.length) t.activeTier = t.tiers.length - 1;
+          }
           // `count` is canonical; `target` is the pre-merge alias on old events. Shrinking the box
           // count below what's already ticked clamps progress so state stays valid.
           const nextCount = c.count ?? c.target;

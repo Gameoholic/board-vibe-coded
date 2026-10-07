@@ -1,5 +1,5 @@
-import { behaviorOf, DEFAULT_EFFORT_ID, formatPercent, parsePercent } from "@board/contracts";
-import { Fragment, useCallback, useMemo, useState } from "react";
+import { behaviorOf, formatPercent, parsePercent } from "@board/contracts";
+import { Fragment, useMemo, useState } from "react";
 import CanvasCard, { CardAdd, CardTitle, type CardFrame } from "./CanvasCard";
 import ColorPicker from "./ColorPicker";
 import type { MenuPoint } from "./ActionMenu";
@@ -10,7 +10,7 @@ import type { RowContext } from "./ItemRow";
 import DescriptionField from "./DescriptionField";
 import Form from "./Form";
 import PriorityField from "./PriorityField";
-import PointsBuilder, { type BuilderEstimate, POINTS_FORM_WIDTH, TierBuilderRow, type TierRow } from "./PointsBuilder";
+import PointsBuilder, { type BuilderEstimate, POINTS_FORM_WIDTH, TiersField } from "./PointsBuilder";
 import Popover from "./Popover";
 import ScheduleEditor, { scheduleFromRows, type Cadence, type ScheduleRow } from "./ScheduleEditor";
 import StatusBand from "./StatusBand";
@@ -18,6 +18,7 @@ import StreakForm, { type StreakPayload } from "./StreakForm";
 import StreakItem from "./StreakItem";
 import TaskCount from "./TaskCount";
 import { tabInk } from "./palette";
+import { EMPTY_ESTIMATE, newTierRow, tiersFromRows, type TierRow } from "./tierRows";
 import { DisplayMenu, SortMenu, sortItems, tabView } from "./TabControls";
 import { MODIFIER_LOOKS } from "./modifierLooks";
 import { ADD_BUTTON_KEY, GROUPING_KEY, STREAKS_OFFER, taskTabOffer } from "./tabViews";
@@ -30,7 +31,6 @@ import { behaviorOfType, canBoost, canBreakDown, canPrioritise, canPrune, DEFAUL
 import { runBetween, withUnlistedKept } from "./listOps";
 import { pruneUntil, streaksBrokenByPruning } from "./pruning";
 import { bandSplits, IN_PROGRESS_NUDGE_ABOVE, STATUS_BANDS, statusLabel } from "./taskStatus";
-import { uid } from "./uid";
 import type { AppliedModifier, Group, Section, StreakView, Task, TaskPriority, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
 
 // A board tab: the shared tab base (CanvasCard — move/resize, header, sort/display controls, add
@@ -626,8 +626,6 @@ interface AddTaskPopoverProps {
   onCreate: (payload: TaskCreatePayload) => void;
 }
 
-const EMPTY_EST: BuilderEstimate = { minutes: null, effort: DEFAULT_EFFORT_ID, source: "manual" };
-
 const TYPE_LABELS: Record<TaskType, string> = { checkbox: "Checkbox", tiered: "Tiered", repeatable: "Repeatable", once: "One-time" };
 
 function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProps) {
@@ -636,8 +634,8 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
   const [description, setDescription] = useState("");
   const [points, setPoints] = useState("");
   // Builder report for a checkbox task (minutes/effort/source); minutes null ≡ no duration picked.
-  const [checkboxEst, setCheckboxEst] = useState<BuilderEstimate>(EMPTY_EST);
-  const [tierRows, setTierRows] = useState<TierRow[]>([{ id: uid(), points: "", est: EMPTY_EST }]);
+  const [checkboxEst, setCheckboxEst] = useState<BuilderEstimate>(EMPTY_ESTIMATE);
+  const [tierRows, setTierRows] = useState<TierRow[]>(() => [newTierRow()]);
   // Bumped on reset to remount PointsBuilder and clear its local duration/effort selections.
   const [builderKey, setBuilderKey] = useState(0);
   // A checkbox task can carry an optional box count (each box worth `points`, scored per box).
@@ -662,29 +660,13 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
     setText("");
     setDescription("");
     setPoints("");
-    setCheckboxEst(EMPTY_EST);
-    setTierRows([{ id: uid(), points: "", est: EMPTY_EST }]);
+    setCheckboxEst(EMPTY_ESTIMATE);
+    setTierRows([newTierRow()]);
     setBuilderKey((k) => k + 1);
     setAmount("1");
     setMaxTimes("");
     setScheduleRows([]);
     setPriority(DEFAULT_PRIORITY);
-  }
-
-  // Stable (no deps) so each row's PointsBuilder gets stable callbacks — its effects depend on them.
-  const setTierPoints = useCallback((id: string, points: string) => {
-    setTierRows((prev) => prev.map((row) => (row.id === id ? { ...row, points } : row)));
-  }, []);
-  const setTierEstimate = useCallback((id: string, est: BuilderEstimate) => {
-    setTierRows((prev) => prev.map((row) => (row.id === id ? { ...row, est } : row)));
-  }, []);
-
-  function addTierRow() {
-    setTierRows((prev) => [...prev, { id: uid(), points: "", est: EMPTY_EST }]);
-  }
-
-  function removeTierRow(id: string) {
-    setTierRows((prev) => (prev.length > 1 ? prev.filter((row) => row.id !== id) : prev));
   }
 
   // The fields carry their own rules (`required`, `min`, `type=number`) and Form says what's wrong with one in
@@ -698,16 +680,8 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
     const withPriority = takesPriority ? { priority } : {};
 
     if (type === "tiered") {
-      const tiers: TierDef[] = [];
-      for (let i = 0; i < tierRows.length; i++) {
-        const value = parsePercent(tierRows[i].points);
-        if (value === null) return;
-        // Carry the tier's estimate only when a duration was picked (feeds the tier timer + rebalance);
-        // pointsSource records whether that % came from the builder or was overridden.
-        const est = tierRows[i].est;
-        const estFields = est.minutes != null ? { minutes: est.minutes, effort: est.effort } : {};
-        tiers.push({ label: `Tier ${i + 1}`, points: value, ...estFields, pointsSource: est.source });
-      }
+      const tiers = tiersFromRows(tierRows);
+      if (!tiers) return;
       onCreate({ type: "tiered", text: trimmed, tiers, ...withPriority, ...withDesc });
     } else {
       const pointsValue = parsePercent(points);
@@ -790,27 +764,7 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
           <PointsBuilder key={builderKey} points={points} onPointsChange={setPoints} onBuilderChange={setCheckboxEst} />
         )}
 
-        {type === "tiered" && (
-          <div className="field">
-            <span className="field-label">Tiers</span>
-            <div className="tier-rows">
-              {tierRows.map((row, i) => (
-                <TierBuilderRow
-                  key={row.id}
-                  row={row}
-                  index={i}
-                  canRemove={tierRows.length > 1}
-                  onPointsChange={setTierPoints}
-                  onEstimateChange={setTierEstimate}
-                  onRemove={removeTierRow}
-                />
-              ))}
-            </div>
-            <button type="button" className="ghost-btn form-add-btn" onClick={addTierRow}>
-              + Add tier
-            </button>
-          </div>
-        )}
+        {type === "tiered" && <TiersField rows={tierRows} onChange={setTierRows} />}
 
         {type === "checkbox" && (
           <label className="field">
