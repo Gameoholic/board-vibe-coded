@@ -4,6 +4,7 @@ import { useState, type CSSProperties } from "react";
 import { BoosterDeal } from "./BoosterDeal";
 import { BountyRolls } from "./BountyRoll";
 import { FlameIcon, SnowflakeIcon } from "./Icons";
+import Tooltip from "./Tooltip";
 import { tabInk } from "./palette";
 import { dayLabel, labelFor } from "./periodLabels";
 import type { BoosterHand, BountyStatus, BountyStopped, PeriodRecap, RecapDay, RecapFrost, RecapFrozen, RecapStreak, RecapTab } from "./types";
@@ -201,11 +202,12 @@ function RecapBody({ recap, onRollBounty, onRerollBounty, onPickBooster, onDone 
 // One tab's line on a day: how many it cleared, in the tab's colour, and the % that earned.
 function TabCount({ tab, named = false }: { tab: RecapTab; named?: boolean }) {
   return (
-    <span className="recap-tab" title={`${tab.name}: ${tab.cleared} cleared`}>
+    // Unnamed, it's only a number in the tab's colour — its tooltip says whose.
+    <Tooltip className="recap-tab" label={named ? undefined : `${tab.name}: ${tab.cleared} cleared`}>
       {named && <span className="recap-tab-name">{tab.name}</span>}
       <b style={{ color: tabInk(tab.color) }}>{tab.cleared}</b>
       <span className="recap-tab-pct">({formatPercent(tab.earned)})</span>
-    </span>
+    </Tooltip>
   );
 }
 
@@ -213,11 +215,14 @@ function Purchases({ day }: { day: RecapDay }) {
   return day.purchases.length > 0 ? (
     <ul className="recap-purchases">
       {day.purchases.map((p, i) => (
-        <li key={i} title={p.name}>
-          <span className="recap-purchase-name">
-            {p.emoji} {p.name}
-          </span>
-          <span className="lost">−{formatPercent(p.cost)}</span>
+        <li key={i}>
+          {/* The name is cut short where it doesn't fit; its tooltip has all of it. */}
+          <Tooltip className="recap-purchase" label={p.name} align="start">
+            <span className="recap-purchase-name">
+              {p.emoji} {p.name}
+            </span>
+            <span className="lost">−{formatPercent(p.cost)}</span>
+          </Tooltip>
         </li>
       ))}
     </ul>

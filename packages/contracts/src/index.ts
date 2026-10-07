@@ -7,6 +7,7 @@ export * from "./requests.js";
 export * from "./streak.js";
 export * from "./taskKinds.js";
 export * from "./taskStatus.js";
+export * from "./taskPriority.js";
 export * from "./listOrder.js";
 export * from "./pieces.js";
 export * from "./bounty.js";

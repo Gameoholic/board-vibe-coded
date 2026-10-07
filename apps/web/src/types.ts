@@ -42,6 +42,7 @@ export type {
   TaskCondition,
   TaskRequirement,
   TaskBlocker,
+  TaskPriority,
   TaskStatus,
   TaskType,
   TierDef,
@@ -60,6 +61,8 @@ export { behaviorOf, behaviorOfType, canPrune, isRetired, taskPointValue } from 
 // A task's Status band, and the release of a task waiting on another once that one is done — the same
 // rules the server folds, so the optimistic state lands where the server will.
 export { statusOf, statusChange, releasedFrom } from "@board/contracts";
+// A task's priority (Low until it's given one), the order they list in, and which tasks take one.
+export { canPrioritise, DEFAULT_PRIORITY, PRIORITIES, priorityOf } from "@board/contracts";
 // Break down: which tasks can hold pieces, what new pieces are worth, and when a task with pieces is done —
 // the rules the server folds, mirrored so the optimistic state lands where the server will.
 export { canBreakDown, doneFromPieces, newPiecePoints, wholeWorth } from "@board/contracts";

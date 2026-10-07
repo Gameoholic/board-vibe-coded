@@ -4,6 +4,7 @@ import type { FlyOrigin } from "./FlyingPoints";
 import { ChevronDownIcon, PickWhipIcon } from "./Icons";
 import type { RowContext } from "./ItemRow";
 import PointsBracket from "./PointsBracket";
+import Tooltip from "./Tooltip";
 import { usePickWhip, type WhipTarget } from "./pickWhip";
 import { behaviorOf, newPiecePoints, statusOf } from "./types";
 import type { AppliedModifier } from "./types";
@@ -188,15 +189,12 @@ function BreakDownEntry({ task, pieces, onDone }: BreakDownEntryProps) {
         <kbd>Enter</kbd>
       </label>
       <div className="break-down-foot">
-        <button
-          type="button"
-          className={`whip-handle${whip.dragging ? " dragging" : ""}`}
-          onPointerDown={whip.start}
-          title="Drag onto a task to tuck it in as a piece"
-        >
-          <PickWhipIcon size={14} />
-          <span>Tuck a task in</span>
-        </button>
+        <Tooltip label="Drag onto a task to tuck it in as a piece" align="start">
+          <button type="button" className={`whip-handle${whip.dragging ? " dragging" : ""}`} onPointerDown={whip.start}>
+            <PickWhipIcon size={14} />
+            <span>Tuck a task in</span>
+          </button>
+        </Tooltip>
         <span>Esc when done</span>
       </div>
       {whip.overlay}

@@ -1,5 +1,7 @@
 import { formatPercent } from "@board/contracts";
+import { Fragment } from "react";
 import { modifierInk } from "./modifierLooks";
+import Tooltip from "./Tooltip";
 import { payout } from "./types";
 import type { AppliedModifier } from "./types";
 
@@ -26,21 +28,26 @@ function PointsBracket({ percents, modifiers = [] }: PointsBracketProps) {
   return (
     <>
       [
-      {percents.map((p, i) => (
-        <span
-          key={i}
-          className={ink ? "points-modified" : undefined}
-          style={ink ? ({ "--ink": ink } as React.CSSProperties) : undefined}
-          title={ink ? `${formatPercent(p)} → ${formatPercent(payout(p, modifiers))}` : undefined}
-        >
-          {i > 0 && (
-            <>
-              <wbr />/
-            </>
-          )}
-          {formatPercent(ink ? payout(p, modifiers) : p)}
-        </span>
-      ))}
+      {percents.map((p, i) => {
+        const segment = (
+          <span className={ink ? "points-modified" : undefined} style={ink ? ({ "--ink": ink } as React.CSSProperties) : undefined}>
+            {i > 0 && (
+              <>
+                <wbr />/
+              </>
+            )}
+            {formatPercent(ink ? payout(p, modifiers) : p)}
+          </span>
+        );
+        // A modified value says what it was before, on hover — inline, so the bracket still wraps between values.
+        return ink ? (
+          <Tooltip key={i} inline label={`${formatPercent(p)} → ${formatPercent(payout(p, modifiers))}`}>
+            {segment}
+          </Tooltip>
+        ) : (
+          <Fragment key={i}>{segment}</Fragment>
+        );
+      })}
       ]
     </>
   );

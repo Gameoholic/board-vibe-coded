@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import ActionMenu from "./ActionMenu";
 import type { MenuPoint, RowAction } from "./ActionMenu";
 import { ChevronDownIcon, MonitorIcon, MoonIcon, SunIcon } from "./Icons";
+import Tooltip from "./Tooltip";
 import { THEMES, useTheme } from "./useTheme";
 import type { ThemeId } from "./useTheme";
 
@@ -41,37 +42,35 @@ export default function ThemeSwitch() {
 
   return (
     <div className="nav-theme">
-      <button
-        type="button"
-        className="nav-btn"
-        title={dark ? "Light mode" : "Dark mode"}
-        aria-label={dark ? "Light mode" : "Dark mode"}
-        onClick={toggle}
-      >
-        {dark ? <SunIcon size={18} /> : <MoonIcon size={18} />}
-      </button>
-      <button
-        type="button"
-        className={`nav-btn nav-more${menuAt ? " active" : ""}`}
-        title="Themes"
-        aria-label="Themes"
-        aria-haspopup="menu"
-        aria-expanded={menuAt !== null}
-        onPointerDown={() => {
-          pressedWhileOpen.current = menuAt !== null;
-        }}
-        onClick={(e) => {
-          if (pressedWhileOpen.current) {
-            pressedWhileOpen.current = false;
-            return;
-          }
-          // Beside the rail, its bottom edge level with the chevron's (the menu flips up near the screen's foot).
-          const rect = e.currentTarget.getBoundingClientRect();
-          setMenuAt({ x: rect.right + 10, y: rect.bottom });
-        }}
-      >
-        <ChevronDownIcon size={14} />
-      </button>
+      <Tooltip label={dark ? "Light mode" : "Dark mode"} position="right">
+        <button type="button" className="nav-btn" aria-label={dark ? "Light mode" : "Dark mode"} onClick={toggle}>
+          {dark ? <SunIcon size={18} /> : <MoonIcon size={18} />}
+        </button>
+      </Tooltip>
+      {/* Its menu opens where the tooltip would sit, so the tooltip steps aside while it's open. */}
+      <Tooltip label={menuAt ? undefined : "Themes"} position="right">
+        <button
+          type="button"
+          className={`nav-btn nav-more${menuAt ? " active" : ""}`}
+          aria-label="Themes"
+          aria-haspopup="menu"
+          aria-expanded={menuAt !== null}
+          onPointerDown={() => {
+            pressedWhileOpen.current = menuAt !== null;
+          }}
+          onClick={(e) => {
+            if (pressedWhileOpen.current) {
+              pressedWhileOpen.current = false;
+              return;
+            }
+            // Beside the rail, its bottom edge level with the chevron's (the menu flips up near the screen's foot).
+            const rect = e.currentTarget.getBoundingClientRect();
+            setMenuAt({ x: rect.right + 10, y: rect.bottom });
+          }}
+        >
+          <ChevronDownIcon size={14} />
+        </button>
+      </Tooltip>
       <ActionMenu at={menuAt} groups={groups} onClose={() => setMenuAt(null)} />
     </div>
   );

@@ -446,6 +446,49 @@ export function AgeIcon({ size = 14 }: IconProps) {
   );
 }
 
+// A priority's arrows, stacked: three for High, two for Medium, one for Low. `feet` is where each arrow
+// stands in the 16-unit box. Given a `color` (a theme token) it's drawn in it wherever it shows — a menu
+// would otherwise dim it like any other icon; without one it takes the text's.
+function StackedArrowsIcon({ size = 14, feet, color }: IconProps & { feet: readonly number[]; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={color ? { color } : undefined}>
+      {feet.map((y) => (
+        <path key={y} d={`M4 ${y}l4-3.5 4 3.5`} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      ))}
+    </svg>
+  );
+}
+
+const ARROWS_HIGH = [6.5, 10, 13.5];
+const ARROWS_MEDIUM = [8.25, 11.75];
+const ARROWS_LOW = [10];
+
+export function PriorityHighIcon({ size = 14 }: IconProps) {
+  return <StackedArrowsIcon size={size} feet={ARROWS_HIGH} color="var(--pri-high)" />;
+}
+
+export function PriorityMediumIcon({ size = 14 }: IconProps) {
+  return <StackedArrowsIcon size={size} feet={ARROWS_MEDIUM} color="var(--pri-med)" />;
+}
+
+export function PriorityLowIcon({ size = 14 }: IconProps) {
+  return <StackedArrowsIcon size={size} feet={ARROWS_LOW} color="var(--pri-low)" />;
+}
+
+// Priority as a way to sort: the arrows, in no priority's colour.
+export function PriorityIcon({ size = 14 }: IconProps) {
+  return <StackedArrowsIcon size={size} feet={ARROWS_HIGH} />;
+}
+
+// A tally — "how many": a tab's task count.
+export function TallyIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <path d="M3.5 3.5v9M6.5 3.5v9M9.5 3.5v9M12.5 3.5v9M2 11.5l12-7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 // The theme toggle on the rail: a sun while dark (back to light), a moon while light.
 export function SunIcon({ size = 14 }: IconProps) {
   return (

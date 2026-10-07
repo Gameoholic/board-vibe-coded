@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Form from "./Form";
 import { PickWhipIcon } from "./Icons";
 import { usePickWhip, type WhipTarget } from "./pickWhip";
 import { behaviorOf } from "./types";
@@ -45,7 +46,7 @@ export default function BlockForm({ task, allTasks, accentColor, initial, submit
   }
 
   return (
-    <form className="popover-form" onSubmit={handleSubmit}>
+    <Form className="popover-form" onSubmit={handleSubmit}>
       <label className="field">
         <span className="field-label">Waiting on</span>
         <input
@@ -74,7 +75,6 @@ export default function BlockForm({ task, allTasks, accentColor, initial, submit
           type="button"
           className={`whip-handle${whip.dragging ? " dragging" : ""}`}
           onPointerDown={whip.start}
-          title="Drag onto the task it's waiting on"
         >
           <PickWhipIcon />
           <span>{waitsOnName ? "Drag to link a different task" : "Drag onto the task it's waiting on"}</span>
@@ -90,6 +90,6 @@ export default function BlockForm({ task, allTasks, accentColor, initial, submit
       </div>
 
       {whip.overlay}
-    </form>
+    </Form>
   );
 }

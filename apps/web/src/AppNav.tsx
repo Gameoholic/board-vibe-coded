@@ -1,5 +1,6 @@
 import { BagIcon, BoardIcon, GearIcon } from "./Icons";
 import ThemeSwitch from "./ThemeSwitch";
+import Tooltip from "./Tooltip";
 
 // The app's "places" — the board is home, settings is its own place. "shop" isn't a separate place but
 // a mode of the board's (App: the tabs poof away and the shop appears on the same canvas); it gets a
@@ -32,18 +33,18 @@ function AppNav({ view, onChange }: AppNavProps) {
         const active = entry.view === view;
         const disabled = entry.view === null;
         return (
-          <button
-            key={entry.label}
-            type="button"
-            className={`nav-btn${active ? " active" : ""}${disabled ? " disabled" : ""}`}
-            title={entry.label}
-            aria-label={entry.label}
-            aria-current={active ? "page" : undefined}
-            disabled={disabled}
-            onClick={() => entry.view && onChange(entry.view)}
-          >
-            {entry.icon}
-          </button>
+          <Tooltip key={entry.label} label={entry.label} position="right">
+            <button
+              type="button"
+              className={`nav-btn${active ? " active" : ""}${disabled ? " disabled" : ""}`}
+              aria-label={entry.label}
+              aria-current={active ? "page" : undefined}
+              disabled={disabled}
+              onClick={() => entry.view && onChange(entry.view)}
+            >
+              {entry.icon}
+            </button>
+          </Tooltip>
         );
       })}
       <ThemeSwitch />

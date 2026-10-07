@@ -14,16 +14,19 @@ import {
   MeterIcon,
   PencilIcon,
   PlusIcon,
+  PriorityIcon,
   ScissorsIcon,
   SnowflakeIcon,
   SparkleIcon,
+  TallyIcon,
   ThawIcon,
   TimerIcon,
   ZapIcon,
 } from "./Icons";
-import { catalog, offer, type DisplayOption, type SortOption, type TabOffer } from "./TabControls";
-import { behaviorOfType, isBoxLocked, waitedMs } from "./types";
-import type { Reward, Section, Settings, StreakView, Task } from "./types";
+import { catalog, offer, type DisplayOption, type ListPart, type SortOption, type TabOffer } from "./TabControls";
+import { PRIORITY_LOOKS } from "./taskPriority";
+import { behaviorOfType, isBoxLocked, PRIORITIES, priorityOf, waitedMs } from "./types";
+import type { Reward, Section, Settings, StreakView, Task, TaskPriority } from "./types";
 
 // What every tab's Sort and Display menus offer — the one place to read it. Each kind of item has a catalog:
 // every sort and display toggle its tabs can use, each written once (a sort's logic is its `compare`). Each tab
@@ -73,8 +76,31 @@ const isLocked = (task: Task, ctx: TaskSortContext): boolean => {
   return !!entry && isBoxLocked(entry, ctx.now, ctx.settings, ctx.openDay);
 };
 
+// One priority's part of a list: its tasks, in the list's order, under its word in its colour.
+const priorityPart = (priority: TaskPriority, tasks: readonly Task[]): ListPart<Task> => ({
+  key: priority,
+  label: PRIORITY_LOOKS[priority].label,
+  color: PRIORITY_LOOKS[priority].color,
+  items: tasks.filter((t) => priorityOf(t) === priority),
+});
+// High set apart from everything else. With no High task there's nothing to set apart, so the rest gets no
+// header.
+const highApart = (tasks: readonly Task[]): ListPart<Task>[] => {
+  const high = priorityPart("high", tasks);
+  const rest = tasks.filter((t) => priorityOf(t) !== "high");
+  return high.items.length > 0 ? [high, { key: "rest", label: "Tasks", items: rest }] : [{ key: "rest", items: rest }];
+};
+
 export const TASK_SORTS = catalog<SortOption<Task, TaskSortContext>>()({
   manual: { key: "manual", label: "Manual", icon: SparkleIcon },
+  // By priority: a part each, under its header, in the tab's own order inside it — so rows still drag there.
+  priorityHigh: { key: "priority-high", label: "Priority: High only", icon: PriorityIcon, parts: () => highApart },
+  priorityAll: {
+    key: "priority-all",
+    label: "Priority: High, Medium, Low",
+    icon: PriorityIcon,
+    parts: () => (tasks) => PRIORITIES.map((priority) => priorityPart(priority, tasks)),
+  },
   // Shortest doable first, in bands: doable and timed (shortest first), schedule-locked (not yet doable),
   // untimed, then done at the very bottom.
   quick: {
@@ -117,7 +143,7 @@ export const TASK_SORTS = catalog<SortOption<Task, TaskSortContext>>()({
 });
 
 export const TASK_DISPLAYS = catalog<DisplayOption>()({
-  // The tab's tasks in Status bands: In progress, the Backlog (its order is the priority), Blocked folded.
+  // The tab's tasks in Status bands: In progress, the Backlog (where tasks wait their turn), Blocked folded.
   status: { key: "status", label: "Status", icon: InProgressIcon },
   estimate: { key: "estimate", label: "Time estimate", icon: HourglassIcon },
   timer: { key: "timer", label: "Timer", icon: TimerIcon },
@@ -128,6 +154,8 @@ export const TASK_DISPLAYS = catalog<DisplayOption>()({
   pruned: { key: "pruned", label: "Pruned tasks", icon: ScissorsIcon },
   // How long each task has waited, beside its name (AgeChip).
   age: { key: "age", label: "Age", icon: AgeIcon },
+  // How many tasks the tab lists, under its title — by priority where they have more than one (TaskCount).
+  count: { key: "task-count", label: "Task count", icon: TallyIcon },
   // A frosted task's line under it, keyed by the frost modifier's id — a Display option keyed by a modifier
   // shows or hides that modifier's line (see SectionCard) — and the bar on it while it's on ice.
   frost: { key: "frost", label: "Frost bonus", icon: SnowflakeIcon, defaultOn: true },
@@ -178,12 +206,15 @@ export function taskTabOffer(section: Section): TabOffer<Task, TaskSortContext> 
         sorts: [offer(s.manual, pinned), offer(s.incompleteFirst, pinned), s.completeFirst, s.pointsDesc, s.pointsAsc, s.effortAsc, s.effortDesc],
         displays: [offer(d.timer, pinned), offer(d.grouping, pinned), d.estimate, d.add],
       };
-    // A to-do list: its order is the priority; what's been waiting longest is worth seeing. Done tasks leave it,
-    // so done-first sorts mean nothing here. Only here do tasks have a status.
+    // A to-do list: what matters most first — its own order, or by priority; what's been waiting longest is
+    // worth seeing. Done tasks leave it, so done-first sorts mean nothing here. Only here do tasks have a
+    // status and a priority.
     case "todo":
       return {
         sorts: [
           offer(s.manual, pinned),
+          offer(s.priorityHigh, pinned),
+          offer(s.priorityAll, pinned),
           offer(s.quick, pinned),
           offer(s.ageOldest, pinned),
           offer(s.effortAsc, pinned),
@@ -197,6 +228,7 @@ export function taskTabOffer(section: Section): TabOffer<Task, TaskSortContext> 
         displays: [
           offer(d.status, { ...pinned, defaultOn: true }),
           offer(d.age, { ...pinned, defaultOn: true }),
+          offer(d.count, { ...pinned, defaultOn: true }),
           offer(d.add, { ...pinned, defaultOn: true }),
           d.estimate,
           d.timer,

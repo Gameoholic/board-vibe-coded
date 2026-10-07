@@ -2,6 +2,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { dayKeyFor, windDownState } from "./types";
 import type { Settings } from "./types";
+import Tooltip from "./Tooltip";
 import { useFreeSpot } from "./useFreeSpot";
 
 // The screen-off wind-down nudge (see PRODUCT/ARCHITECTURE). As the configured target time nears, an
@@ -87,9 +88,11 @@ function WindDownClock({
         // Delayed so it springs in as the panel's melt settles into wax (see the exit in renderFull).
         transition={{ type: "spring", stiffness: 240, damping: 17, delay: 0.5 }}
       >
-        <button type="button" className="wd-clock-open" onClick={onExpand} title="Open the wind-down alert">
-          <Candle burn={burn} past={past} />
-        </button>
+        <Tooltip label="Open the wind-down alert">
+          <button type="button" className="wd-clock-open" onClick={onExpand} aria-label="Open the wind-down alert">
+            <Candle burn={burn} past={past} />
+          </button>
+        </Tooltip>
         <div className="wd-clock-info">
           <span className="wd-clock-time">{timeText}</span>
           <span className="wd-clock-label">{past ? "Screens off" : "Wind-down"}</span>

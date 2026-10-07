@@ -21,10 +21,21 @@ export interface MenuOption {
   pinned?: boolean;
 }
 
+/** One headed part of a list a sort has split up. Without a `label` it has no header (there's nothing to
+ *  set it apart from). */
+export interface ListPart<T> {
+  key: string;
+  label?: string;
+  color?: string; // a theme token for its header's words
+  items: T[];
+}
+
 /** A sort, and how it orders a list's items given what it needs to know (`C`). Without `compare` it keeps
- *  the list's own order (Manual). */
+ *  the list's own order (Manual) — and so do a sort's `parts`: instead of ordering item against item, a sort
+ *  can split a list into headed parts, each in the list's own order, so its rows still drag within their part. */
 export interface SortOption<T, C> extends MenuOption {
   compare?: (ctx: C) => (a: T, b: T) => number;
+  parts?: (ctx: C) => (items: readonly T[]) => ListPart<T>[];
 }
 
 /** An optional extra on a tab's rows. */
@@ -166,7 +177,7 @@ export function SortMenu({ options, view }: { options: readonly MenuOption[]; vi
       <button type="button" className="sort-btn" aria-label="Sort" onClick={() => setOpen((v) => !v)}>
         <SortIcon />
       </button>
-      <Popover title="Sort" open={open} onClose={() => setOpen(false)} align="right" width={212}>
+      <Popover title="Sort" open={open} onClose={() => setOpen(false)} align="right" width={212} fit>
         <PinnedRows
           menu="sort"
           options={options}

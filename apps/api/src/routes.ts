@@ -107,6 +107,7 @@ export function buildRouter(store: BoardStore, backups: Backups): Router {
     if (body.timer !== undefined) task = store.setTimer(id, body.timer);
     if (body.pruned !== undefined) task = store.setPruned(id, body.pruned, idemKey(req, "prune"));
     if (body.status !== undefined) task = store.setStatus(id, body.status, body.blocker, idemKey(req, "status"));
+    if (body.priority !== undefined) task = store.setPriority(id, body.priority, idemKey(req, "priority"));
     if (body.parentId !== undefined) task = store.setParent(id, body.parentId, idemKey(req, "parent"));
     if (body.frozen !== undefined) task = store.setFrozen(id, body.frozen, idemKey(req, "frozen"));
 

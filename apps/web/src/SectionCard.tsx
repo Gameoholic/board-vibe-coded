@@ -1,18 +1,22 @@
 import { behaviorOf, DEFAULT_EFFORT_ID, formatPercent, parsePercent } from "@board/contracts";
-import { useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 import CanvasCard, { CardAdd, CardTitle, type CardFrame } from "./CanvasCard";
 import ColorPicker from "./ColorPicker";
 import type { MenuPoint } from "./ActionMenu";
 import type { BlockReason } from "./BlockForm";
 import ItemList, { type DropOutside } from "./ItemList";
+import ListPartHead from "./ListPartHead";
 import type { RowContext } from "./ItemRow";
 import DescriptionField from "./DescriptionField";
+import Form from "./Form";
+import PriorityField from "./PriorityField";
 import PointsBuilder, { type BuilderEstimate, POINTS_FORM_WIDTH, TierBuilderRow, type TierRow } from "./PointsBuilder";
 import Popover from "./Popover";
 import ScheduleEditor, { scheduleFromRows, type Cadence, type ScheduleRow } from "./ScheduleEditor";
 import StatusBand from "./StatusBand";
 import StreakForm, { type StreakPayload } from "./StreakForm";
 import StreakItem from "./StreakItem";
+import TaskCount from "./TaskCount";
 import { tabInk } from "./palette";
 import { DisplayMenu, SortMenu, sortItems, tabView } from "./TabControls";
 import { MODIFIER_LOOKS } from "./modifierLooks";
@@ -22,12 +26,12 @@ import type { FlyOrigin } from "./FlyingPoints";
 import type { RowPieces } from "./Pieces";
 import { useBoardClock } from "./useBoardClock";
 import type { TabPrefs } from "./useLocalConfig";
-import { canBoost, canBreakDown, canPrune, freezeRefusal, freezerOf, frostShare, isRetired, modifiersOf, payout, statusOf, wholeWorth } from "./types";
+import { behaviorOfType, canBoost, canBreakDown, canPrioritise, canPrune, DEFAULT_PRIORITY, freezeRefusal, freezerOf, frostShare, isRetired, modifiersOf, payout, statusOf, wholeWorth } from "./types";
 import { runBetween, withUnlistedKept } from "./listOps";
 import { pruneUntil, streaksBrokenByPruning } from "./pruning";
-import { IN_PROGRESS_NUDGE_ABOVE, STATUS_BANDS, statusLabel } from "./taskStatus";
+import { bandSplits, IN_PROGRESS_NUDGE_ABOVE, STATUS_BANDS, statusLabel } from "./taskStatus";
 import { uid } from "./uid";
-import type { AppliedModifier, Group, Section, StreakView, Task, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
+import type { AppliedModifier, Group, Section, StreakView, Task, TaskPriority, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
 
 // A board tab: the shared tab base (CanvasCard — move/resize, header, sort/display controls, add
 // button) around a board list. A "tasks" tab lists tasks on the shared list base (ItemList — reorder
@@ -36,8 +40,8 @@ import type { AppliedModifier, Group, Section, StreakView, Task, TaskSchedule, T
 
 // The create/edit task payload, in one alias so the schedule field threads through every call site.
 type PointsSource = "builder" | "manual";
-type TaskCreatePayload = { type: TaskType; text: string; points?: number; estimate?: string; estimateMinutes?: number; estimateEffort?: string; pointsSource?: PointsSource; description?: string; tiers?: TierDef[]; count?: number; schedule?: TaskSchedule };
-type TaskEditPayload = { text?: string; points?: number; estimateMinutes?: number | null; estimateEffort?: string | null; pointsSource?: PointsSource; description?: string | null; tiers?: Task["tiers"]; count?: number; schedule?: TaskSchedule };
+type TaskCreatePayload = { type: TaskType; text: string; points?: number; estimate?: string; estimateMinutes?: number; estimateEffort?: string; pointsSource?: PointsSource; description?: string; tiers?: TierDef[]; count?: number; schedule?: TaskSchedule; priority?: TaskPriority };
+type TaskEditPayload = { text?: string; points?: number; estimateMinutes?: number | null; estimateEffort?: string | null; pointsSource?: PointsSource; description?: string | null; tiers?: Task["tiers"]; count?: number; schedule?: TaskSchedule; priority?: TaskPriority };
 
 const byOrder = (a: Task, b: Task) => (a.order ?? 0) - (b.order ?? 0);
 
@@ -169,6 +173,7 @@ function SectionCard({
   const showPruned = view.shown("pruned");
   const showStatus = view.shown("status");
   const showAge = view.shown("age");
+  const showCount = view.shown("task-count");
   const grouping = view.shown(GROUPING_KEY);
   // The row extras a tab may let you turn off — a modifier's line (a Display option keyed by the modifier's
   // id), the meter on it, the thaw bonus — show wherever the tab doesn't offer them as a toggle.
@@ -178,9 +183,14 @@ function SectionCard({
     meters: extraShown("meters"),
   };
   const sortMode = view.sortMode;
+  const sort = taskOffer.sorts.find((o) => o.key === sortMode);
+  // A list is in the tab's own order — so its rows drag — under Manual, and under a sort that only splits it
+  // into headed parts (by priority).
+  const ownOrder = !sort?.compare;
   // Board clock (ticks ~1/min) — read to lock-aware-sort "Get done quick", and for what tasks pay (frost is
   // in Settings); a tick re-renders the card, which is cheap and lets a task slide up the moment it unlocks.
   const { now, settings: boardSettings, openDay } = useBoardClock();
+  const sortContext = useMemo(() => ({ now, settings: boardSettings, openDay }), [now, boardSettings, openDay]);
   // The Blocked band folds to its count until opened; which row's Blocked form is open (a drop on the
   // Blocked band opens it as well as the row's own menu and pill, so the tab holds it).
   const [blockedOpen, setBlockedOpen] = useState(false);
@@ -272,15 +282,7 @@ function SectionCard({
   }
 
   // The tab's sort over its tasks in their own order (so Manual, and ties, keep it).
-  const displayedTasks = useMemo(
-    () =>
-      sortItems(
-        [...listedTasks].sort(byOrder),
-        taskOffer.sorts.find((o) => o.key === sortMode),
-        { now, settings: boardSettings, openDay },
-      ),
-    [listedTasks, taskOffer, sortMode, now, boardSettings, openDay],
-  );
+  const displayedTasks = useMemo(() => sortItems([...listedTasks].sort(byOrder), sort, sortContext), [listedTasks, sort, sortContext]);
 
   const displayedStreaks = useMemo(
     () => sortItems(streaks, STREAKS_OFFER.sorts.find((o) => o.key === sortMode), undefined),
@@ -370,6 +372,8 @@ function SectionCard({
           : undefined
       }
       onSetPruned={(pruned) => onSetPruned(task, pruned)}
+      // Nothing on ice is waiting to be picked, so the Freezer shows no priority (a task keeps its own).
+      priority={canPrioritise(task) && !isFreezer ? { onSet: (priority) => onEditTask(task.id, { priority }) } : undefined}
       status={
         showStatus
           ? {
@@ -387,19 +391,38 @@ function SectionCard({
   // the tab's tasks it shows, so its reorders keep everything else in place.
   // This week's Bounty, if it's among them, sits pinned above the rest in a list of its own — not moved in
   // the tab's order, so it's back in its place once the Bounty ends (and isn't dragged meanwhile).
+  // Where the list is one a sort may `split`, a sort with parts (by priority) shows each part as a list of its
+  // own under its header, in the tab's own order — so a row drags within its part, and never out of it into
+  // another.
   const taskList = (
     items: Task[],
     sorted: Task[],
-    { inList = isListed, emptyLabel, dropOutside }: { inList?: (t: Task) => boolean; emptyLabel?: string; dropOutside?: DropOutside } = {},
+    {
+      inList = isListed,
+      emptyLabel,
+      dropOutside,
+      split = false,
+    }: { inList?: (t: Task) => boolean; emptyLabel?: string; dropOutside?: DropOutside; split?: boolean } = {},
   ) => {
     const pinned = items.find((t) => t.id === bountyId);
-    if (!pinned) return itemList(items, sorted, { inList, emptyLabel, dropOutside });
-    const rest = items.filter((t) => t !== pinned);
+    const rest = pinned ? items.filter((t) => t !== pinned) : items;
+    const inRest = pinned ? (t: Task) => inList(t) && t.id !== pinned.id : inList;
+    const parts = split && sort?.parts ? sort.parts(sortContext)([...rest].sort(byOrder)).filter((part) => part.items.length > 0) : [];
     return (
       <>
-        {itemList([pinned], [pinned], { inList: (t) => t === pinned, emptyLabel, pinned: true })}
-        {rest.length > 0 &&
-          itemList(rest, sorted.filter((t) => t !== pinned), { inList: (t) => inList(t) && t.id !== pinned.id, emptyLabel, dropOutside })}
+        {pinned && itemList([pinned], [pinned], { inList: (t) => t === pinned, emptyLabel, pinned: true })}
+        {parts.length > 0
+          ? parts.map((part) => {
+              const ids = new Set(part.items.map((t) => t.id));
+              return (
+                <Fragment key={part.key}>
+                  {part.label && <ListPartHead label={part.label} count={part.items.length} color={part.color} />}
+                  {itemList(part.items, part.items, { inList: (t) => inRest(t) && ids.has(t.id), dropOutside })}
+                </Fragment>
+              );
+            })
+          : (rest.length > 0 || !pinned) &&
+            itemList(rest, pinned ? sorted.filter((t) => t !== pinned) : sorted, { inList: inRest, emptyLabel, dropOutside })}
       </>
     );
   };
@@ -412,7 +435,7 @@ function SectionCard({
       items={items}
       // The Completed view is a flat look-back (those tasks sit ungrouped at the end), so it doesn't reorder
       // or group — that happens in the normal view. Nor does a pinned Bounty.
-      manual={sortMode === "manual" && !flatView && !pinned}
+      manual={ownOrder && !flatView && !pinned}
       sorted={sorted}
       groups={groups}
       noun="tasks"
@@ -459,7 +482,7 @@ function SectionCard({
       taskList(
         listedTasks.filter((t) => bandOf(t) === band),
         displayedTasks.filter((t) => bandOf(t) === band),
-        { inList: inBand(band), emptyLabel, dropOutside: band === "done" ? undefined : dropFrom(band) },
+        { inList: inBand(band), emptyLabel, dropOutside: band === "done" ? undefined : dropFrom(band), split: band !== "done" && bandSplits(band) },
       );
     const count = (band: Band) => listedTasks.filter((t) => bandOf(t) === band).length;
     const inProgress = count("in-progress");
@@ -496,6 +519,9 @@ function SectionCard({
       </div>
     );
   }
+
+  // How many tasks the tab lists, under its title (finished one-time tasks aren't among them, shown or not).
+  const taskCount = showCount ? <TaskCount tasks={listedTasks.filter((t) => !isRetired(t))} /> : null;
 
   return (
     <CanvasCard
@@ -576,12 +602,18 @@ function SectionCard({
           onRemoveGroup={onRemoveGroup}
         />
       ) : showStatus ? (
-        statusBands()
+        <>
+          {taskCount}
+          {statusBands()}
+        </>
       ) : (
-        <div className="list-stack">
-          {taskList(listedTasks, displayedTasks, { emptyLabel: isFreezer ? "Nothing on ice" : "Nothing here yet" })}
-          {prunedTasks.length > 0 && prunedList()}
-        </div>
+        <>
+          {taskCount}
+          <div className="list-stack">
+            {taskList(listedTasks, displayedTasks, { emptyLabel: isFreezer ? "Nothing on ice" : "Nothing here yet", split: true })}
+            {prunedTasks.length > 0 && prunedList()}
+          </div>
+        </>
       )}
     </CanvasCard>
   );
@@ -618,6 +650,9 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
   // cadence (daily/weekly) is inferred from the section's recurrence, not chosen here.
   const [scheduleRows, setScheduleRows] = useState<ScheduleRow[]>([]);
   const scheduleCadence: Cadence = section.period === "week" ? "weekly" : "daily";
+  // How much it matters, for a type that takes a priority — Low unless another is picked.
+  const [priority, setPriority] = useState<TaskPriority>(DEFAULT_PRIORITY);
+  const takesPriority = behaviorOfType(type).takesPriority;
   // Checkbox, repeatable and one-time tasks score a single per-completion `points`, so they use the
   // duration→points calc; tiered doesn't (each tier has its own builder).
   const usesPointsCalc = type === "checkbox" || type === "repeatable" || type === "once";
@@ -633,6 +668,7 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
     setAmount("1");
     setMaxTimes("");
     setScheduleRows([]);
+    setPriority(DEFAULT_PRIORITY);
   }
 
   // Stable (no deps) so each row's PointsBuilder gets stable callbacks — its effects depend on them.
@@ -651,15 +687,15 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
     setTierRows((prev) => (prev.length > 1 ? prev.filter((row) => row.id !== id) : prev));
   }
 
-  // Validation is the browser's job now: `required`/`min`/`type=number` on the inputs raise the
-  // native constraint bubble (the same component the user sees for step/range), so the form's submit
-  // handler only ever runs once every field is valid. The parse guards below are a belt-and-braces
-  // fallback — they should never fire past native validation, and the server re-validates regardless.
+  // The fields carry their own rules (`required`, `min`, `type=number`) and Form says what's wrong with one in
+  // the app's bubble, so this only ever runs once every field is valid. The parse guards below are a
+  // belt-and-braces fallback — they should never fire past that, and the server re-validates regardless.
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = text.trim();
     // Description is optional — omit it entirely when blank so a task stays description-free.
     const withDesc = description.trim() ? { description: description.trim() } : {};
+    const withPriority = takesPriority ? { priority } : {};
 
     if (type === "tiered") {
       const tiers: TierDef[] = [];
@@ -672,7 +708,7 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
         const estFields = est.minutes != null ? { minutes: est.minutes, effort: est.effort } : {};
         tiers.push({ label: `Tier ${i + 1}`, points: value, ...estFields, pointsSource: est.source });
       }
-      onCreate({ type: "tiered", text: trimmed, tiers, ...withDesc });
+      onCreate({ type: "tiered", text: trimmed, tiers, ...withPriority, ...withDesc });
     } else {
       const pointsValue = parsePercent(points);
       if (pointsValue === null) return;
@@ -687,11 +723,11 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
         // completion cap rides in `count` (blank ≡ unlimited).
         const max = Number(maxTimes);
         const withMax = maxTimes.trim() && Number.isInteger(max) && max >= 1 ? { count: max } : {};
-        onCreate({ type: "repeatable", text: trimmed, points: pointsValue, ...withMax, ...withEstimate, pointsSource: checkboxEst.source, ...withDesc });
+        onCreate({ type: "repeatable", text: trimmed, points: pointsValue, ...withMax, ...withEstimate, pointsSource: checkboxEst.source, ...withPriority, ...withDesc });
       } else if (type === "once") {
         // A one-time task is a single checkbox with no box count and no scheduled times — check it and
         // it's gone, so neither knob applies.
-        onCreate({ type: "once", text: trimmed, points: pointsValue, ...withEstimate, pointsSource: checkboxEst.source, ...withDesc });
+        onCreate({ type: "once", text: trimmed, points: pointsValue, ...withEstimate, pointsSource: checkboxEst.source, ...withPriority, ...withDesc });
       } else {
         // A count of 1 is a plain checkbox — omit it so the task stays a bare checkbox rather than
         // storing a redundant 1-box amount.
@@ -700,7 +736,7 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
         // Include the schedule only if at least one box is actually scheduled (else stay a plain task).
         const schedule = scheduleFromRows(scheduleRows, scheduleCadence, boxCount);
         const withSchedule = schedule.some(Boolean) ? { schedule } : {};
-        onCreate({ type: "checkbox", text: trimmed, points: pointsValue, ...withCount, ...withSchedule, ...withEstimate, pointsSource: checkboxEst.source, ...withDesc });
+        onCreate({ type: "checkbox", text: trimmed, points: pointsValue, ...withCount, ...withSchedule, ...withEstimate, pointsSource: checkboxEst.source, ...withPriority, ...withDesc });
       }
     }
     reset();
@@ -718,7 +754,7 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
       width={POINTS_FORM_WIDTH}
       scrollable
     >
-      <form className="popover-form" onSubmit={handleSubmit}>
+      <Form className="popover-form" onSubmit={handleSubmit}>
         {section.allowedTypes.length > 1 && (
           <div className="field">
             <span className="field-label">Type</span>
@@ -746,6 +782,7 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
             autoComplete="off"
             autoFocus
             required
+            data-missing="Give it a name"
           />
         </label>
 
@@ -785,6 +822,7 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               required
+              data-missing="How many boxes?"
             />
           </label>
         )}
@@ -807,6 +845,8 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
           </label>
         )}
 
+        {takesPriority && <PriorityField value={priority} onChange={setPriority} />}
+
         {/* Keyed like the builder, to fold again once a task is added — under its own name, both being this form's children. */}
         <DescriptionField key={`description-${builderKey}`} value={description} onChange={setDescription} />
 
@@ -816,7 +856,7 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
           </button>
           <button type="submit">Add task</button>
         </div>
-      </form>
+      </Form>
     </Popover>
   );
 }

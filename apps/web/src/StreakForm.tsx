@@ -1,7 +1,9 @@
 import { useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import Form, { type FormProblem } from "./Form";
 import { PickWhipIcon } from "./Icons";
 import { usePickWhip, type WhipTarget } from "./pickWhip";
+import Tooltip from "./Tooltip";
 import { behaviorOf, streakRefusal } from "./types";
 import type { Section, StreakMatcher, StreakMode, StreakSince, StreakType, Task, TaskCondition, TaskRequirement } from "./types";
 
@@ -54,7 +56,6 @@ function StreakForm({ allTasks, allSections, accentColor, initial, submitLabel, 
   const [conditions, setConditions] = useState<TaskCondition[]>(
     initial?.matcher.kind === "tasks" ? initial.matcher.conditions : [],
   );
-  const [errors, setErrors] = useState<{ name?: string; conditions?: string }>({});
 
   // Whip drag runs on window listeners; those closures capture state, so read the live values off
   // refs to avoid staleness mid-gesture.
@@ -152,27 +153,24 @@ function StreakForm({ allTasks, allSections, accentColor, initial, submitLabel, 
         ? prev.map((c) => (c.taskId === id ? { taskId: id, required } : c))
         : [...prev, { taskId: id, required }],
     );
-    setErrors((p) => ({ ...p, conditions: undefined }));
   });
 
-  function handleSubmit(e: React.FormEvent) {
+  // The name's own rule is its field's (`required`); what only the whole form can tell is said under the
+  // link handle.
+  function handleSubmit(e: React.FormEvent): FormProblem | void {
     e.preventDefault();
     const trimmed = name.trim();
-    const errs: { name?: string; conditions?: string } = {};
-    if (!trimmed) errs.name = "Name is required";
-    if (conditions.length === 0) errs.conditions = "Link at least one task";
-    else if (misfits) errs.conditions = `${misfit} — remove the marked ones or change the type`;
-    if (Object.keys(errs).length) { setErrors(errs); return; }
+    if (conditions.length === 0) return { field: "conditions", message: "Link at least one task" };
+    if (misfits) return { field: "conditions", message: `${misfit} — remove the marked ones or change the type` };
     const matcher: StreakMatcher = { kind: "tasks", conditions };
     onSubmit({ name: trimmed, type, mode, since, matcher });
   }
 
   return (
-    <form className="popover-form" onSubmit={handleSubmit}>
+    <Form className="popover-form" onSubmit={handleSubmit}>
       <label className="field">
         <span className="field-label">Name</span>
-        <input type="text" value={name} onChange={(e) => { setName(e.target.value); setErrors((p) => ({ ...p, name: undefined })); }} autoComplete="off" autoFocus />
-        {errors.name && <span className="field-error">{errors.name}</span>}
+        <input type="text" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" autoFocus required data-missing="Give it a name" />
       </label>
 
       <div className="field">
@@ -230,24 +228,22 @@ function StreakForm({ allTasks, allSections, accentColor, initial, submitLabel, 
                     {i === 1 && !isCounter ? (
                       // Only the first join is interactive; the rest mirror it (the group shares one
                       // AND/OR). Toggling it flips `mode` for the whole streak.
-                      <button
-                        type="button"
-                        className="cond-connector"
-                        onClick={() => setMode((m) => (m === "all" ? "any" : "all"))}
-                        title="Switch between AND / OR"
-                      >
-                        {connector}
-                        <span className="cond-connector-hint">⇅</span>
-                      </button>
+                      <Tooltip label="Switch between AND / OR" align="start">
+                        <button type="button" className="cond-connector" onClick={() => setMode((m) => (m === "all" ? "any" : "all"))}>
+                          {connector}
+                          <span className="cond-connector-hint">⇅</span>
+                        </button>
+                      </Tooltip>
                     ) : (
                       <span className="cond-connector static">{connector}</span>
                     )}
                   </div>
                 )}
-                <div
+                <Tooltip
                   className={fits(cond.taskId) ? "cond-row" : "cond-row misfit"}
                   style={{ "--cond-color": accentColor } as React.CSSProperties}
-                  title={refusalFor(cond.taskId) ?? undefined}
+                  label={refusalFor(cond.taskId)}
+                  align="start"
                 >
                   <span className="cond-dot" />
                   <span className="cond-name">{taskName(cond.taskId)}</span>
@@ -260,7 +256,7 @@ function StreakForm({ allTasks, allSections, accentColor, initial, submitLabel, 
                   >
                     ✕
                   </button>
-                </div>
+                </Tooltip>
               </motion.div>
             ))}
           </AnimatePresence>
@@ -269,12 +265,11 @@ function StreakForm({ allTasks, allSections, accentColor, initial, submitLabel, 
             type="button"
             className={`whip-handle${whip.dragging ? " dragging" : ""}`}
             onPointerDown={whip.start}
-            title="Drag onto a task on your board to link it"
+            data-field="conditions"
           >
             <PickWhipIcon />
             <span>{conditions.length ? "Drag to link another task" : "Drag onto a task to link it"}</span>
           </button>
-          {errors.conditions && <span className="field-error">{errors.conditions}</span>}
         </div>
       </div>
 
@@ -286,7 +281,7 @@ function StreakForm({ allTasks, allSections, accentColor, initial, submitLabel, 
       </div>
 
       {whip.overlay}
-    </form>
+    </Form>
   );
 }
 

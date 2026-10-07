@@ -71,6 +71,7 @@ export default function AgeChip({ task, onIce, freezes }: AgeChipProps) {
     <Tooltip
       className={`age-chip${soon ? " soon" : ""}${onIce ? " on-ice" : ""}`}
       position="bottom"
+      focusable
       label={
         <>
           {lines.map((line) => (

@@ -9,13 +9,18 @@ import type { Settings, Task, TaskStatus } from "./types";
 
 type IconComponent = (props: { size?: number }) => React.ReactElement;
 
-export const STATUS_BANDS: { status: TaskStatus; label: string; icon: IconComponent }[] = [
+export const STATUS_BANDS: { status: TaskStatus; label: string; icon: IconComponent; splits?: boolean }[] = [
   { status: "in-progress", label: "In progress", icon: InProgressIcon },
-  { status: "backlog", label: "Backlog", icon: BacklogIcon },
+  // Where tasks wait their turn — so the one band a sort may split into headed parts (by priority). The
+  // others stay as dragged: what's in hand, or stuck, isn't waiting to be picked.
+  { status: "backlog", label: "Backlog", icon: BacklogIcon, splits: true },
   { status: "blocked", label: "Blocked", icon: BlockedIcon },
 ];
 
 export const statusLabel = (status: TaskStatus): string => STATUS_BANDS.find((b) => b.status === status)!.label;
+
+/** Whether a sort that splits a list into parts splits this band's. */
+export const bandSplits = (status: TaskStatus): boolean => !!STATUS_BANDS.find((b) => b.status === status)?.splits;
 
 // The Status choices' caption in the actions menu.
 const STATUS_SET = "Status";

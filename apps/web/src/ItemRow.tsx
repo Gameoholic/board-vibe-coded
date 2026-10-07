@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ActionMenu, { type MenuPoint, type RowAction } from "./ActionMenu";
 import ConfirmPopover from "./ConfirmPopover";
 import { GroupBracketIcon, TrashIcon } from "./Icons";
+import Tooltip from "./Tooltip";
 
 // The shared base of every row in a tab's list (a task, a reward, …): a framer Reorder.Item with the
 // row chrome that makes list structure work — the move handle and the group handle — so ItemList can
@@ -164,10 +165,12 @@ function ItemRow<T>({ value, id, row, className, attrs, actions, exitDelay, chil
         <span
           className="group-handle"
           aria-label={`Drag to group ${row.noun}`}
-          title={`Drag down to group ${row.noun}`}
           onPointerDown={(e) => row.onGroupDragStart?.(id, e)}
         >
-          <GroupBracketIcon />
+          {/* Starting at the handle, so it opens over the row rather than off the tab's edge. */}
+          <Tooltip label={`Drag down to group ${row.noun}`} align="start">
+            <GroupBracketIcon />
+          </Tooltip>
         </span>
       )}
       {children}

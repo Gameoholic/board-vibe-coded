@@ -60,6 +60,11 @@ export const HexColor = z
 export const TaskStatus = z.enum(["in-progress", "backlog", "blocked"]);
 export type TaskStatus = z.infer<typeof TaskStatus>;
 
+// How much a task matters among its tab's tasks. Every task that takes one has one — a task never given
+// one is Low (see taskPriority.ts). Organisation only, like its Status: it never touches points.
+export const TaskPriority = z.enum(["high", "medium", "low"]);
+export type TaskPriority = z.infer<typeof TaskPriority>;
+
 // Why a task is blocked: a short note, the task it's waiting on (which releases it once done), or both.
 // `resume` is the status it goes back to when that task is done — where it was before it was blocked.
 export const TaskBlocker = z.object({
@@ -161,6 +166,8 @@ export const Task = z.object({
   status: TaskStatus.optional(),
   statusSince: z.string().optional(),
   blocker: TaskBlocker.optional(),
+  // How much it matters among its tab's tasks (absent ≡ low — see priorityOf).
+  priority: TaskPriority.optional(),
   // A piece of a broken-down task: the task it sits inside (one level deep — a piece never has pieces).
   // Pieces aren't items of their tab's list; they're listed under their task, in its own order.
   parentId: z.string().optional(),

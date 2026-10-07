@@ -1,27 +1,43 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
-// A small hover/focus tooltip in the app's dark-bubble style (the same look as the tier-dot label
-// bubble). CSS-driven — no JS state — so it's cheap and reveals on focus too, which is how it works
-// on touch. Wrap the trigger element; pass the text as `label` — a line of text, or several (block-level
-// children each take their own line). `position` picks the side the bubble opens on (default above), and `align`
-// whether it's centred on the trigger or starts at its left edge (for a trigger at the left of a card, where a
-// centred bubble would hang off it). The wrapper is focusable so the bubble still shows for a locked/disabled
-// child (which wouldn't take focus).
+// The app's tooltip: a small dark bubble shown on hover and on keyboard focus. It's the one way to hint at
+// anything — never the browser's own (`title="…"` draws Chrome's grey box, which doesn't belong on the board).
+// CSS-driven, no JS state. Wrap the trigger and pass the words as `label`: a line of text, or several (block-level
+// children each take their own line). With no label it's just its children, so a hint that only sometimes
+// applies needs no branch around it.
 interface TooltipProps {
-  label: ReactNode;
+  label?: ReactNode;
   children: ReactNode;
-  position?: "top" | "bottom";
-  align?: "center" | "start";
+  // The side the bubble opens on (default above).
+  position?: "top" | "bottom" | "left" | "right";
+  // Above or below the trigger: centred on it, or lined up with its left (`start`) or right (`end`) edge — for a
+  // trigger at a card's edge, where a centred bubble would hang off it.
+  align?: "center" | "start" | "end";
+  // The bubble shows while anything inside has focus. This lets the wrapper itself take it, for a child that
+  // can't (plain text, a disabled box) — which is also how a tap reaches it on a touch screen. A child that
+  // takes focus (a button) needs nothing, and would only gain a second tab stop.
+  focusable?: boolean;
+  // Keeps the wrapper in the run of text, for a trigger that must still wrap with it (the points bracket).
+  inline?: boolean;
+  // For running text (a task's description): the bubble wraps at a set width, keeping the text's own line
+  // breaks, instead of staying on one line.
+  wrap?: boolean;
+  // The trigger's own look, where the wrapper stands in for an element with a place in a layout (a grid cell,
+  // a row) — the wrapper then is that element.
   className?: string;
+  style?: CSSProperties;
 }
 
-export default function Tooltip({ label, children, position = "top", align = "center", className }: TooltipProps) {
+export default function Tooltip({ label, children, position = "top", align = "center", focusable = false, inline = false, wrap = false, className, style }: TooltipProps) {
+  const shown = label != null && label !== false && label !== "";
   return (
-    <span className={`tooltip-wrap${className ? ` ${className}` : ""}`} tabIndex={0}>
+    <span className={`tooltip-wrap${inline ? " tooltip-inline" : ""}${className ? ` ${className}` : ""}`} style={style} tabIndex={focusable ? 0 : undefined}>
       {children}
-      <span className={`tooltip-bubble tooltip-${position}${align === "start" ? " tooltip-start" : ""}`} role="tooltip">
-        {label}
-      </span>
+      {shown && (
+        <span className={`tooltip-bubble tooltip-${position}${align === "center" ? "" : ` tooltip-${align}`}${wrap ? " tooltip-wrapping" : ""}`} role="tooltip">
+          {label}
+        </span>
+      )}
     </span>
   );
 }

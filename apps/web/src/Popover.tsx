@@ -8,6 +8,8 @@ interface PopoverProps {
   title: string;
   children: React.ReactNode;
   width?: number;
+  // A menu whose rows mustn't wrap: as wide as its longest row needs, and never narrower than `width`.
+  fit?: boolean;
   align?: "left" | "right";
   // Tall forms (add-task, streak) opt in: cap the panel to the window's height and scroll internally rather
   // than run past an edge. Off by default so short popovers that hold nested popovers of their own (color
@@ -17,7 +19,7 @@ interface PopoverProps {
 
 // The one inline form/menu primitive: a panel anchored to the element it sits in (its `.popover-anchor`),
 // opened in the top layer so a tab's scrolling list can't cut it off (see useTopLayer).
-function Popover({ open, onClose, title, children, width = 280, align = "left", scrollable = false }: PopoverProps) {
+function Popover({ open, onClose, title, children, width = 280, fit = false, align = "left", scrollable = false }: PopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
   const { openUp, maxH } = useAnchoredPanel(ref, open, { align, scrollable });
 
@@ -38,7 +40,7 @@ function Popover({ open, onClose, title, children, width = 280, align = "left", 
           popover="manual"
           className="popover"
           style={{
-            width,
+            ...(fit ? { minWidth: width, width: "max-content" } : { width }),
             ...(scrollable ? { maxHeight: maxH, overflowY: "auto" } : {}),
             transformOrigin: openUp ? "bottom" : "top",
           }}

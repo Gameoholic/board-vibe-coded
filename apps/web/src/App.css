@@ -665,6 +665,8 @@ main {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* A sort's name stays on one line; its menu grows to fit the longest (Popover's `fit`). */
+  white-space: nowrap;
 }
 
 .sort-option svg {
@@ -1065,15 +1067,19 @@ main {
   flex-shrink: 0;
 }
 
-/* Inline "i" affordance for a task's optional description — sits after the name, reveals the note in
-   a bubble on hover/focus (focus so a tap works on touch). Mirrors the tier-dot tooltip pattern. */
+/* Inline "i" for a task's optional description — sits after the name; its Tooltip (wrapping, for running
+   text) is the note. The wrapper holds its place in the name's line. */
+.task-info-spot {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 .task-info {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 15px;
   height: 15px;
-  margin-left: 6px;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 50%;
@@ -1083,37 +1089,7 @@ main {
   font-style: italic;
   font-weight: 700;
   line-height: 1;
-  vertical-align: middle;
   cursor: help;
-  position: relative;
-}
-
-.task-info-bubble {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  width: max-content;
-  max-width: 220px;
-  background: var(--text);
-  color: var(--surface);
-  font-size: 0.75rem;
-  font-style: normal;
-  font-weight: 400;
-  line-height: 1.4;
-  text-align: left;
-  white-space: pre-wrap;
-  padding: 6px 9px;
-  border-radius: 6px;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.1s;
-  z-index: 10;
-}
-
-.task-info:hover .task-info-bubble,
-.task-info:focus .task-info-bubble {
-  opacity: 1;
 }
 
 /* ---- Row actions menu (ActionMenu — right-click / long-press on any list row) ----
@@ -1505,29 +1481,6 @@ main {
   transition: background 0.1s, border-color 0.1s;
 }
 
-.tier-dot[data-label]::before {
-  content: attr(data-label);
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--text);
-  color: var(--surface);
-  font-size: 0.72rem;
-  font-weight: 500;
-  white-space: nowrap;
-  padding: 3px 7px;
-  border-radius: 6px;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.1s;
-  z-index: 10;
-}
-
-.tier-dot[data-label]:hover::before {
-  opacity: 1;
-}
-
 .tier-dot.filled {
   background: var(--task-color, var(--border));
 }
@@ -1623,39 +1576,82 @@ main {
   user-select: none;
 }
 
-/* Reusable tooltip (Tooltip.tsx): a dark bubble in the app's style — the same look as the tier-dot
-   label bubble — shown on hover/focus. CSS-only, no JS. Wrap the trigger; the bubble is the last
-   child. Used for the scheduled-box lock and available anywhere a small hint is needed. */
+/* The app's tooltip (Tooltip.tsx): a dark bubble shown on
+   hover/focus. CSS-only, no JS. Wrap the trigger; the bubble is the last child. Every hint in the app is one
+   of these: a `title` attribute draws the browser's own box instead. */
 .tooltip-wrap {
   position: relative;
   display: inline-flex;
   outline: none;
 }
-.tooltip-bubble {
+/* In a run of text that must still wrap (the points bracket), the wrapper wraps with it. */
+.tooltip-wrap.tooltip-inline {
+  display: inline;
+}
+/* The bubble itself — one look for a hint (Tooltip) and for what's wrong with a form's field (Form). */
+.tooltip-bubble,
+.form-problem {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
   background: var(--text);
   color: var(--surface);
   font-size: 0.72rem;
   font-weight: 500;
-  white-space: nowrap;
   padding: 3px 7px;
   border-radius: 6px;
   pointer-events: none;
+  z-index: 20;
+}
+.tooltip-bubble {
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
   opacity: 0;
   transition: opacity 0.1s;
-  z-index: 20;
 }
 .tooltip-top {
   bottom: calc(100% + 6px);
 }
+.tooltip-bottom {
+  top: calc(100% + 6px);
+}
+/* Above or below, lined up with the trigger's left or right edge instead of centred on it. */
 .tooltip-start {
   left: 0;
   transform: none;
 }
-.tooltip-bottom {
-  top: calc(100% + 6px);
+.tooltip-end {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.tooltip-left,
+.tooltip-right {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.tooltip-right {
+  left: calc(100% + 8px);
+}
+.tooltip-left {
+  left: auto;
+  right: calc(100% + 8px);
+}
+/* Running text (a task's description): it wraps at a set width, keeping its own line breaks. */
+.tooltip-bubble.tooltip-wrapping {
+  width: max-content;
+  max-width: 220px;
+  padding: 6px 9px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: pre-wrap;
+}
+/* A form (Form.tsx) is what its problem bubble is placed in: under the field it's about, wrapping if it's long. */
+.app-form {
+  position: relative;
+}
+.form-problem {
+  max-width: min(280px, 100%);
+  line-height: 1.35;
 }
 .tooltip-wrap:hover .tooltip-bubble,
 .tooltip-wrap:focus-visible .tooltip-bubble,
@@ -1830,11 +1826,6 @@ main {
   color: var(--text-dim);
 }
 
-.field-error {
-  font-size: 0.75rem;
-  color: #ef4444;
-}
-
 .field input[type="text"],
 .field input[type="number"],
 .field select,
@@ -1950,6 +1941,13 @@ main {
   background: var(--text);
   border-color: var(--text);
   color: var(--surface);
+}
+
+/* A priority's pill in a task form (PriorityField): its arrows, then its word. */
+.priority-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 /* ---- Points builder (PointsBuilder.tsx): the pick as a sentence, "1h at Ugh difficulty = 3.75%" — the time
@@ -3360,6 +3358,13 @@ body.whip-dragging {
 
 .recap-purchases li {
   display: flex;
+  min-width: 0;
+}
+
+/* A purchase's line, which is also what its full name's tooltip hangs from. */
+.recap-purchase {
+  flex: 1;
+  display: flex;
   justify-content: space-between;
   gap: 6px;
   min-width: 0;
@@ -4514,6 +4519,69 @@ main.shop-open > .zoom-controls {
   border-bottom: 1.5px dotted var(--text-dim);
 }
 
+/* ---- A list a sort has split into parts (ListPartHead) ----
+   Each part's header sits between its lists, on their grid: its words (in its own colour, where it has
+   one — a priority's), how many rows it holds, and a rule out to the list's edge. */
+.list-part-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 4px 3px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--c, var(--text-dim));
+}
+
+/* Right under its band's own header, or first in a tab, it needs no room above it. */
+.status-band-head + .list-part-head,
+.list-stack > .list-part-head:first-child {
+  padding-top: 2px;
+}
+
+.list-part-count {
+  font-weight: 600;
+  letter-spacing: 0;
+  opacity: 0.8;
+}
+
+.list-part-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* A tab's task count under its title (TaskCount): one number, or one per priority in its colour. Brought up
+   close to the title by the header giving up some of its gap — never by a negative margin of its own: that
+   leaves the tab's list a few px shorter than its content, so a resized tab thinks it overflows, scrolls, and
+   cuts the count's top off. */
+.board-card:has(.task-count) > .board-card-header {
+  margin-bottom: 8px;
+}
+
+.task-count {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.task-count-part b {
+  font-weight: 700;
+  color: var(--c);
+}
+
+.task-count-part + .task-count-part::before {
+  content: "·";
+  margin: 0 7px;
+  color: var(--text-dim);
+}
+
 /* The hover pill that moves a row between bands in one click. Out of the grid (absolute), so it takes
    no track; it sits at the end of the first line, left of the trash. */
 .status-pill {
@@ -4562,15 +4630,16 @@ main.shop-open > .zoom-controls {
   cursor: pointer;
 }
 
-.status-pill button:first-child {
+/* Each button sits in its Tooltip's wrapper, so the pill's ends and dividers are told by the wrappers. */
+.status-pill .tooltip-wrap:first-child button {
   border-radius: 6px 0 0 6px;
 }
 
-.status-pill button:last-child {
+.status-pill .tooltip-wrap:last-child button {
   border-radius: 0 6px 6px 0;
 }
 
-.status-pill button + button {
+.status-pill .tooltip-wrap + .tooltip-wrap button {
   border-left: 1px solid var(--border);
 }
 
@@ -4585,29 +4654,6 @@ main.shop-open > .zoom-controls {
   cursor: default;
 }
 
-/* Each icon's name, in the tier-dot label bubble. */
-.status-pill button::before {
-  content: attr(data-label);
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--text);
-  color: var(--surface);
-  font-size: 0.72rem;
-  font-weight: 500;
-  white-space: nowrap;
-  padding: 3px 7px;
-  border-radius: 6px;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.1s;
-  z-index: 10;
-}
-
-.status-pill button:hover::before {
-  opacity: 1;
-}
 
 /* No hover on touch: the same choices are in the long-press menu. */
 @media (hover: none) {

@@ -12,15 +12,17 @@ import { PieceList, PieceStrip, PiecesSummary, type RowPieces } from "./Pieces";
 import { deleteAction, editAction } from "./rowActions";
 import PointsBracket from "./PointsBracket";
 import DescriptionField from "./DescriptionField";
+import Form from "./Form";
 import PointsBuilder, { type BuilderEstimate, POINTS_FORM_WIDTH, TierBuilderRow, type TierRow } from "./PointsBuilder";
 import Popover from "./Popover";
 import ScheduleEditor, { rowsFromSchedule, scheduleFromRows, type Cadence, type ScheduleRow } from "./ScheduleEditor";
 import StatusPill from "./StatusPill";
 import TaskTimer from "./TaskTimer";
+import { priorityActions, priorityInk } from "./taskPriority";
 import { inHandLabel, pieceStatusActions, statusActions } from "./taskStatus";
 import Tooltip from "./Tooltip";
 import { boxScheduleLabel, isBoxLocked, isRetired, onWholeTask, statusOf, wholeWorth } from "./types";
-import type { AppliedModifier, BoxSchedule, Task, TaskSchedule, TaskStatus, TierDef } from "./types";
+import type { AppliedModifier, BoxSchedule, Task, TaskPriority, TaskSchedule, TaskStatus, TierDef } from "./types";
 import { formatMinutes } from "./duration";
 import { uid } from "./uid";
 import { useBoardClock } from "./useBoardClock";
@@ -37,7 +39,7 @@ const PIECE_CASCADE_MS = 100;
 
 // The task-edit / add-task patch shape, shared by the row callbacks (kept in one alias so the
 // schedule field is threaded through every call site consistently).
-type TaskPatch = { text?: string; points?: number; estimateMinutes?: number | null; estimateEffort?: string | null; pointsSource?: "builder" | "manual"; description?: string | null; tiers?: TierDef[]; count?: number; progress?: number; schedule?: TaskSchedule };
+type TaskPatch = { text?: string; points?: number; estimateMinutes?: number | null; estimateEffort?: string | null; pointsSource?: "builder" | "manual"; description?: string | null; tiers?: TierDef[]; count?: number; progress?: number; schedule?: TaskSchedule; priority?: TaskPriority };
 
 interface TaskItemProps {
   task: Task;
@@ -84,6 +86,9 @@ interface TaskItemProps {
   freeze?: { onFreeze: () => void; refusal: string | null };
   // The tab's Age Display toggle: how long it has waited, beside its name.
   showAge: boolean;
+  // Only on a task that takes a priority, where its tab shows one: setting it (from its menu). The row then
+  // wears its priority's colour. Absent ≡ no priority on this row.
+  priority?: { onSet: (priority: TaskPriority) => void };
 }
 
 // A row menu's Reroll: what it rerolls, how many rerolls are left, and doing it.
@@ -102,14 +107,15 @@ export interface RowStatus {
   allTasks: Task[];
 }
 
-// The inline "ℹ" affordance on a task with a description. The note lives in a CSS-driven bubble that
-// reveals on hover and on focus (so a tap, which focuses the button, works on touch too) — no JS state.
+// The inline "ℹ" on a task with a description: its tooltip is the note, wrapped like the running text it is.
+// It shows on hover and while the button has focus — so a tap, which focuses it, works on touch too.
 function TaskInfo({ text }: { text: string }) {
   return (
-    <button type="button" className="task-info" aria-label="Show description">
-      <span aria-hidden="true">i</span>
-      <span className="task-info-bubble" role="tooltip">{text}</span>
-    </button>
+    <Tooltip className="task-info-spot" label={text} wrap>
+      <button type="button" className="task-info" aria-label="Show description">
+        <span aria-hidden="true">i</span>
+      </button>
+    </Tooltip>
   );
 }
 
@@ -188,7 +194,7 @@ function TaskEditForm({ task, cadence, onSave, onCancel }: TaskEditFormProps) {
   }
 
   return (
-    <form className="popover-form" onSubmit={handleSubmit}>
+    <Form className="popover-form" onSubmit={handleSubmit}>
       <label className="field">
         <span className="field-label">Name</span>
         <input
@@ -258,7 +264,7 @@ function TaskEditForm({ task, cadence, onSave, onCancel }: TaskEditFormProps) {
         </button>
         <button type="submit">Save</button>
       </div>
-    </form>
+    </Form>
   );
 }
 
@@ -268,7 +274,7 @@ function ticked(task: Task): Task {
   return { ...task, ...b.patchForLevel(task, b.boxes(task)) };
 }
 
-function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, pointsHidden, onSetLevel, onRemove, onEdit, onDuplicate, prune, onSetPruned, status, pieces, onMakeOwn, modifiers, lines, reroll, onIce, freeze, showAge }: TaskItemProps) {
+function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, pointsHidden, onSetLevel, onRemove, onEdit, onDuplicate, prune, onSetPruned, status, pieces, onMakeOwn, modifiers, lines, reroll, onIce, freeze, showAge, priority }: TaskItemProps) {
   const b = behaviorOf(task);
   const { now, settings, openDay } = useBoardClock();
   // A scheduled box shows a lock until its time arrives — but only on checkbox tasks (the gate is
@@ -299,6 +305,11 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
   // "finale" when its last piece finished it: the longer exit that plays the tick back up to its box.
   const [retiring, setRetiring] = useState<false | "tick" | "finale">(false);
   const shownDone = task.done || !!retiring;
+  // Its priority's colour (none for one that isn't coloured on its row): on its box, and — while it's still
+  // to do — on its name.
+  const ink = priority ? priorityInk(task) : undefined;
+  const boxColor = ink ?? color;
+  const nameInk = ink && !shownDone ? { color: ink } : undefined;
   // Break down: the pieces it holds — every one shown ticked while its finale plays, since the leaving row's
   // last props are from before the last tick (the one just ticked paid at its modifiers now) — and whether the
   // type-a-piece entry is open under it.
@@ -420,6 +431,8 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
     : task.parentId
       ? pieceStatusActions(task, () => pickStatus("blocked"), () => rowStatus.onSet("backlog"))
       : statusActions(task, pickStatus, () => pickStatus("blocked"), losesBonus);
+  // How much it matters — its own captioned set, beside Status.
+  const priorityChoices = priority ? priorityActions(task, priority.onSet) : [];
   // A Bounty still to win can be rerolled from its menu, saying what that spends.
   const rerollActions: RowAction[] = reroll
     ? [{ key: "reroll", label: reroll.label, icon: RerollIcon, shortcut: "r", warning: `${reroll.left} reroll${reroll.left === 1 ? "" : "s"} left`, onSelect: reroll.onReroll }]
@@ -448,7 +461,7 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
     : [
         [editAction(() => setEditOpen(true))],
         rerollActions,
-        [...pieceActions, ...statusChoices],
+        [...pieceActions, ...statusChoices, ...priorityChoices],
         freezeActions,
         pruneActions,
         [{ key: "duplicate", label: "Duplicate", icon: CopyIcon, shortcut: "d", onSelect: onDuplicate }],
@@ -549,10 +562,10 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
   // cell so it doesn't take its own subgrid column. Shown only when the tab's Display toggle is on.
   const estBadge =
     showEstimate && task.estimateMinutes != null ? (
-      <span className="task-est" title="Estimated time">
+      <Tooltip className="task-est" label="Estimated time">
         <HourglassIcon size={11} />
         {formatMinutes(task.estimateMinutes)}
-      </span>
+      </Tooltip>
     ) : null;
 
   // The timer footer — a full-width second grid row, shown on any task when the tab's Timer
@@ -619,7 +632,7 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
     const atMax = task.count != null && count >= task.count;
     return (
       <ItemRow {...rowProps} className={`task-item${rowMods}`}>
-        <div className="checkbox-cell counter-cell" style={{ "--task-color": color } as React.CSSProperties}>
+        <div className="checkbox-cell counter-cell" style={{ "--task-color": boxColor } as React.CSSProperties}>
           <button
             type="button"
             className={`counter-box${count > 0 ? " filled" : ""}${atMax ? " maxed" : ""}`}
@@ -650,7 +663,7 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitInline(); } else if (e.key === "Escape") { e.preventDefault(); cancelInline(); } }}
             />
           ) : (
-            <span className="task-text" onDoubleClick={startInline}>{task.text}{task.description && <TaskInfo text={task.description} />}{estBadge}{modifierTags}{ageChip}{prunedNote}{statusNote}</span>
+            <span className="task-text" style={nameInk} onDoubleClick={startInline}>{task.text}{task.description && <TaskInfo text={task.description} />}{estBadge}{modifierTags}{ageChip}{prunedNote}{statusNote}</span>
           )}
           {modifierLines}
         </div>
@@ -672,20 +685,19 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
     const done = task.count != null && b.isDone(task);
     return (
       <ItemRow {...rowProps} className={`task-item${done ? " done" : ""}${rowMods}`}>
-        <div className="tier-dots" style={{ "--task-color": color } as React.CSSProperties}>
+        <div className="tier-dots" style={{ "--task-color": boxColor } as React.CSSProperties}>
           {Array.from({ length: boxes }, (_, i) => {
             const locked = i >= filled && boxLocked(i);
             const tip = boxTip(i, locked);
             const tier = task.tiers?.[i];
-            // Hover bubble shows the tier's estimated time; falls back to its label ("Tier N") when
-            // the tier carries no estimate.
-            const dotLabel = tier?.minutes != null ? formatMinutes(tier.minutes) : tier?.label;
+            // What its tooltip says: a scheduled box's time, or a tier's own — its estimated time, falling
+            // back to its label ("Tier N") when it carries no estimate. A plain box of a count has none.
+            const hint = tip ?? (tier?.minutes != null ? formatMinutes(tier.minutes) : tier?.label);
             // aria-disabled + a click guard (not the `disabled` attribute) so the element still
             // receives hover/focus and its Tooltip shows — and the pick-whip can still hit-test it.
             const dot = (
               <button
                 type="button"
-                data-label={dotLabel}
                 data-box-index={i}
                 className={`tier-dot${i < filled ? " filled" : ""}${locked ? " locked" : ""}`}
                 aria-label={tip ?? `Set box ${i + 1}`}
@@ -695,9 +707,8 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
                 {locked && <span className="box-lock"><LockIcon /></span>}
               </button>
             );
-            // A scheduled box (locked or already open) gets the hover tip; an unscheduled one doesn't.
-            return tip ? (
-              <Tooltip key={i} label={tip}>{dot}</Tooltip>
+            return hint ? (
+              <Tooltip key={i} label={hint}>{dot}</Tooltip>
             ) : (
               <Fragment key={i}>{dot}</Fragment>
             );
@@ -715,7 +726,7 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitInline(); } else if (e.key === "Escape") { e.preventDefault(); cancelInline(); } }}
             />
           ) : (
-            <span className="task-text" onDoubleClick={startInline}>{task.text}{task.description && <TaskInfo text={task.description} />}{estBadge}{modifierTags}{ageChip}{prunedNote}{statusNote}</span>
+            <span className="task-text" style={nameInk} onDoubleClick={startInline}>{task.text}{task.description && <TaskInfo text={task.description} />}{estBadge}{modifierTags}{ageChip}{prunedNote}{statusNote}</span>
           )}
           {modifierLines}
         </div>
@@ -752,8 +763,8 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
           // Scheduled, not-yet-due: locked with a lock badge and an "Unlocks …" tooltip. The Tooltip
           // wrapper carries .checkbox-cell so it stays a single column-1 grid child (subgrid intact).
           return (
-            <Tooltip className="checkbox-cell locked" label={tip ?? ""}>
-              <input type="checkbox" checked={false} disabled readOnly style={{ "--task-color": color } as React.CSSProperties} />
+            <Tooltip className="checkbox-cell locked" label={tip ?? ""} focusable>
+              <input type="checkbox" checked={false} disabled readOnly style={{ "--task-color": boxColor } as React.CSSProperties} />
               <span className="box-lock"><LockIcon /></span>
             </Tooltip>
           );
@@ -768,7 +779,7 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
               setRetiring(b.retiresWhenDone && level >= 1 ? "tick" : false);
               onSetLevel(task, level, pointsOrigin());
             }}
-            style={{ "--task-color": color } as React.CSSProperties}
+            style={{ "--task-color": boxColor } as React.CSSProperties}
           />
         );
         // A scheduled-but-open checkbox still shows "For <time>" on hover so you know what it's for.
@@ -787,7 +798,7 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitInline(); } else if (e.key === "Escape") { e.preventDefault(); cancelInline(); } }}
           />
         ) : (
-          <span className="task-text" onDoubleClick={startInline}>{task.text}{task.description && <TaskInfo text={task.description} />}{estBadge}{modifierTags}{ageChip}{pieceStrip}{prunedNote}{statusNote}</span>
+          <span className="task-text" style={nameInk} onDoubleClick={startInline}>{task.text}{task.description && <TaskInfo text={task.description} />}{estBadge}{modifierTags}{ageChip}{pieceStrip}{prunedNote}{statusNote}</span>
         )}
         {modifierLines}
         {piecesSummary}

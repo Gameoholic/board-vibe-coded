@@ -159,6 +159,7 @@ export default function PointsBuilder({ points, onPointsChange, onBuilderChange,
               step="any"
               placeholder="0"
               required
+              data-missing="Pick a time, or type a %"
               aria-label="Points"
               // As wide as what's typed, and never narrower than a usual % ("3.75"), so typing a shorter one
               // doesn't change what fits on the line.

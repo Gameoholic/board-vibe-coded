@@ -57,6 +57,9 @@ export interface TaskBehavior {
   /** Whether a task of this type can be the weekly Booster: a habit you level up (a tier, a tally), never a
    *  to-do — see booster.ts. */
   readonly boostable: boolean;
+  /** Whether a task of this type takes a priority (see taskPriority.ts): a to-do you choose between, never a
+   *  habit that comes round again by itself. */
+  readonly takesPriority: boolean;
 }
 
 // count>1 ⇒ a row of `progress`-driven boxes; count≤1 ⇒ a plain `done` checkbox. `filled` reads
@@ -86,6 +89,7 @@ const checkbox: TaskBehavior = {
   breaksDown: false,
   eachBoxCompletes: true,
   boostable: false,
+  takesPriority: false,
 };
 
 const tiered: TaskBehavior = {
@@ -107,6 +111,7 @@ const tiered: TaskBehavior = {
   breaksDown: false,
   eachBoxCompletes: false,
   boostable: true,
+  takesPriority: false,
 };
 
 // A single box you tick again and again — the whiteboard tally. Its completion count lives in
@@ -132,14 +137,16 @@ const repeatable: TaskBehavior = {
   breaksDown: false,
   eachBoxCompletes: true,
   boostable: true,
+  takesPriority: false,
 };
 
 // A single "do it once" checkbox — the Tasks tab's kind: check it and it's gone. Scores exactly like
 // a 1-box checkbox (same native toggle); it differs in two ways: no box count or scheduled times
 // (`supportsQuantity: false` — neither means anything for a one-off), and a finished one leaves its
 // list (`retiresWhenDone`) instead of sitting there hatched like a daily task waiting for tomorrow. A
-// one-off that turns out bigger than it looked can be broken down into pieces (`breaksDown`).
-const once: TaskBehavior = { ...checkbox, supportsQuantity: false, retiresWhenDone: true, prunable: false, breaksDown: true };
+// one-off that turns out bigger than it looked can be broken down into pieces (`breaksDown`), and one
+// matters more than another (`takesPriority`).
+const once: TaskBehavior = { ...checkbox, supportsQuantity: false, retiresWhenDone: true, prunable: false, breaksDown: true, takesPriority: true };
 
 const TASK_BEHAVIORS: Record<TaskType, TaskBehavior> = { checkbox, tiered, repeatable, once };
 

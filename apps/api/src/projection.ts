@@ -15,6 +15,7 @@ import {
   canBoost,
   canBounty,
   canBreakDown,
+  canPrioritise,
   canPrune,
   type ClosedPeriod,
   type CompletionRecord,
@@ -64,6 +65,7 @@ import {
   type PeriodStatus,
   type PriceContext,
   priceModifiersOf,
+  priorityOf,
   saleOn,
   rerollSource,
   PIECES_MAX,
@@ -91,6 +93,7 @@ import {
   type Task,
   type TaskEditFields,
   taskPointValue,
+  type TaskPriority,
   type TaskStatus,
   type TaskType,
   type TierDef,
@@ -142,6 +145,7 @@ function taskDefinition(t: Task): Omit<TaskCreated, "type" | "taskId" | "section
     ...(t.count !== undefined ? { count: t.count } : {}),
     ...(t.schedule?.some(Boolean) ? { schedule: t.schedule } : {}),
     ...(t.parentId ? { parentId: t.parentId } : {}),
+    ...(t.priority ? { priority: t.priority } : {}),
   };
 }
 
@@ -622,6 +626,9 @@ export class BoardStore {
       throw badRequest(`section does not allow ${body.type} tasks`);
     }
     this.assertEfforts(body.estimateEffort, body.tiers);
+    if (body.priority !== undefined && !behaviorOfType(body.type).takesPriority) {
+      throw badRequest(`${body.type} tasks don't take a priority`);
+    }
     const event: BoardEvent = {
       type: "TaskCreated",
       taskId: randomUUID(),
@@ -637,6 +644,7 @@ export class BoardStore {
       ...(body.tiers ? { tiers: body.tiers } : {}),
       ...(body.count !== undefined ? { count: body.count } : {}),
       ...(body.schedule?.some(Boolean) ? { schedule: body.schedule } : {}),
+      ...(body.priority !== undefined ? { priority: body.priority } : {}),
     };
     this.commit(event, idempotencyKey);
     return this.readTask(this.requireTask(event.taskId));
@@ -785,6 +793,16 @@ export class BoardStore {
     return this.readTask(this.requireTask(id));
   }
 
+  // Priority: how much a task matters among its tab's tasks — for a task that takes one (canPrioritise).
+  // A definition field, so it's an edit like any other (TaskEdited, with what it was) and a copy keeps it.
+  // Saying again what it already is is a no-op.
+  setPriority(id: string, priority: TaskPriority, idempotencyKey?: string | null): Task {
+    const task = this.requireTask(id);
+    if (!canPrioritise(task)) throw badRequest("this task doesn't take a priority");
+    if (priorityOf(task) === priority) return this.readTask(task);
+    return this.editTask(id, { priority }, idempotencyKey);
+  }
+
   // Prune: skip a task until its tab's current day/week rolls over. Only where canPrune allows (a
   // prunable type in a recurring tab) and while that period is open — it's recorded against it. It
   // changes nothing else: done, progress, points and streak counting all stay exactly as they were.
@@ -903,6 +921,7 @@ export class BoardStore {
     if (changes.tiers !== undefined) previous.tiers = task.tiers;
     if (changes.count !== undefined) previous.count = task.count;
     if (changes.schedule !== undefined) previous.schedule = task.schedule;
+    if (changes.priority !== undefined) previous.priority = priorityOf(task);
     this.commit({ type: "TaskEdited", taskId: id, changes, previous }, idempotencyKey);
     return this.readTask(this.requireTask(id));
   }
@@ -1922,6 +1941,7 @@ export class BoardStore {
           ...(count !== undefined && count > 1 ? { progress: 0 } : {}),
           ...(event.schedule?.some(Boolean) ? { schedule: event.schedule } : {}),
           ...(event.parentId ? { parentId: event.parentId } : {}),
+          ...(event.priority ? { priority: event.priority } : {}),
           // A new task waits in the Backlog from the moment it's made.
           waitMs: 0,
           waitingSince: occurredAt,
@@ -2005,6 +2025,7 @@ export class BoardStore {
           }
           // An all-unscheduled array clears the schedule; otherwise it replaces it wholesale.
           if (c.schedule !== undefined) t.schedule = c.schedule.some(Boolean) ? c.schedule : undefined;
+          if (c.priority !== undefined) t.priority = c.priority;
         });
         // Lowering a box count to what's already ticked finishes the task.
         this.releaseDependents(event.taskId, occurredAt);

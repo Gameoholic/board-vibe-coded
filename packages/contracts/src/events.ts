@@ -10,6 +10,7 @@ import {
   StreakMode,
   StreakSince,
   StreakType,
+  TaskPriority,
   TaskStatus,
   TierDef,
 } from "./domain.js";
@@ -65,6 +66,8 @@ export const TaskEditFields = z.object({
   // Per-box scheduled times (see domain Task.schedule). The full array is sent on edit; the
   // projection normalises an all-unscheduled array back to "no schedule".
   schedule: TaskSchedule.optional(),
+  // Its priority (see domain TaskPriority). `previous` always names one — Low for a task never given one.
+  priority: TaskPriority.optional(),
 });
 export type TaskEditFields = z.infer<typeof TaskEditFields>;
 
@@ -153,6 +156,9 @@ export const BoardEvent = z.discriminatedUnion("type", [
     // A piece born inside a task (Break down, or a copy of a piece): listed under that task, not in its
     // tab. Absent on a task of the tab's own list.
     parentId: z.string().optional(),
+    // Its priority, where it was made with one: picked in the add form, or carried over from the task it was
+    // made from (a copy, a board rebuilt by reset-keep-board). Absent ≡ low.
+    priority: TaskPriority.optional(),
   }),
   // `modifiers` are what the completion was paid at (a Bounty's ×2, its frost, …) — frozen here, with the
   // award they produced, so a Bounty ending or a setting changing later never re-prices it. Absent ≡ none.

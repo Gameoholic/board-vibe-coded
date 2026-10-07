@@ -1,5 +1,6 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import "./AuthGate.css";
+import Form from "./Form";
 
 interface Status {
   configured: boolean;
@@ -62,7 +63,12 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   if (!status.authenticated) {
     return (
       <div className="auth-gate">
-        <form className="auth-gate-card" onSubmit={handleSubmit}>
+        <Form
+          className="auth-gate-card"
+          onSubmit={(e) => {
+            void handleSubmit(e);
+          }}
+        >
           <h1>Board</h1>
           <input
             type="password"
@@ -75,7 +81,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           <button type="submit" className="btn-primary" disabled={submitting || !password}>
             Unlock
           </button>
-        </form>
+        </Form>
       </div>
     );
   }

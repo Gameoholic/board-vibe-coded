@@ -17,6 +17,7 @@ import {
   StreakType,
   StreakView,
   Task,
+  TaskPriority,
   TaskStatus,
   TaskType,
   TEXT_MAX,
@@ -47,6 +48,8 @@ export const CreateTaskBody = z
     count: z.number().int().min(1).max(QTY_MAX).optional(),
     // Optional per-box scheduled times (see domain Task.schedule).
     schedule: TaskSchedule.optional(),
+    // How much it matters, for a type that takes a priority (see canPrioritise); absent ≡ low.
+    priority: TaskPriority.optional(),
   })
   .refine((b) => b.type === "tiered" || b.points !== undefined, {
     message: "non-tiered tasks require points",
@@ -96,6 +99,8 @@ export const PatchTaskBody = z.object({
       taskId: z.string().min(1).optional(),
     })
     .optional(),
+  // How much it matters among its tab's tasks — only for a task that takes one (see canPrioritise).
+  priority: TaskPriority.optional(),
   // Tuck it inside another task as a piece, or (null) take a piece out into its tab's list again.
   parentId: z.string().min(1).nullable().optional(),
   // Freeze it into its tab's Freezer (true), or thaw it back out (false) — see BoardStore.setFrozen.

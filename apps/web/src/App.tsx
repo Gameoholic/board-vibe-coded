@@ -39,12 +39,13 @@ import type { StreakPayload } from "./StreakForm";
 import WindDownOverlay from "./WindDownOverlay";
 import { finishFx, thawFx } from "./freezeFx";
 import { behaviorOf, doneFromPieces, frostFill, frostShare, isRetired, modifiersOf, onWholeTask, payout, releasedFrom, saleOn, statusChange, taskPointValue, wholeWorth } from "./types";
-import type { BoosterHand, BountyReel, BountyStatus, BountyStopped, FormulaPreview, Group, PeriodRecap, PeriodStatus, PointsFormula, Reward, Section, Settings, StreakView, Task, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
+import type { BoosterHand, BountyReel, BountyStatus, BountyStopped, FormulaPreview, Group, PeriodRecap, PeriodStatus, PointsFormula, Reward, Section, Settings, StreakView, Task, TaskPriority, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
 import { BoardClockProvider } from "./useBoardClock";
 import { useLocalConfig } from "./useLocalConfig";
 import { useShop } from "./useShop";
 import { uid } from "./uid";
 import { useSuppressPasswordManagers } from "./useSuppressPasswordManagers";
+import Tooltip from "./Tooltip";
 
 const byOrder = (a: Task, b: Task) => (a.order ?? 0) - (b.order ?? 0);
 // A reel dealt by a win is shown once the win's points have landed, after the counter's count-up (ms).
@@ -515,7 +516,7 @@ function App() {
 
   async function addTask(
     sectionId: string,
-    payload: { type: TaskType; text: string; points?: number; estimate?: string; estimateMinutes?: number; estimateEffort?: string; pointsSource?: "builder" | "manual"; description?: string; tiers?: TierDef[]; count?: number; schedule?: TaskSchedule },
+    payload: { type: TaskType; text: string; points?: number; estimate?: string; estimateMinutes?: number; estimateEffort?: string; pointsSource?: "builder" | "manual"; description?: string; tiers?: TierDef[]; count?: number; schedule?: TaskSchedule; priority?: TaskPriority },
   ) {
     const res = await fetch("/api/tasks", {
       method: "POST",
@@ -835,7 +836,7 @@ function App() {
     fetch(`/api/tasks/${id}`, { method: "DELETE" });
   }
 
-  function editTask(id: string, patch: { text?: string; points?: number; estimateMinutes?: number | null; estimateEffort?: string | null; pointsSource?: "builder" | "manual"; description?: string | null; tiers?: Task["tiers"]; count?: number; progress?: number; schedule?: TaskSchedule }) {
+  function editTask(id: string, patch: { text?: string; points?: number; estimateMinutes?: number | null; estimateEffort?: string | null; pointsSource?: "builder" | "manual"; description?: string | null; tiers?: Task["tiers"]; count?: number; progress?: number; schedule?: TaskSchedule; priority?: TaskPriority }) {
     // Server takes null to clear description/estimate; the local Task shape uses undefined for "none".
     // Only touch a field when the patch carries it (absent = leave as-is).
     const { description: desc, estimateMinutes: est, estimateEffort: eff, ...rest } = patch;
@@ -1051,21 +1052,18 @@ function App() {
           {/* Debug clock is pinned — show a persistent badge (in every view) with the pretend time
               and a one-click exit back to the real/browser clock. Only rendered while pinned. */}
           {debugNow && (
-            <button
-              type="button"
-              className="debug-badge"
-              onClick={() => setDebugClock(null)}
-              title="Exit debug — go back to the real time"
-            >
-              <span className="debug-badge-dot" />
-              Debug time · {today.toLocaleString(undefined, {
-                day: "numeric",
-                month: "short",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-              <span className="debug-badge-exit">Exit</span>
-            </button>
+            <Tooltip label="Back to the real time" position="bottom">
+              <button type="button" className="debug-badge" onClick={() => setDebugClock(null)}>
+                <span className="debug-badge-dot" />
+                Debug time · {today.toLocaleString(undefined, {
+                  day: "numeric",
+                  month: "short",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+                <span className="debug-badge-exit">Exit</span>
+              </button>
+            </Tooltip>
           )}
         </header>
 

@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import { useState } from "react";
 import CardCanvas from "./CardCanvas";
 import { ToolbarGroup } from "./CanvasToolbar";
+import Form from "./Form";
 import { BagIcon, PlusIcon, TagIcon } from "./Icons";
 import { GAME_ITEMS } from "./gameItems";
 import { PALETTE } from "./palette";
@@ -152,7 +153,7 @@ function Inventory({ items }: { items: InventoryItem[] }) {
 function NewTabForm({ onAdd, onCancel }: { onAdd: (name: string) => void; onCancel?: () => void }) {
   const [name, setName] = useState("");
   return (
-    <form
+    <Form
       className="popover-form"
       onSubmit={(e) => {
         e.preventDefault();
@@ -176,7 +177,7 @@ function NewTabForm({ onAdd, onCancel }: { onAdd: (name: string) => void; onCanc
           Add tab
         </button>
       </div>
-    </form>
+    </Form>
   );
 }
 

@@ -1,6 +1,7 @@
 import { formatPercent, POINTS_PER_PERCENT } from "@board/contracts";
 import { useRef, useState } from "react";
 import ConfirmPopover from "./ConfirmPopover";
+import Form from "./Form";
 import { GAME_ITEM_IDS, GAME_ITEMS } from "./gameItems";
 import { BagIcon } from "./Icons";
 import ItemRow, { RowRemove, type RowContext } from "./ItemRow";
@@ -206,7 +207,7 @@ export function RewardForm({
   }
 
   return (
-    <form
+    <Form
       className="popover-form"
       onSubmit={(e) => {
         e.preventDefault();
@@ -288,7 +289,7 @@ export function RewardForm({
           {submitLabel}
         </button>
       </div>
-    </form>
+    </Form>
   );
 }
 

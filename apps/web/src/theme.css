@@ -55,6 +55,11 @@
   --heat-soft: #fff7ed;
   --heat-line: #fed7aa;
 
+  /* A task's priority: High, Medium, Low (taskPriority.ts). */
+  --pri-high: #dc2626;
+  --pri-med: #d97706;
+  --pri-low: #64748b;
+
   /* The modifiers' colours (modifierLooks.ts), and the frost world around them. */
   --mod-bounty: #dc2626;
   --mod-frost: #0284c7;
@@ -95,6 +100,10 @@
   --heat-ink: #fb923c;
   --heat-soft: rgba(249, 115, 22, 0.12);
   --heat-line: rgba(249, 115, 22, 0.4);
+
+  --pri-high: #f87171;
+  --pri-med: #fbbf24;
+  --pri-low: #94a3b8;
 
   --mod-bounty: #f87171;
   --mod-frost: #38bdf8;

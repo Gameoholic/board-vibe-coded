@@ -4,6 +4,7 @@ import ItemRow, { RowRemove, type RowContext } from "./ItemRow";
 import { deleteAction, editAction } from "./rowActions";
 import Popover from "./Popover";
 import StreakForm, { type StreakPayload } from "./StreakForm";
+import Tooltip from "./Tooltip";
 import { useClickOutside } from "./useClickOutside";
 import type { Section, StreakView, Task } from "./types";
 
@@ -46,14 +47,14 @@ function StreakItem({ streak, allTasks, allSections, sectionColor, row, onEdit, 
       {/* Personal-best (longest run ever) — only daily/weekly have a consecutive-run notion. Always
           rendered (empty for a counter) so it keeps its own column, like every other row's fixed-
           position value slot (points-prefix, price pill). */}
-      <span className={`streak-best${hasBest ? "" : " empty"}`} title={hasBest ? "Best run so far" : undefined}>
+      <Tooltip className={`streak-best${hasBest ? "" : " empty"}`} label={hasBest ? "Best run so far" : undefined}>
         {hasBest && (
           <>
             <span className="streak-best-label">best</span>
             {streak.best}
           </>
         )}
-      </span>
+      </Tooltip>
 
       <div className="streak-main">
         <span className="streak-name">{streak.name}</span>
