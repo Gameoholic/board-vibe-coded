@@ -2,17 +2,17 @@ import { formatPercent } from "@board/contracts";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useState, type CSSProperties } from "react";
 import { BoosterDeal } from "./BoosterDeal";
-import { BountyExplain, BountyRoll } from "./BountyRoll";
+import { BountyRolls } from "./BountyRoll";
 import { FlameIcon, SnowflakeIcon } from "./Icons";
 import { tabInk } from "./palette";
 import { dayLabel, labelFor } from "./periodLabels";
-import type { BoosterHand, PeriodRecap, RecapDay, RecapFrost, RecapFrozen, RecapStreak, RecapTab, RolledBounty } from "./types";
+import type { BoosterHand, BountyStatus, BountyStopped, PeriodRecap, RecapDay, RecapFrost, RecapFrozen, RecapStreak, RecapTab } from "./types";
 
 // The recap of a just-closed period, like a mobile game's daily log-in: a week opens on its days, each with
 // what you cleared in every tab (in the tab's colour, with the % it earned), what the day earned and lost,
 // and each purchase; then its streaks from the week's start to its end; then the frost its close banked and
-// the tasks it froze; then the next week's Bounty roll, and its Booster hand to pick from. Pages you flip, so
-// nothing scrolls.
+// the tasks it froze; then the next week's Bounty reel to swing, and its Booster hand to pick from. Pages you
+// flip, so nothing scrolls.
 // A week's takes over the screen as sticky notes on the board (NoteWall); a day's is a floating card over a
 // soft (never fully dark) scrim, in keeping with the no-heavy-modal rule.
 
@@ -43,16 +43,22 @@ const dropStyle = (i: number): CSSProperties =>
 
 type Page = { key: string; label: string };
 
-interface PeriodRecapCardProps {
-  recap: PeriodRecap;
-  onReroll: (taskId: string) => void;
-  // Take a card of the week's Booster hand: the hand with it turned over, or null when the server refused.
+// What the recap's last pages do on the board: roll a Bounty on the spot the week's reel stopped on and reroll
+// one (see BountyRolls), and take a card of its Booster hand — the hand with it turned over, or null when the
+// server refused.
+interface RecapActions {
+  onRollBounty: (spot: number) => Promise<BountyStopped | null>;
+  onRerollBounty: (taskId: string) => Promise<BountyStatus | null>;
   onPickBooster: (card: number) => Promise<BoosterHand | null>;
+}
+
+interface PeriodRecapCardProps extends RecapActions {
+  recap: PeriodRecap;
   onClose: () => void;
 }
 
-export function PeriodRecapCard({ recap, onReroll, onPickBooster, onClose }: PeriodRecapCardProps) {
-  if (recap.kind === "week") return <NoteWall recap={recap} onReroll={onReroll} onPickBooster={onPickBooster} onClose={onClose} />;
+export function PeriodRecapCard({ recap, onClose, ...actions }: PeriodRecapCardProps) {
+  if (recap.kind === "week") return <NoteWall recap={recap} onClose={onClose} {...actions} />;
   return (
     <div className="recap-scrim" onClick={onClose}>
       <motion.div
@@ -63,7 +69,7 @@ export function PeriodRecapCard({ recap, onReroll, onPickBooster, onClose }: Per
         exit={{ opacity: 0, scale: 0.96 }}
         transition={{ type: "spring", stiffness: 380, damping: 30 }}
       >
-        <RecapBody recap={recap} onReroll={onReroll} onPickBooster={onPickBooster} onDone={onClose} />
+        <RecapBody recap={recap} onDone={onClose} {...actions} />
       </motion.div>
     </div>
   );
@@ -72,7 +78,7 @@ export function PeriodRecapCard({ recap, onReroll, onPickBooster, onClose }: Per
 // The week's recap: the board fades back behind a frosted wash and the week is stuck onto it as notes
 // (App holds the board's new week until it's closed, so nothing is given away early). Done peels the notes
 // off and drops them, then it closes and the wash clears.
-function NoteWall({ recap, onReroll, onPickBooster, onClose }: PeriodRecapCardProps) {
+function NoteWall({ recap, onClose, ...actions }: PeriodRecapCardProps) {
   const reduce = useReducedMotion();
   const [leaving, setLeaving] = useState(false);
   const leave = () => {
@@ -84,25 +90,18 @@ function NoteWall({ recap, onReroll, onPickBooster, onClose }: PeriodRecapCardPr
     <div className={`recap-wall${leaving ? " leaving" : ""}`} role="dialog" aria-modal="true" aria-label="Week recap">
       <motion.div className="recap-wash" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.35 }} />
       <motion.div className="recap-screen" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.15 }}>
-        <RecapBody recap={recap} onReroll={onReroll} onPickBooster={onPickBooster} onDone={leave} />
+        <RecapBody recap={recap} onDone={leave} {...actions} />
       </motion.div>
     </div>
   );
 }
 
 // The recap itself, the same in the card and on the wall: its date, the page you're on, and the way through.
-// The Booster's page holds Done back until its pick has landed, so the week's Booster is never skipped.
-function RecapBody({
-  recap,
-  onReroll,
-  onPickBooster,
-  onDone,
-}: {
-  recap: PeriodRecap;
-  onReroll: (taskId: string) => void;
-  onPickBooster: (card: number) => Promise<BoosterHand | null>;
-  onDone: () => void;
-}) {
+// The Bounty's page holds the way on back until its reels have landed, and the Booster's until its pick has,
+// so neither is passed by.
+function RecapBody({ recap, onRollBounty, onRerollBounty, onPickBooster, onDone }: RecapActions & { recap: PeriodRecap; onDone: () => void }) {
+  // How many Bounties the week has as the page is shown: those rolled, and the stops its reel has left.
+  const bounties = (recap.bounty?.bounties.length ?? 0) + (recap.bounty?.reel?.rolls ?? 0);
   const pages: Page[] =
     recap.kind === "week"
       ? [
@@ -110,9 +109,7 @@ function RecapBody({
           ...(recap.streaks.length > 0 ? [{ key: "streaks", label: "Streaks" }] : []),
           ...(recap.frost.length > 0 ? [{ key: "frost", label: "Frost" }] : []),
           ...(recap.frozen.length > 0 ? [{ key: "frozen", label: "Frozen" }] : []),
-          ...(recap.bounties.length > 0 || recap.bountyEmpty
-            ? [{ key: "bounty", label: recap.bounties.length > 1 ? "Bounties" : "Bounty" }]
-            : []),
+          ...(bounties > 0 || recap.bountyEmpty ? [{ key: "bounty", label: bounties > 1 ? "Bounties" : "Bounty" }] : []),
           ...(recap.booster ? [{ key: "booster", label: recap.booster.picks > 1 ? "Boosters" : "Booster" }] : []),
         ]
       : [{ key: "day", label: "Your day" }];
@@ -124,8 +121,9 @@ function RecapBody({
   };
   const current = pages[page];
   const last = page === pages.length - 1;
+  const [bountyLanded, setBountyLanded] = useState(!recap.bounty?.reel);
   const [boosterLanded, setBoosterLanded] = useState(false);
-  const picking = current.key === "booster" && !boosterLanded;
+  const waiting = (current.key === "bounty" && !bountyLanded) || (current.key === "booster" && !boosterLanded);
 
   return (
     <>
@@ -152,7 +150,11 @@ function RecapBody({
             {current.key === "frost" && <FrostPage frost={recap.frost} />}
             {current.key === "frozen" && <FrozenPage frozen={recap.frozen} />}
             {current.key === "bounty" &&
-              (recap.bounties.length > 0 ? <BountiesPage bounties={recap.bounties} onReroll={onReroll} /> : <NoBountyPage />)}
+              (recap.bounty && bounties > 0 ? (
+                <BountiesPage status={recap.bounty} onRoll={onRollBounty} onReroll={onRerollBounty} onLandedChange={setBountyLanded} />
+              ) : (
+                <NoBountyPage />
+              ))}
             {current.key === "booster" && recap.booster && (
               <BoosterPage hand={recap.booster} onPick={onPickBooster} onLanded={() => setBoosterLanded(true)} />
             )}
@@ -182,11 +184,11 @@ function RecapBody({
             </button>
           )}
           {last ? (
-            <button type="button" className="btn-primary" disabled={picking} onClick={onDone}>
+            <button type="button" className="btn-primary" disabled={waiting} onClick={onDone}>
               Done
             </button>
           ) : (
-            <button type="button" className="btn-primary" onClick={() => go(page + 1)}>
+            <button type="button" className="btn-primary" disabled={waiting} onClick={() => go(page + 1)}>
               Next
             </button>
           )}
@@ -420,27 +422,23 @@ function BoosterPage({ hand, onPick, onLanded }: { hand: BoosterHand; onPick: (c
   );
 }
 
-// The new week's Bounties, each on its own reel — one after another, each spinning once the last has
-// landed — then what a Bounty means.
-function BountiesPage({ bounties, onReroll }: { bounties: RolledBounty[]; onReroll: (taskId: string) => void }) {
-  const [landed, setLanded] = useState(0);
+// The new week's Bounties, each on its own reel to swing, then what a Bounty means.
+function BountiesPage({
+  status,
+  onRoll,
+  onReroll,
+  onLandedChange,
+}: {
+  status: BountyStatus;
+  onRoll: (spot: number) => Promise<BountyStopped | null>;
+  onReroll: (taskId: string) => Promise<BountyStatus | null>;
+  onLandedChange: (landed: boolean) => void;
+}) {
+  const several = status.bounties.length + (status.reel?.rolls ?? 0) > 1;
   return (
     <div className="bounty-page">
-      <div className="bounty-page-head">{bounties.length > 1 ? "This week's Bounties" : "This week's Bounty"}</div>
-      {bounties.map((bounty, i) => (
-        // Keyed by the task it landed on, so a reroll spins the reel again.
-        <div key={bounty.taskId} className="recap-drop" style={dropStyle(i)}>
-          <BountyRoll
-            bounty={bounty}
-            spin={i <= landed}
-            onLanded={() => setLanded((n) => Math.max(n, i + 1))}
-            onReroll={() => onReroll(bounty.taskId)}
-          />
-        </div>
-      ))}
-      <div className="recap-drop" style={dropStyle(bounties.length)}>
-        <BountyExplain multiplier={bounties[0].multiplier} several={bounties.length > 1} shown={landed >= bounties.length} />
-      </div>
+      <div className="bounty-page-head">{several ? "This week's Bounties" : "This week's Bounty"}</div>
+      <BountyRolls status={status} onRoll={onRoll} onReroll={onReroll} onLandedChange={onLandedChange} slotClassName="recap-drop" slotStyle={dropStyle} />
     </div>
   );
 }

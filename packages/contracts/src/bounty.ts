@@ -1,12 +1,18 @@
+import { shuffled } from "./booster.js";
 import type { Section, Task } from "./domain.js";
 import { waitDays } from "./freezer.js";
 import { behaviorOf } from "./taskKinds.js";
 
-// The weekly Bounty: every week close rolls tasks from the Freezer (as many as Settings allow at once), each
-// worth a multiplier until the next close. A Bounty stays frozen until the owner thaws it. The roll is the
-// server's — its result is recorded (BountyRolled) and a rebuild replays it, never rolls again. These are
-// the shared rules: what may be rolled, how likely, and which rerolls a reroll spends. What a Bounty pays is
-// a modifier (modifiers.ts).
+// The weekly Bounty: every week close deals a reel of the Freezer's tasks, and the owner swings it — the spot it
+// stops on is a Bounty (as many as Settings allow at once), worth a multiplier until the next close. A Bounty
+// stays frozen until the owner thaws it. The reel is the server's and recorded (BountyReelDealt) with which
+// spot holds which task before any stop, so a stop is a real draw; a rebuild replays it and never deals again.
+// These are the shared rules: what may be rolled, how likely, and which rerolls a reroll spends. What a Bounty
+// pays is a modifier (modifiers.ts).
+
+/** The most spots a reel holds. A fuller Freezer's is cut to a random handful of its spots — each as likely to
+ *  make the cut as any other, so a task's chance stays its share of them. */
+export const BOUNTY_REEL_MAX = 48;
 
 /** Whether `task` may be the Bounty: an open task of a type that's done once, in a Freezer — what's being
  *  avoided — and not a piece (a broken-down task's pieces share its Bounty). */
@@ -21,15 +27,12 @@ export function bountyWeight(task: Pick<Task, "waitMs" | "waitingSince">, now: s
   return 1 + Math.floor(waitDays(task, now) / 7);
 }
 
-/** A weighted pick: `r` in [0, 1) — the caller's randomness — lands on one candidate; null with none. */
-export function pickWeighted<T>(candidates: T[], weight: (c: T) => number, r: number): T | null {
-  const total = candidates.reduce((sum, c) => sum + weight(c), 0);
-  let at = r * total;
-  for (const c of candidates) {
-    at -= weight(c);
-    if (at < 0) return c;
-  }
-  return candidates.at(-1) ?? null;
+/** A reel of `candidates`: each on as many spots as its weight — every spot is as likely to be stopped on as
+ *  any other, so that's its chance — in a random order drawn with `random` (the caller's randomness, so the
+ *  server's reel is recorded and a test's is fixed). */
+export function bountyReel<T>(candidates: readonly T[], weight: (c: T) => number, random: () => number): T[] {
+  const spots = candidates.flatMap((c) => Array.from({ length: weight(c) }, () => c));
+  return shuffled(spots, random).slice(0, BOUNTY_REEL_MAX);
 }
 
 /** Which rerolls a reroll spends: the week's free ones first (they're gone when the week closes), then

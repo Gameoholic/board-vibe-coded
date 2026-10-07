@@ -28,9 +28,10 @@ interface AgeChipProps {
 
 export default function AgeChip({ task, onIce, freezes }: AgeChipProps) {
   const { now, settings } = useBoardClock();
-  // The row's hover pill (Status) sits over the end of the name's line — where this chip is — and would take
-  // the pointer first. So the row is told (`age-peek`) while the pointer is over the chip's own spot: the pill
-  // steps aside and the chip's details show. Measured on the row's pointer moves, since the pill is on top.
+  // The row's hover pill (Status) sits over the end of the name's line — where this chip can be. The pill wins
+  // where the two overlap (its buttons are what you click); over the rest of the chip the row is told
+  // (`age-peek`), the pill steps aside and the chip's details show. Measured on the row's pointer moves, since
+  // the pill is on top.
   const ref = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     const chip = ref.current;
@@ -40,10 +41,11 @@ export default function AgeChip({ task, onIce, freezes }: AgeChipProps) {
       row.classList.toggle("age-peek", on);
       chip.classList.toggle("peek", on);
     };
-    const onMove = (e: PointerEvent) => {
-      const r = chip.getBoundingClientRect();
-      peek(e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom);
+    const over = (el: Element | null, e: PointerEvent) => {
+      const r = el?.getBoundingClientRect();
+      return !!r && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
     };
+    const onMove = (e: PointerEvent) => peek(over(chip, e) && !over(row.querySelector(":scope > .status-pill"), e));
     const onLeave = () => peek(false);
     row.addEventListener("pointermove", onMove);
     row.addEventListener("pointerleave", onLeave);

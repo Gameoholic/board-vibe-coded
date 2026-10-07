@@ -1,4 +1,4 @@
-import { behaviorOf, formatPercent, parsePercent } from "@board/contracts";
+import { behaviorOf, DEFAULT_EFFORT_ID, formatPercent, parsePercent } from "@board/contracts";
 import { useCallback, useMemo, useState } from "react";
 import CanvasCard, { CardAdd, CardTitle, type CardFrame } from "./CanvasCard";
 import ColorPicker from "./ColorPicker";
@@ -6,7 +6,8 @@ import type { MenuPoint } from "./ActionMenu";
 import type { BlockReason } from "./BlockForm";
 import ItemList, { type DropOutside } from "./ItemList";
 import type { RowContext } from "./ItemRow";
-import PointsBuilder, { type BuilderEstimate, TierBuilderRow, type TierRow } from "./PointsBuilder";
+import DescriptionField from "./DescriptionField";
+import PointsBuilder, { type BuilderEstimate, POINTS_FORM_WIDTH, TierBuilderRow, type TierRow } from "./PointsBuilder";
 import Popover from "./Popover";
 import ScheduleEditor, { scheduleFromRows, type Cadence, type ScheduleRow } from "./ScheduleEditor";
 import StatusBand from "./StatusBand";
@@ -35,8 +36,8 @@ import type { AppliedModifier, Group, Section, StreakView, Task, TaskSchedule, T
 
 // The create/edit task payload, in one alias so the schedule field threads through every call site.
 type PointsSource = "builder" | "manual";
-type TaskCreatePayload = { type: TaskType; text: string; points?: number; estimate?: string; estimateMinutes?: number; estimateEffortIndex?: number; pointsSource?: PointsSource; description?: string; tiers?: TierDef[]; count?: number; schedule?: TaskSchedule };
-type TaskEditPayload = { text?: string; points?: number; estimateMinutes?: number | null; estimateEffortIndex?: number | null; pointsSource?: PointsSource; description?: string | null; tiers?: Task["tiers"]; count?: number; schedule?: TaskSchedule };
+type TaskCreatePayload = { type: TaskType; text: string; points?: number; estimate?: string; estimateMinutes?: number; estimateEffort?: string; pointsSource?: PointsSource; description?: string; tiers?: TierDef[]; count?: number; schedule?: TaskSchedule };
+type TaskEditPayload = { text?: string; points?: number; estimateMinutes?: number | null; estimateEffort?: string | null; pointsSource?: PointsSource; description?: string | null; tiers?: Task["tiers"]; count?: number; schedule?: TaskSchedule };
 
 const byOrder = (a: Task, b: Task) => (a.order ?? 0) - (b.order ?? 0);
 
@@ -593,7 +594,7 @@ interface AddTaskPopoverProps {
   onCreate: (payload: TaskCreatePayload) => void;
 }
 
-const EMPTY_EST: BuilderEstimate = { minutes: null, effortIndex: 0, source: "manual" };
+const EMPTY_EST: BuilderEstimate = { minutes: null, effort: DEFAULT_EFFORT_ID, source: "manual" };
 
 const TYPE_LABELS: Record<TaskType, string> = { checkbox: "Checkbox", tiered: "Tiered", repeatable: "Repeatable", once: "One-time" };
 
@@ -602,7 +603,7 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
   const [text, setText] = useState("");
   const [description, setDescription] = useState("");
   const [points, setPoints] = useState("");
-  // Builder report for a checkbox task (minutes/effortIndex/source); minutes null ≡ no duration picked.
+  // Builder report for a checkbox task (minutes/effort/source); minutes null ≡ no duration picked.
   const [checkboxEst, setCheckboxEst] = useState<BuilderEstimate>(EMPTY_EST);
   const [tierRows, setTierRows] = useState<TierRow[]>([{ id: uid(), points: "", est: EMPTY_EST }]);
   // Bumped on reset to remount PointsBuilder and clear its local duration/effort selections.
@@ -668,7 +669,7 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
         // Carry the tier's estimate only when a duration was picked (feeds the tier timer + rebalance);
         // pointsSource records whether that % came from the builder or was overridden.
         const est = tierRows[i].est;
-        const estFields = est.minutes != null ? { minutes: est.minutes, effortIndex: est.effortIndex } : {};
+        const estFields = est.minutes != null ? { minutes: est.minutes, effort: est.effort } : {};
         tiers.push({ label: `Tier ${i + 1}`, points: value, ...estFields, pointsSource: est.source });
       }
       onCreate({ type: "tiered", text: trimmed, tiers, ...withDesc });
@@ -679,7 +680,7 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
       // from the builder (pointsSource) so a later rate/effort change knows what it may rebalance.
       const withEstimate =
         checkboxEst.minutes != null
-          ? { estimateMinutes: checkboxEst.minutes, estimateEffortIndex: checkboxEst.effortIndex }
+          ? { estimateMinutes: checkboxEst.minutes, estimateEffort: checkboxEst.effort }
           : {};
       if (type === "repeatable") {
         // A repeatable task is a single tally box — no box count, no per-box schedule. An optional
@@ -705,38 +706,16 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
     reset();
   }
 
-  const refButton = (
-    <div className="calc-ref-trigger">
-      <button type="button" className="icon-btn calc-ref-btn" aria-label="Points reference">?</button>
-      <div className="calc-ref-tooltip" role="tooltip">
-        <div className="calc-ref-section">
-          <span className="calc-ref-heading">Duration → %</span>
-          <span>5 min → 0.21%</span>
-          <span>15 min → 0.63%</span>
-          <span>30 min → 1.25%</span>
-          <span>1 hr → 2.5%</span>
-          <span>2 hr → 5%</span>
-        </div>
-        <div className="calc-ref-section">
-          <span className="calc-ref-heading">Effort multiplier</span>
-          <span>Normal ×1.0</span>
-          <span>Challenging ×1.5</span>
-        </div>
-      </div>
-    </div>
-  );
-
   return (
     <Popover
       title="Add task"
-      titleExtra={refButton}
       open={open}
       onClose={() => {
         onClose();
         reset();
       }}
       align="left"
-      width={300}
+      width={POINTS_FORM_WIDTH}
       scrollable
     >
       <form className="popover-form" onSubmit={handleSubmit}>
@@ -770,16 +749,31 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
           />
         </label>
 
-        <label className="field">
-          <span className="field-label">Description (optional)</span>
-          <textarea
-            className="field-textarea"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={2}
-            autoComplete="off"
-          />
-        </label>
+        {usesPointsCalc && (
+          <PointsBuilder key={builderKey} points={points} onPointsChange={setPoints} onBuilderChange={setCheckboxEst} />
+        )}
+
+        {type === "tiered" && (
+          <div className="field">
+            <span className="field-label">Tiers</span>
+            <div className="tier-rows">
+              {tierRows.map((row, i) => (
+                <TierBuilderRow
+                  key={row.id}
+                  row={row}
+                  index={i}
+                  canRemove={tierRows.length > 1}
+                  onPointsChange={setTierPoints}
+                  onEstimateChange={setTierEstimate}
+                  onRemove={removeTierRow}
+                />
+              ))}
+            </div>
+            <button type="button" className="ghost-btn form-add-btn" onClick={addTierRow}>
+              + Add tier
+            </button>
+          </div>
+        )}
 
         {type === "checkbox" && (
           <label className="field">
@@ -813,31 +807,8 @@ function AddTaskPopover({ section, open, onClose, onCreate }: AddTaskPopoverProp
           </label>
         )}
 
-        {usesPointsCalc && (
-          <PointsBuilder key={builderKey} points={points} onPointsChange={setPoints} onBuilderChange={setCheckboxEst} />
-        )}
-
-        {type === "tiered" && (
-          <div className="field">
-            <span className="field-label">Tiers</span>
-            <div className="tier-rows">
-              {tierRows.map((row, i) => (
-                <TierBuilderRow
-                  key={row.id}
-                  row={row}
-                  index={i}
-                  canRemove={tierRows.length > 1}
-                  onPointsChange={setTierPoints}
-                  onEstimateChange={setTierEstimate}
-                  onRemove={removeTierRow}
-                />
-              ))}
-            </div>
-            <button type="button" className="ghost-btn add-tier-btn" onClick={addTierRow}>
-              + Add tier
-            </button>
-          </div>
-        )}
+        {/* Keyed like the builder, to fold again once a task is added — under its own name, both being this form's children. */}
+        <DescriptionField key={`description-${builderKey}`} value={description} onChange={setDescription} />
 
         <div className="popover-actions">
           <button type="button" className="ghost-btn" onClick={onClose}>

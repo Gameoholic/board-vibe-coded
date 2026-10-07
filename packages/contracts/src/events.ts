@@ -15,7 +15,7 @@ import {
 } from "./domain.js";
 import { PeriodKindSchema, PeriodSnapshotEntry, Settings, TaskSchedule } from "./period.js";
 import { Points } from "./points.js";
-import { PointsSource } from "./pointsFormula.js";
+import { EffortId, PointsSource } from "./pointsFormula.js";
 
 // The append-only event log is the sole source of truth; current state is a projection folded from
 // these. History is never mutated in place — an edit or a delete is another event, and each scoring
@@ -25,6 +25,11 @@ import { PointsSource } from "./pointsFormula.js";
 // Stored events still carry it, and `BoardEvent.parse` runs on every row on the way out of the DB, so
 // we accept it here and normalise it to "checkbox" on read (like the streak `period → type` alias) —
 // no backfill, the projection sees only current-vocabulary types.
+// A tier as stored. Before effort levels had ids, a tier kept its level's place in the list
+// (`effortIndex`); old tiers still carry it, and the projection resolves it to the level it meant.
+export const StoredTierDef = TierDef.extend({ effortIndex: z.number().int().nonnegative().optional() });
+export type StoredTierDef = z.infer<typeof StoredTierDef>;
+
 const StoredTaskType = z
   .enum(["checkbox", "tiered", "count", "repeatable", "once"])
   .transform((t) => (t === "count" ? ("checkbox" as const) : t));
@@ -46,10 +51,13 @@ export const TaskEditFields = z.object({
   points: Points.optional(),
   estimate: z.string().nullable().optional(),
   estimateMinutes: z.number().nullable().optional(),
+  estimateEffort: EffortId.nullable().optional(),
+  // The pre-id form of estimateEffort (the level's place in the list) — accepted on read and resolved to
+  // estimateEffort in the projection, like `target` below.
   estimateEffortIndex: z.number().int().nullable().optional(),
   pointsSource: PointsSource.optional(),
   description: z.string().nullable().optional(),
-  tiers: z.array(TierDef).optional(),
+  tiers: z.array(StoredTierDef).optional(),
   // The box count. `target` is the pre-merge name — accepted on read and resolved to `count` in the
   // projection (count ?? target), so old TaskEdited events still apply with no migration.
   count: z.number().int().optional(),
@@ -128,10 +136,12 @@ export const BoardEvent = z.discriminatedUnion("type", [
     points: Points.optional(),
     estimate: z.string().optional(),
     estimateMinutes: z.number().optional(),
+    estimateEffort: EffortId.optional(),
+    // The pre-id form of estimateEffort, resolved in the projection (see TaskEditFields).
     estimateEffortIndex: z.number().int().optional(),
     pointsSource: PointsSource.optional(),
     description: z.string().optional(),
-    tiers: z.array(TierDef).optional(),
+    tiers: z.array(StoredTierDef).optional(),
     // Box count. `target` is the pre-merge name, resolved to `count` in the projection (count ?? target).
     count: z.number().int().optional(),
     target: z.number().int().optional(),
@@ -207,17 +217,31 @@ export const BoardEvent = z.discriminatedUnion("type", [
     parentId: z.string().nullable(),
     previousParentId: z.string().nullable(),
   }),
-  // A Bounty for the week `periodKey` — rolled at the week close (as many as may be on at once), when one
-  // is won (Settings' rollOnWin), or rerolled (`reroll`) — the result of the server's roll, recorded so a
-  // rebuild replays it and never rolls again. It's on until that week closes; the multiplier is the
-  // setting's at the time. A reroll `replaces` one of the week's Bounties and spends a reroll from
-  // `rerollFrom`: the week's free ones, else the bought ones banked. (A reroll from before a week could
-  // hold several has neither: it replaced the week's only Bounty, from the free ones.)
+  // A reel for the week `periodKey`'s Bounties: the tasks on its spots, in order — the result of the server's
+  // shuffle (a task on as many spots as its weight), recorded so a rebuild replays it and which spot holds
+  // which task is settled before any stop. It's good for `rolls` stops. Dealt at the week close (as many
+  // stops as Bounties may be on at once), when one is won (Settings' rollOnWin), or for a reroll: that one
+  // `replaces` a Bounty, which stops being one, and spends a reroll from `rerollFrom` — the week's free
+  // ones, else the bought ones banked. A week has one reel at a time: a new one takes the last one's place.
+  z.object({
+    type: z.literal("BountyReelDealt"),
+    periodKey: z.string(),
+    taskIds: z.array(z.string()),
+    rolls: z.number().int().positive(),
+    replaces: z.string().optional(),
+    rerollFrom: z.enum(["week", "bank"]).optional(),
+  }),
+  // A Bounty for the week `periodKey`: the task on the `spot` its reel stopped on, swung by the owner. It's on until
+  // that week closes; the multiplier is the setting's at the time. (Before reels, the server rolled it
+  // itself — no `spot` — and a reroll was this event too: `reroll`, with the Bounty it `replaces` and where
+  // its reroll was spent `rerollFrom`; one from before a week could hold several has neither, and replaced
+  // the week's only Bounty from the free ones. Those still fold as they did.)
   z.object({
     type: z.literal("BountyRolled"),
     taskId: z.string(),
     periodKey: z.string(),
     multiplier: z.number(),
+    spot: z.number().int().nonnegative().optional(),
     reroll: z.boolean().optional(),
     replaces: z.string().optional(),
     rerollFrom: z.enum(["week", "bank"]).optional(),

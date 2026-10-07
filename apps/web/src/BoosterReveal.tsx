@@ -10,11 +10,12 @@ interface BoosterRevealProps {
 }
 
 // This week's Booster hand when a pick was left (the board was reloaded before it was made): dealt again over
-// the board, in a card like the recap's, to pick from. The board reads its tasks back once it's closed.
+// the board, in a card like the recap's, to pick from. It stays up until the pick has landed (its Skip is the
+// quick way through), then Done or a click beside it closes it, and the board reads its tasks back.
 export function BoosterReveal({ hand, onPick, onClose }: BoosterRevealProps) {
   const [landed, setLanded] = useState(false);
   return (
-    <div className="recap-scrim" onClick={onClose}>
+    <div className="recap-scrim" onClick={landed ? onClose : undefined}>
       <motion.div
         className="recap-card booster-reveal"
         role="dialog"

@@ -1,30 +1,29 @@
-import { effortMultOf, parsePercent, pointsFromMinutes } from "@board/contracts";
+import { DEFAULT_EFFORT_ID, effortMultOf, effortRank, formatPercent, parsePercent, pointsFromMinutes } from "@board/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatMinutes, readDuration } from "./duration";
 import { useBoardClock } from "./useBoardClock";
 
-const DURATION_PRESETS = [
-  { label: "<2m", minutes: 2 },
-  { label: "5m", minutes: 5 },
-  { label: "15m", minutes: 15 },
-  { label: "30m", minutes: 30 },
-  { label: "1h", minutes: 60 },
-  { label: "2h", minutes: 120 },
-] as const;
+// How wide a form holding the builder is: room for its sentence on one line ("1h 30m at Normal difficulty =
+// 12.5%"), so it reads as one and typing a % can't push its end to a second line.
+export const POINTS_FORM_WIDTH = 350;
 
-// Seed the custom duration field from an edited task's saved minutes: blank for a preset value (its
-// pill lights instead), else the value in whole hours when it divides evenly, otherwise minutes.
-function seedCustom(mins: number | undefined): { unit: "h" | "m"; text: string } {
-  if (mins == null || DURATION_PRESETS.some((p) => p.minutes === mins)) return { unit: "h", text: "" };
-  if (mins % 60 === 0) return { unit: "h", text: String(mins / 60) };
-  return { unit: "m", text: String(mins) };
+const DURATION_PRESETS = [2, 5, 15, 30, 60, 120] as const;
+const isPreset = (minutes: number | null) => DURATION_PRESETS.some((p) => p === minutes);
+
+// An effort's colour by where it sits on the scale, lightest to hardest — never by its name, which is the
+// owner's to change. Only the builder's own marks wear it: a task's bracket is coloured by modifiers alone.
+const EFFORT_TONES = ["var(--good-text)", "var(--text-2)", "var(--heat-ink)", "var(--danger-text)"];
+function effortTone(rank: number, levels: number): string {
+  const at = levels > 1 ? (Math.max(rank, 0) / (levels - 1)) * (EFFORT_TONES.length - 1) : 1;
+  return EFFORT_TONES[Math.round(at)];
 }
 
-// What the builder reports up: the picked duration (null ≡ none → no estimate), which effort preset it
+// What the builder reports up: the picked duration (null ≡ none → no estimate), which effort level it
 // used, and whether the current % still equals what that duration+effort produces at the live formula
 // ("builder") or was typed to something else ("manual"). The parent stores all three on the task/tier.
 export interface BuilderEstimate {
   minutes: number | null;
-  effortIndex: number;
+  effort: string;
   source: "builder" | "manual";
 }
 
@@ -32,127 +31,204 @@ interface PointsBuilderProps {
   points: string;
   // Must be a stable setter (a useState dispatcher) — it's an effect dependency.
   onPointsChange: (v: string) => void;
-  // Optional: reports {minutes, effortIndex, source} on every change. Must be stable (effect dep).
+  // Optional: reports {minutes, effort, source} on every change. Must be stable (effect dep).
   onBuilderChange?: (info: BuilderEstimate) => void;
   // Optional seed for editing: preselect a builder value's duration/effort so it shows as chosen and
   // is reported as "builder". The initial auto-write is skipped, so seeding never clobbers the parent's
   // existing % (e.g. a manually-overridden one — don't seed those).
   initialMinutes?: number;
-  initialEffortIndex?: number;
+  initialEffort?: string;
+  // What sits above the sentence: the field's label, or a tier's head (TierBuilderRow).
+  heading?: React.ReactNode;
 }
 
-// The Points (%) field plus its assistive Duration + Effort controls. Points is the single source of
-// truth owned by the parent form; picking a duration/effort writes a suggested % into it via the live
-// conversion formula (Settings.pointsFormula — rate + effort presets). The duration/effort selections
-// are local throwaway state — to clear them, remount with a changing `key`.
-export default function PointsBuilder({ points, onPointsChange, onBuilderChange, initialMinutes, initialEffortIndex }: PointsBuilderProps) {
+// A value's points as a sentence — "1h at Ugh difficulty = 3.75%" — each word a chip that opens its choices
+// under the line: the time (presets, or type one: the field is focused as it opens) and the effort (the
+// board's levels, each with its multiplier). Points is the single source of truth owned by the parent form;
+// picking a time or an effort writes the % they come to via the live formula (Settings.pointsFormula), and a
+// % typed over it stays, marked ≠ with the way back under it. The picks are local throwaway state — to
+// clear them, remount with a changing `key`.
+export default function PointsBuilder({ points, onPointsChange, onBuilderChange, initialMinutes, initialEffort, heading }: PointsBuilderProps) {
   const { settings } = useBoardClock();
   const formula = settings.pointsFormula;
-  const [calcMins, setCalcMins] = useState<number | null>(initialMinutes ?? null);
-  const seed = seedCustom(initialMinutes);
-  const [calcUnit, setCalcUnit] = useState<"h" | "m">(seed.unit);
-  const [customDur, setCustomDur] = useState(seed.text);
-  const [effortIndex, setEffortIndex] = useState(initialEffortIndex ?? 0);
+  const [minutes, setMinutes] = useState<number | null>(initialMinutes ?? null);
+  const [effort, setEffort] = useState(initialEffort ?? DEFAULT_EFFORT_ID);
+  const [open, setOpen] = useState<"time" | "effort" | null>(null);
+  // The typed time, as typed. Seeded for an edited task whose time isn't one of the presets.
+  const [typed, setTyped] = useState(initialMinutes != null && !isPreset(initialMinutes) ? formatMinutes(initialMinutes) : "");
+  const typedField = useRef<HTMLInputElement>(null);
 
-  // Write the suggested % whenever a duration/effort is chosen (or the formula changes under them).
-  // Skips the first run so a seeded (edit) builder doesn't overwrite the parent's existing % on mount.
+  const built = minutes === null ? null : pointsFromMinutes(minutes, effortMultOf(formula, effort), formula);
+  const byHand = built !== null && parsePercent(points) !== built;
+
+  // Write the % whenever a time/effort is chosen (or the formula changes under them). Skips the first
+  // run so a seeded (edit) builder doesn't overwrite the parent's existing % on mount.
   const didMount = useRef(false);
   useEffect(() => {
     if (!didMount.current) {
       didMount.current = true;
       return;
     }
-    if (calcMins !== null) {
-      onPointsChange(String(pointsFromMinutes(calcMins, effortMultOf(formula, effortIndex), formula) / 1000));
+    if (minutes !== null) {
+      onPointsChange(String(pointsFromMinutes(minutes, effortMultOf(formula, effort), formula) / 1000));
     }
-  }, [calcMins, effortIndex, formula, onPointsChange]);
+  }, [minutes, effort, formula, onPointsChange]);
 
-  // Report source: "builder" when the current % equals the picked duration+effort's output at the live
-  // formula, else "manual" (a hand-typed %, or no duration). Separate effect so writing points above
-  // and reading it here don't loop.
+  // Report source: "builder" when the current % equals the picked time+effort's output at the live
+  // formula, else "manual" (a hand-typed %, or no time). Separate effect so writing points above and
+  // reading it here don't loop.
   useEffect(() => {
     if (!onBuilderChange) return;
     const source =
-      calcMins !== null &&
-      parsePercent(points) === pointsFromMinutes(calcMins, effortMultOf(formula, effortIndex), formula)
+      minutes !== null && parsePercent(points) === pointsFromMinutes(minutes, effortMultOf(formula, effort), formula)
         ? "builder"
         : "manual";
-    onBuilderChange({ minutes: calcMins === null ? null : Math.round(calcMins), effortIndex, source });
-  }, [points, calcMins, effortIndex, formula, onBuilderChange]);
+    onBuilderChange({ minutes, effort, source });
+  }, [points, minutes, effort, formula, onBuilderChange]);
+
+  // Opening the time goes straight to its field, so a time can be typed at once.
+  useEffect(() => {
+    if (open !== "time") return;
+    typedField.current?.focus();
+    typedField.current?.select();
+  }, [open]);
+
+  const typedRead = readDuration(typed);
+
+  function typeTime(text: string) {
+    setTyped(text);
+    const read = readDuration(text);
+    if (read.minutes !== null) setMinutes(read.minutes);
+    // Emptied or unreadable: the typed time it replaced is gone; a preset picked earlier stays.
+    else if (!isPreset(minutes)) setMinutes(null);
+  }
+
+  function pickPreset(preset: number) {
+    // Picking the chosen preset again clears the time.
+    setMinutes(minutes === preset ? null : preset);
+    setTyped("");
+    setOpen(null);
+  }
+
+  const levels = formula.effortLevels;
+  const level = levels.find((l) => l.id === effort);
+  const tone = (id: string) => ({ "--effort-tone": effortTone(effortRank(formula, id), levels.length) }) as React.CSSProperties;
+  const toggle = (which: "time" | "effort") => setOpen(open === which ? null : which);
 
   return (
-    <>
-      <label className="field">
-        <span className="field-label">Points (%)</span>
-        <input
-          type="number"
-          value={points}
-          onChange={(e) => onPointsChange(e.target.value)}
-          min="0"
-          step="any"
-          placeholder="0"
-          required
-        />
-      </label>
-      <div className="field">
-        <span className="field-label">Duration</span>
-        <div className="calc-pills">
-          {DURATION_PRESETS.map((p) => (
-            <button
-              key={p.label}
-              type="button"
-              className={`calc-pill${calcMins === p.minutes ? " active" : ""}`}
-              onClick={() => setCalcMins(calcMins === p.minutes ? null : p.minutes)}
-            >
-              {p.label}
-            </button>
-          ))}
-          <label className="calc-custom-wrap">
+    <div
+      className="field points-builder"
+      onKeyDown={(e) => {
+        // Esc closes the open choices, not the whole form.
+        if (e.key === "Escape" && open) {
+          e.stopPropagation();
+          setOpen(null);
+        }
+      }}
+    >
+      {heading ?? <span className="field-label">Points</span>}
+      <div className={`points-sentence${byHand ? " by-hand" : ""}`}>
+        <button
+          type="button"
+          className={`sentence-chip${minutes === null ? " empty" : ""}${open === "time" ? " open" : ""}`}
+          aria-expanded={open === "time"}
+          onClick={() => toggle("time")}
+        >
+          {minutes === null ? "Time" : formatMinutes(minutes)}
+        </button>
+        <span className="sentence-word">at</span>
+        <button
+          type="button"
+          className={`sentence-chip${open === "effort" ? " open" : ""}`}
+          style={tone(effort)}
+          aria-expanded={open === "effort"}
+          onClick={() => toggle("effort")}
+        >
+          <i className="effort-dot" />
+          {level?.label ?? "Effort"}
+        </button>
+        <span className="sentence-word">difficulty</span>
+        <span className="sentence-result">
+          <span className="sentence-word sentence-sign">{byHand ? "≠" : "="}</span>
+          <label className="sentence-value">
             <input
               type="number"
-              className="calc-custom-mins"
-              min={calcUnit === "h" ? "0.1" : "2"}
+              value={points}
+              onChange={(e) => onPointsChange(e.target.value)}
+              min="0"
               step="any"
               placeholder="0"
-              value={customDur}
-              onChange={(e) => {
-                setCustomDur(e.target.value);
-                const mins = calcUnit === "h" ? Number(e.target.value) * 60 : Number(e.target.value);
-                if (mins >= 2) setCalcMins(mins);
-              }}
+              required
+              aria-label="Points"
+              // As wide as what's typed, and never narrower than a usual % ("3.75"), so typing a shorter one
+              // doesn't change what fits on the line.
+              style={{ width: `${Math.max(4, points.length)}ch` }}
             />
+            %
+          </label>
+        </span>
+      </div>
+
+      {open === "time" && (
+        <div className="sentence-choices">
+          {DURATION_PRESETS.map((preset) => (
             <button
+              key={preset}
               type="button"
-              className="calc-custom-unit"
-              aria-label={`Switch unit (currently ${calcUnit === "h" ? "hours" : "minutes"})`}
+              className={`calc-pill${minutes === preset ? " active" : ""}`}
+              onClick={() => pickPreset(preset)}
+            >
+              {formatMinutes(preset)}
+            </button>
+          ))}
+          <input
+            ref={typedField}
+            type="text"
+            className={`typed-time${minutes !== null && !isPreset(minutes) ? " active" : ""}${typedRead.error ? " invalid" : ""}`}
+            value={typed}
+            placeholder="Other"
+            aria-label="Other time"
+            aria-invalid={!!typedRead.error}
+            autoComplete="off"
+            onChange={(e) => typeTime(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter is "done with the time", not "submit the form".
+              if (e.key === "Enter") {
+                e.preventDefault();
+                setOpen(null);
+              }
+            }}
+          />
+          {typedRead.error && <span className="typed-time-error">{typedRead.error}</span>}
+        </div>
+      )}
+
+      {open === "effort" && (
+        <div className="sentence-choices effort-choices">
+          {levels.map((l) => (
+            <button
+              key={l.id}
+              type="button"
+              className={`effort-choice${effort === l.id ? " on" : ""}`}
+              style={tone(l.id)}
               onClick={() => {
-                const next = calcUnit === "h" ? "m" : "h";
-                setCalcUnit(next);
-                const mins = next === "h" ? Number(customDur) * 60 : Number(customDur);
-                if (mins >= 2) setCalcMins(mins);
+                setEffort(l.id);
+                setOpen(null);
               }}
             >
-              {calcUnit}
-            </button>
-          </label>
-        </div>
-      </div>
-      <div className="field">
-        <span className="field-label">Effort</span>
-        <div className="calc-pills">
-          {formula.effortLevels.map((e, i) => (
-            <button
-              key={e.label}
-              type="button"
-              className={`calc-pill${effortIndex === i ? " active" : ""}`}
-              onClick={() => setEffortIndex(i)}
-            >
-              {e.label}
+              <span className="effort-choice-name">{l.label}</span>
+              <span className="effort-choice-mult">×{l.mult}</span>
             </button>
           ))}
         </div>
-      </div>
-    </>
+      )}
+
+      {byHand && built !== null && (
+        <button type="button" className="ghost-btn or-use-btn" onClick={() => onPointsChange(String(built / 1000))}>
+          Or use {formatPercent(built)}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -174,12 +250,12 @@ interface TierBuilderRowProps {
   canRemove?: boolean;
   // Edit form: the tier's saved duration/effort, preselected in its builder (see PointsBuilder).
   initialMinutes?: number;
-  initialEffortIndex?: number;
+  initialEffort?: string;
 }
 
-// One tier's builder — the same PointsBuilder (Points % + Duration + Effort) a checkbox task gets, under
-// a "Tier N" head — shared by the add and edit forms. Its own component so its callbacks are stable per
-// row (the builder treats them as effect dependencies) and each tier's duration/effort stays its own.
+// One tier's builder — the same PointsBuilder sentence a checkbox task gets, under a "Tier N" head —
+// shared by the add and edit forms. Its own component so its callbacks are stable per row (the builder
+// treats them as effect dependencies) and each tier's duration/effort stays its own.
 export function TierBuilderRow({
   row,
   index,
@@ -188,26 +264,28 @@ export function TierBuilderRow({
   onRemove,
   canRemove = true,
   initialMinutes,
-  initialEffortIndex,
+  initialEffort,
 }: TierBuilderRowProps) {
   const handlePoints = useCallback((v: string) => onPointsChange(row.id, v), [row.id, onPointsChange]);
   const handleBuilder = useCallback((est: BuilderEstimate) => onEstimateChange(row.id, est), [row.id, onEstimateChange]);
   return (
     <div className="tier-builder-row">
-      <div className="tier-builder-head">
-        <span className="tier-row-label">Tier {index + 1}</span>
-        {onRemove && (
-          <button type="button" className="icon-btn" aria-label="Remove tier" onClick={() => onRemove(row.id)} disabled={!canRemove}>
-            ✕
-          </button>
-        )}
-      </div>
       <PointsBuilder
         points={row.points}
         onPointsChange={handlePoints}
         onBuilderChange={handleBuilder}
         initialMinutes={initialMinutes}
-        initialEffortIndex={initialEffortIndex}
+        initialEffort={initialEffort}
+        heading={
+          <div className="tier-builder-head">
+            <span className="tier-row-label">Tier {index + 1}</span>
+            {onRemove && (
+              <button type="button" className="icon-btn" aria-label="Remove tier" onClick={() => onRemove(row.id)} disabled={!canRemove}>
+                ✕
+              </button>
+            )}
+          </div>
+        }
       />
     </div>
   );

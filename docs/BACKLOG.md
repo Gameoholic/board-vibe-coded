@@ -61,6 +61,7 @@ Ideas from a much larger earlier vision of this product. None is built; each is 
 
 ## Loose ideas
 
+- **Points builder — other looks** (not built): the builder is now the Sentence the owner picked (variant B of https://claude.ai/artifact/7wDW7jZPdoapTBu5QJuHov — see `PRODUCT.md` "Points"). Still on that page if wanted later: C, the same sentence with effort *cards* (a line and a price each) in place of the multiplier choices.
 - **Live tab icon** (owner-approved, not built yet): the tab icon fills from the bottom as today's points come in, with the points that fill it to the top set in Settings.
 - **More items** (the owner asked for ideas; each would be one entry in the shop's item registry — see ARCHITECTURE "Shop"):
   - **Extra Bounty** — roll one more Bounty this week (another ×2 target).

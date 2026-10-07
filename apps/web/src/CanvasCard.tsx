@@ -1,5 +1,5 @@
 import { animate, motion, useMotionValue } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MIN_H, MIN_W, snap } from "./canvas";
 import Popover from "./Popover";
 import { useCanvasScale } from "./useCanvasScale";
@@ -10,6 +10,8 @@ import type { CardLayout } from "./useLocalConfig";
 // The shared base of every tab on every canvas (the board's task/streak tabs, the shop's tabs): a
 // freely-placed card you move by its header handle, resize from any corner, and bring to front by
 // touching. It knows nothing about what it lists — the tab kind fills the header, body and footer.
+// A card fits what it lists until it's resized; from then on it keeps the size it was given, down to
+// just its header, and its list scrolls inside it when it's taller.
 
 // Everything a card needs from its canvas to be placed: its saved (or default) layout, the canvas's
 // "reset positions" signal, and where to persist a move/resize. Handed to each card by CardCanvas.
@@ -70,6 +72,12 @@ function CanvasCard({ frame, title, actions, footer, children, className }: Canv
     animate(h, l.h, settle);
   }, [resetSignal, x, y, w, h]);
 
+  const fixed = layout.fixed === true;
+  const cardRef = useRef<HTMLElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const overflows = useOverflows(bodyRef, contentRef, fixed);
+
   function bringToFront() {
     onLayoutChange({ ...layoutRef.current, z: ++zCounter });
   }
@@ -80,16 +88,16 @@ function CanvasCard({ frame, title, actions, footer, children, className }: Canv
     if (layoutRef.current.z < zCounter) bringToFront();
   }
 
-  function commit() {
-    // Snap every dimension to the grid, spring to it, and persist. The spring runs on the same
-    // motion values the drag was writing, so there's no jump between "let go" and "settled".
-    // With snapping off (settings) the card just lands exactly where it was dropped (rounded to
-    // whole px), so free placement and grid placement share one commit path.
-    const put = (n: number) => (settings.snap ? snap(n, settings.gridSize) : Math.round(n));
+  // Persist where the card now is, settling on whole px. A move snaps its position to the grid (canvas
+  // settings) and springs there — on the same motion values the drag was writing, so there's no jump
+  // between "let go" and "settled"; with snapping off it lands exactly where it was dropped. A resize
+  // doesn't snap: its edges stay exactly where the pointer left them.
+  function commit(snapToGrid: boolean) {
+    const put = (n: number) => (snapToGrid && settings.snap ? snap(n, settings.gridSize) : Math.round(n));
     const nx = put(x.get());
     const ny = put(y.get());
-    const nw = Math.max(MIN_W, put(w.get()));
-    const nh = Math.max(MIN_H, put(h.get()));
+    const nw = Math.round(w.get());
+    const nh = Math.round(h.get());
     animate(x, nx, settle);
     animate(y, ny, settle);
     animate(w, nw, settle);
@@ -111,7 +119,7 @@ function CanvasCard({ frame, title, actions, footer, children, className }: Canv
     function onUp() {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      commit();
+      commit(true);
     }
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -127,11 +135,34 @@ function CanvasCard({ frame, title, actions, footer, children, className }: Canv
     const ox = x.get();
     const oy = y.get();
     const ow = w.get();
-    const oh = h.get();
-    bringToFront();
+    // A card that still fits its list may be taller than its floor: the drag starts from the height it shows,
+    // which is the height it keeps from now on.
+    const oh = fixed ? h.get() : (cardRef.current?.offsetHeight ?? h.get());
+    h.set(oh);
+    // Into the ref at once too, so a release before the next render still commits it as sized.
+    layoutRef.current = { ...layoutRef.current, z: ++zCounter, h: oh, fixed: true };
+    onLayoutChange(layoutRef.current);
+    // Shrinking past where the list fits takes Shift; without it the card stops there (or where it started, if
+    // it was already shorter). The fit is the list's top, the list, then the card's bottom padding and border —
+    // never the room a taller card leaves empty under its list — read each time, since a narrower card's rows
+    // can wrap taller.
+    const minH = (shift: boolean) => {
+      const card = cardRef.current;
+      const body = bodyRef.current;
+      const content = contentRef.current;
+      if (shift || !card || !body || !content) return MIN_H;
+      const style = getComputedStyle(card);
+      const fit = card.clientTop + body.offsetTop + content.offsetHeight + parseFloat(style.paddingBottom) + parseFloat(style.borderBottomWidth);
+      return Math.max(MIN_H, Math.min(oh, fit));
+    };
+    // How far from the edges it moves the pointer took hold (the grab area reaches past the corner): the edges
+    // go to the pointer on the first move and stay under it.
+    const rect = cardRef.current?.getBoundingClientRect();
+    const gx = rect ? (sx - (xSign === 1 ? rect.right : rect.left)) / scaleRef.current : 0;
+    const gy = rect ? (sy - (ySign === 1 ? rect.bottom : rect.top)) / scaleRef.current : 0;
     function onMove(ev: PointerEvent) {
-      const dx = (ev.clientX - sx) / scaleRef.current;
-      const dy = (ev.clientY - sy) / scaleRef.current;
+      const dx = (ev.clientX - sx) / scaleRef.current + gx;
+      const dy = (ev.clientY - sy) / scaleRef.current + gy;
       if (xSign === 1) {
         w.set(Math.max(MIN_W, ow + dx));
       } else {
@@ -139,10 +170,11 @@ function CanvasCard({ frame, title, actions, footer, children, className }: Canv
         w.set(nw);
         x.set(ox + (ow - nw));
       }
+      const least = minH(ev.shiftKey);
       if (ySign === 1) {
-        h.set(Math.max(MIN_H, oh + dy));
+        h.set(Math.max(least, oh + dy));
       } else {
-        const nh = Math.max(MIN_H, oh - dy);
+        const nh = Math.max(least, oh - dy);
         h.set(nh);
         y.set(oy + (oh - nh));
       }
@@ -150,7 +182,7 @@ function CanvasCard({ frame, title, actions, footer, children, className }: Canv
     function onUp() {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      commit();
+      commit(false);
     }
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -158,8 +190,10 @@ function CanvasCard({ frame, title, actions, footer, children, className }: Canv
 
   return (
     <motion.section
+      ref={cardRef}
       className={`board-card${className ? ` ${className}` : ""}`}
-      style={{ x, y, width: w, minHeight: h, zIndex: layout.z }}
+      // Both sizes are always set, so turning sized can't leave the old floor behind on the element.
+      style={{ x, y, width: w, height: fixed ? h : "auto", minHeight: fixed ? 0 : h, zIndex: layout.z }}
       onPointerDown={focusCard}
       initial={{ opacity: 0, scale: 0.94 }}
       animate={{ opacity: 1, scale: 1 }}
@@ -181,10 +215,40 @@ function CanvasCard({ frame, title, actions, footer, children, className }: Canv
         </div>
       </div>
 
-      {children}
-      {footer}
+      {/* layoutScroll: the rows' layout animations measure through this list's scroll. */}
+      <motion.div ref={bodyRef} className={`board-card-body${overflows ? " overflows" : ""}`} layoutScroll>
+        <div ref={contentRef}>
+          {children}
+          {footer}
+        </div>
+      </motion.div>
     </motion.section>
   );
+}
+
+// Whether a sized card's list is taller than the room the card leaves it — only then does it scroll. A list
+// that fits doesn't clip, so a row's hover bubbles can still reach past the list's edges.
+function useOverflows(
+  bodyRef: React.RefObject<HTMLDivElement | null>,
+  contentRef: React.RefObject<HTMLDivElement | null>,
+  fixed: boolean,
+): boolean {
+  const [overflows, setOverflows] = useState(false);
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    const content = contentRef.current;
+    if (!fixed || !body || !content) {
+      setOverflows(false);
+      return;
+    }
+    const check = () => setOverflows(content.offsetHeight > body.clientHeight + 1);
+    const ro = new ResizeObserver(check);
+    ro.observe(body);
+    ro.observe(content);
+    check();
+    return () => ro.disconnect();
+  }, [bodyRef, contentRef, fixed]);
+  return overflows;
 }
 
 // The tab's coloured name, which opens the tab's own popover (the board: its colour; the shop: its

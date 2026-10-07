@@ -6,7 +6,8 @@ import type { CardLayout } from "./useLocalConfig";
 export const GRID = 20; // snap step, in world px — everything lands on this lattice
 export const MARGIN = 220; // slack around the cards you can pan/drop into, in world px
 export const MIN_W = 240;
-export const MIN_H = 160;
+// Just the header: its 26px, its 14px gap and the card's 20px padding above and below — a tab can fold to its title.
+export const MIN_H = 80;
 
 // Zoom range. You can pull well back to see more tasks at once; 1 (native) is the ceiling — this
 // is a whiteboard, so zooming past 1:1 would only magnify, never reveal more. The camera still

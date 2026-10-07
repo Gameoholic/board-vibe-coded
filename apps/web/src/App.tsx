@@ -2,13 +2,13 @@ import {
   BoosterHand as BoosterHandSchema,
   BoosterStatus as BoosterStatusSchema,
   BountyStatus as BountyStatusSchema,
+  BountyStopped as BountyStoppedSchema,
   DebugClockState as DebugClockStateSchema,
   DEFAULT_SETTINGS,
   formatPercent,
   type StatusFields,
   PeriodRecap as PeriodRecapSchema,
   PeriodStatus as PeriodStatusSchema,
-  RolledBounty as RolledBountySchema,
   Group as GroupSchema,
   Section as SectionSchema,
   Settings as SettingsSchema,
@@ -39,7 +39,7 @@ import type { StreakPayload } from "./StreakForm";
 import WindDownOverlay from "./WindDownOverlay";
 import { finishFx, thawFx } from "./freezeFx";
 import { behaviorOf, doneFromPieces, frostFill, frostShare, isRetired, modifiersOf, onWholeTask, payout, releasedFrom, saleOn, statusChange, taskPointValue, wholeWorth } from "./types";
-import type { BoosterHand, BountyStatus, FormulaPreview, Group, PeriodRecap, PeriodStatus, PointsFormula, Reward, RolledBounty, Section, Settings, StreakView, Task, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
+import type { BoosterHand, BountyReel, BountyStatus, BountyStopped, FormulaPreview, Group, PeriodRecap, PeriodStatus, PointsFormula, Reward, Section, Settings, StreakView, Task, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
 import { BoardClockProvider } from "./useBoardClock";
 import { useLocalConfig } from "./useLocalConfig";
 import { useShop } from "./useShop";
@@ -47,7 +47,7 @@ import { uid } from "./uid";
 import { useSuppressPasswordManagers } from "./useSuppressPasswordManagers";
 
 const byOrder = (a: Task, b: Task) => (a.order ?? 0) - (b.order ?? 0);
-// A Bounty rolled by a win is revealed once the win's points have landed, after the counter's count-up (ms).
+// A reel dealt by a win is shown once the win's points have landed, after the counter's count-up (ms).
 const WIN_REVEAL_SETTLE_MS = 700;
 // A Booster hand with a pick still to make (else null).
 const pickLeft = (hand: BoosterHand | null) => (hand && hand.picked.length < hand.picks ? hand : null);
@@ -73,13 +73,13 @@ function App() {
   const [realNow, setRealNow] = useState<string>(() => new Date().toISOString());
   const [status, setStatus] = useState<PeriodStatus | null>(null);
   const [recap, setRecap] = useState<PeriodRecap | null>(null);
-  // The open week's Bounties still to win and the rerolls left: the row menu's Reroll, and what's new once
-  // a win rolls another.
+  // The open week's Bounties still to win, its reel and the rerolls left: the row menu's Reroll.
   const [bountyStatus, setBountyStatus] = useState<BountyStatus | null>(null);
-  // A Bounty rolled mid-week (a win rolled another, or a row's Reroll), revealed on its reel over the board.
-  const [reveal, setReveal] = useState<RolledBounty | null>(null);
-  // One rolled by a win, waiting for that win's celebration to land before it's revealed.
-  const [revealNext, setRevealNext] = useState<RolledBounty | null>(null);
+  // A reel to swing mid-week (a win dealt one for another Bounty, a row's Reroll, or the board was left
+  // before the week's was swung), shown over the board.
+  const [reveal, setReveal] = useState<BountyReel | null>(null);
+  // One dealt by a win, waiting for that win's celebration to land before it's shown.
+  const [revealNext, setRevealNext] = useState<BountyReel | null>(null);
   // This week's Booster hand when a pick is still to be made (the board was left before the recap's pick):
   // dealt again over the board.
   const [boosterLeft, setBoosterLeft] = useState<BoosterHand | null>(null);
@@ -95,8 +95,8 @@ function App() {
   const [flyers, setFlyers] = useState<Flyer[]>([]);
   const counterRef = useRef<PointsCounterHandle>(null);
 
-  // A Bounty rolled by a win is revealed once nothing is flying to the counter any more (and the count-up
-  // has had its moment), so the reveal never cuts the win's own celebration short.
+  // A reel dealt by a win is shown once nothing is flying to the counter any more (and the count-up has had
+  // its moment), so it never cuts the win's own celebration short.
   useEffect(() => {
     if (!revealNext || flyers.length > 0) return;
     const timer = window.setTimeout(() => {
@@ -130,7 +130,9 @@ function App() {
         const clock = DebugClockStateSchema.parse(clockData);
         setDebugNow(clock.now);
         setRealNow(clock.real);
-        setBountyStatus(BountyStatusSchema.parse(bountyData));
+        const bounty = BountyStatusSchema.parse(bountyData);
+        setBountyStatus(bounty);
+        setReveal(bounty.reel);
         takeBoosterStatus(boosterData);
       })
       .finally(() => setLoading(false));
@@ -147,7 +149,9 @@ function App() {
   // Whether to ask if the day has ended. Only the day is ever asked about — its week ends with it (the
   // server's follow-up once the week is over).
   const askDay = !!status?.day.due && !dayDeferred;
-  // A Booster pick left over is dealt once nothing else is up — never before a day that may end its week.
+  // A reel to swing and a Booster pick left over are shown once nothing else is up — never before a day that
+  // may end their week — the reel first, as in the recap.
+  const revealShown = !!reveal && !askDay && !recap;
   const boosterShown = !!boosterLeft && !askDay && !recap && !reveal;
 
   function refreshStatus() {
@@ -186,8 +190,7 @@ function App() {
           setRecap(recaps[0]);
           await closed;
         }
-        // Read back once it's closed: a reroll in the recap may have moved a Bounty since the roll, and a pick
-        // made the Booster.
+        // Read back once it's closed: the recap's reels rolled the week's Bounties, and a pick made the Booster.
         return Promise.all([
           nextStreaks,
           fetch("/api/tasks").then((res) => res.json()),
@@ -197,10 +200,12 @@ function App() {
         ]);
       })
       // The unchecked tasks and the banked points land in the same render, so the counter never dips.
-      .then(([nextStreaks, tasksData, statusData, , boosterData]) => {
+      .then(([nextStreaks, tasksData, statusData, bounty, boosterData]) => {
         setStreaks(nextStreaks);
         setTasks(TaskSchema.array().parse(tasksData));
         setStatus(PeriodStatusSchema.parse(statusData));
+        // A reel the recap left unswung is shown over the board.
+        setReveal(bounty.reel);
         takeBoosterStatus(boosterData);
       });
   }
@@ -226,25 +231,35 @@ function App() {
       });
   }
 
-  // Reroll one of this week's Bounties onto another task; the new one (null when the server refused).
-  function postReroll(taskId: string): Promise<RolledBounty | null> {
+  // Roll a Bounty on the spot this week's reel stopped on; that Bounty, with the week's as they now stand
+  // (null when the server refused).
+  function postBountyRoll(spot: number): Promise<BountyStopped | null> {
+    return fetch("/api/bounty/roll", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ spot }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => (data ? BountyStoppedSchema.parse(data) : null));
+  }
+
+  // Reroll one of this week's Bounties: it's given up, and the week's Bounties come back with its new reel
+  // (null when the server refused).
+  function postReroll(taskId: string): Promise<BountyStatus | null> {
     return fetch("/api/bounty/reroll", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ taskId }),
     })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => (data ? RolledBountySchema.parse(data) : null));
+      .then((data) => (data ? BountyStatusSchema.parse(data) : null));
   }
 
-  // From the recap: that Bounty's reel spins again onto the new one (the board reads it back on close).
-  function rerollInRecap(taskId: string) {
-    postReroll(taskId).then((bounty) => {
-      if (!bounty) return;
-      setRecap((r) =>
-        r ? { ...r, bounties: r.bounties.map((b) => (b.taskId === taskId ? bounty : { ...b, rerollsLeft: bounty.rerollsLeft })) } : r,
-      );
-    });
+  // From the recap: it holds the week's Bounties as a roll or a reroll leaves them, so its page reads right
+  // when it's flipped back to (the board reads them back on close).
+  function inRecap<T extends BountyStatus>(next: T | null): T | null {
+    if (next) setRecap((r) => (r ? { ...r, bounty: next } : r));
+    return next;
   }
 
   // Take a card of this week's Booster hand; the hand with it turned over (null when the server refused).
@@ -300,9 +315,13 @@ function App() {
       });
   }
 
-  // From a Bounty's row (or the reveal's own Reroll): the new one is revealed on its reel.
+  // From a Bounty's row: it's given up, and its new reel is shown over the board to swing.
   function rerollRevealed(taskId: string) {
-    postReroll(taskId).then((bounty) => bounty && setReveal(bounty));
+    postReroll(taskId).then((next) => {
+      if (!next) return;
+      setBountyStatus(next);
+      setReveal(next.reel);
+    });
   }
 
   // The reveal closed: the board reads back its Bounties (the new one stamped, a rerolled one gone).
@@ -312,13 +331,10 @@ function App() {
     refreshBounty();
   }
 
-  // A win that rolled another Bounty (Settings' rollOnWin): the new one waits (revealNext) for the win's
-  // celebration. `known` is what was on before the win.
-  function revealRolledAfterWin(known: Set<string>) {
-    refreshBounty().then((next) => {
-      const rolled = next.bounties.find((b) => !known.has(b.taskId));
-      if (rolled) setRevealNext(rolled);
-    });
+  // A win that dealt a reel for another Bounty (Settings' rollOnWin): it waits (revealNext) for the win's
+  // celebration.
+  function revealRolledAfterWin() {
+    refreshBounty().then((next) => setRevealNext(next.reel));
   }
 
   // A pending points-formula change awaiting the owner's confirm: the new formula + its dry-run preview.
@@ -499,7 +515,7 @@ function App() {
 
   async function addTask(
     sectionId: string,
-    payload: { type: TaskType; text: string; points?: number; estimate?: string; estimateMinutes?: number; estimateEffortIndex?: number; pointsSource?: "builder" | "manual"; description?: string; tiers?: TierDef[]; count?: number; schedule?: TaskSchedule },
+    payload: { type: TaskType; text: string; points?: number; estimate?: string; estimateMinutes?: number; estimateEffort?: string; pointsSource?: "builder" | "manual"; description?: string; tiers?: TierDef[]; count?: number; schedule?: TaskSchedule },
   ) {
     const res = await fetch("/api/tasks", {
       method: "POST",
@@ -773,7 +789,6 @@ function App() {
       return !!was && !!now && !behaviorOf(was).isDone(was) && behaviorOf(now).isDone(now);
     };
     const wonBounty = (!!task.bounty && finished(task.id)) || (!!parent?.bounty && finished(parent.id));
-    const knownBounties = new Set(bountyStatus?.bounties.map((b) => b.taskId));
     fetch(`/api/tasks/${task.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -781,7 +796,7 @@ function App() {
     })
       .then(refreshStreaks) // reconcile linked streak counts once the server has applied the change
       .then(() => {
-        if (wonBounty && settings?.bounty.rollOnWin) revealRolledAfterWin(knownBounties);
+        if (wonBounty && settings?.bounty.rollOnWin) revealRolledAfterWin();
       });
     // What the tick won — the board's total after it, less before: its modifiers and a finished task's
     // own points included. Finishing a broken-down task, or winning a Bounty, is the bigger celebration.
@@ -820,14 +835,14 @@ function App() {
     fetch(`/api/tasks/${id}`, { method: "DELETE" });
   }
 
-  function editTask(id: string, patch: { text?: string; points?: number; estimateMinutes?: number | null; estimateEffortIndex?: number | null; pointsSource?: "builder" | "manual"; description?: string | null; tiers?: Task["tiers"]; count?: number; progress?: number; schedule?: TaskSchedule }) {
+  function editTask(id: string, patch: { text?: string; points?: number; estimateMinutes?: number | null; estimateEffort?: string | null; pointsSource?: "builder" | "manual"; description?: string | null; tiers?: Task["tiers"]; count?: number; progress?: number; schedule?: TaskSchedule }) {
     // Server takes null to clear description/estimate; the local Task shape uses undefined for "none".
     // Only touch a field when the patch carries it (absent = leave as-is).
-    const { description: desc, estimateMinutes: est, estimateEffortIndex: eff, ...rest } = patch;
+    const { description: desc, estimateMinutes: est, estimateEffort: eff, ...rest } = patch;
     const local: Partial<Task> = { ...rest };
     if (desc !== undefined) local.description = desc ?? undefined;
     if (est !== undefined) local.estimateMinutes = est ?? undefined;
-    if (eff !== undefined) local.estimateEffortIndex = eff ?? undefined;
+    if (eff !== undefined) local.estimateEffort = eff ?? undefined;
     // An all-unscheduled array means "no schedule" locally (mirrors the server's normalisation).
     if (Array.isArray(local.schedule) && !local.schedule.some(Boolean)) local.schedule = undefined;
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...local } : t)));
@@ -974,7 +989,7 @@ function App() {
       {/* The HUD floats over the whole screen; while a period prompt or recap overlay is up it would
           sit on top of that focus surface (overlapping the score), so hide it until they're dismissed.
           In shop mode the same counter docks top-centre. */}
-      {view !== "settings" && !askDay && !recap && !reveal && !boosterShown && (
+      {view !== "settings" && !askDay && !recap && !revealShown && !boosterShown && (
         <>
           <PointsCounter ref={counterRef} total={points} docked={shopOpen} />
           <FlyingPoints flyers={flyers} getTarget={counterTarget} onLand={landFlyer} />
@@ -987,12 +1002,15 @@ function App() {
           <PeriodRecapCard
             key={`${recap.kind}-${recap.periodKey}`}
             recap={recap}
-            onReroll={rerollInRecap}
+            onRollBounty={(spot) => postBountyRoll(spot).then(inRecap)}
+            onRerollBounty={(taskId) => postReroll(taskId).then(inRecap)}
             onPickBooster={pickInRecap}
             onClose={closeRecap}
           />
         )}
-        {reveal && <BountyReveal key="reveal" bounty={reveal} onReroll={() => rerollRevealed(reveal.taskId)} onClose={closeReveal} />}
+        {revealShown && reveal && (
+          <BountyReveal key="reveal" reel={reveal} rerollsLeft={bountyStatus?.rerollsLeft ?? 0} onRoll={postBountyRoll} onReroll={postReroll} onClose={closeReveal} />
+        )}
         {boosterShown && boosterLeft && <BoosterReveal key="booster" hand={boosterLeft} onPick={postBoosterPick} onClose={closeBoosterLeft} />}
       </AnimatePresence>
 

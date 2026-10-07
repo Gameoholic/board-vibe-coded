@@ -1,4 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
+import { useRef } from "react";
+import { useAnchoredPanel, useTopLayer } from "./useTopLayer";
 
 interface ConfirmPopoverProps {
   open: boolean;
@@ -12,13 +14,21 @@ interface ConfirmPopoverProps {
   onCancel: () => void;
 }
 
+// A yes/no beside the button that asked it, right-aligned to it, over a backdrop that a click anywhere else
+// cancels on. Both open in the top layer (see useTopLayer), the backdrop first so the panel sits on it.
 function ConfirmPopover({ open, message, confirmLabel = "Delete", danger = true, onConfirm, onCancel }: ConfirmPopoverProps) {
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useTopLayer(backdropRef, open);
+  useAnchoredPanel(panelRef, open, { align: "right" });
   return (
     <AnimatePresence>
       {open && (
         <>
-          <div className="confirm-backdrop" onClick={onCancel} />
+          <div ref={backdropRef} popover="manual" className="confirm-backdrop" onClick={onCancel} />
           <motion.div
+            ref={panelRef}
+            popover="manual"
             className="confirm-popover"
             initial={{ opacity: 0, scale: 0.9, y: -6 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}

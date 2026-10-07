@@ -22,6 +22,7 @@ import {
   RecolorSectionBody,
   ReorderBody,
   type RewardEditFields,
+  RollBountyBody,
   RollPeriodBody,
   type ShopSectionEditFields,
   type StreakEditFields,
@@ -95,7 +96,7 @@ export function buildRouter(store: BoardStore, backups: Backups): Router {
     if (body.points !== undefined) changes.points = body.points;
     if (body.estimate !== undefined) changes.estimate = body.estimate;
     if (body.estimateMinutes !== undefined) changes.estimateMinutes = body.estimateMinutes;
-    if (body.estimateEffortIndex !== undefined) changes.estimateEffortIndex = body.estimateEffortIndex;
+    if (body.estimateEffort !== undefined) changes.estimateEffort = body.estimateEffort;
     if (body.pointsSource !== undefined) changes.pointsSource = body.pointsSource;
     if (body.description !== undefined) changes.description = body.description;
     if (body.tiers !== undefined) changes.tiers = body.tiers;
@@ -304,12 +305,20 @@ export function buildRouter(store: BoardStore, backups: Backups): Router {
     res.json(store.rollPeriod(kind));
   });
 
-  // The open week's Bounties still to win, and the rerolls left.
+  // The open week's Bounties still to win, the rerolls left, and its reel while a Bounty is still to roll.
   router.get("/bounty", (_req, res) => {
     res.json(store.bountyStatus());
   });
 
-  // Reroll one of this week's Bounties onto another task (while rerolls are left). Returns the new one.
+  // Stop the week's reel on one of its spots (while it has stops left). Returns the Bounty it rolled, with
+  // the week's Bounties as they now stand.
+  router.post("/bounty/roll", (req, res) => {
+    const { spot } = RollBountyBody.parse(req.body);
+    res.json(store.rollBounty(spot, idemKey(req, "bounty-roll")));
+  });
+
+  // Reroll one of this week's Bounties (while rerolls are left): it stops being one. Returns the week's
+  // Bounties with the new reel, to stop once.
   router.post("/bounty/reroll", (req, res) => {
     const { taskId } = RerollBountyBody.parse(req.body);
     res.json(store.rerollBounty(taskId, idemKey(req, "bounty-reroll")));

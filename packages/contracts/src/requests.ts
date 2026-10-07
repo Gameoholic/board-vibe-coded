@@ -26,7 +26,7 @@ import {
 import { BackupSettings, BoosterSettings, BountySettings, FreezerSettings, PeriodKindSchema, SaleSettings, TaskSchedule, WindDown } from "./period.js";
 import { PIECES_MAX } from "./pieces.js";
 import { Points } from "./points.js";
-import { PointsFormula, PointsSource } from "./pointsFormula.js";
+import { EffortId, PointsFormula, PointsSource } from "./pointsFormula.js";
 
 // Request bodies, validated at the API trust boundary. Never trust a raw body — every route parses
 // through one of these before the command layer sees it.
@@ -39,7 +39,7 @@ export const CreateTaskBody = z
     points: Points.optional(),
     estimate: z.string().trim().max(ESTIMATE_MAX).optional(),
     estimateMinutes: z.number().nonnegative().max(MINUTES_MAX).optional(),
-    estimateEffortIndex: z.number().int().nonnegative().optional(),
+    estimateEffort: EffortId.optional(),
     pointsSource: PointsSource.optional(),
     description: z.string().trim().max(DESCRIPTION_MAX).optional(),
     tiers: z.array(TierDef).min(1).optional(),
@@ -76,7 +76,7 @@ export const PatchTaskBody = z.object({
   estimate: z.string().trim().max(ESTIMATE_MAX).nullable().optional(),
   // Nullable so a patch can clear the estimate (null → no minutes); absent leaves it untouched.
   estimateMinutes: z.number().nonnegative().max(MINUTES_MAX).nullable().optional(),
-  estimateEffortIndex: z.number().int().nonnegative().nullable().optional(),
+  estimateEffort: EffortId.nullable().optional(),
   pointsSource: PointsSource.optional(),
   // Nullable so a patch can clear it (null → no description); absent leaves it untouched.
   description: z.string().trim().max(DESCRIPTION_MAX).nullable().optional(),
@@ -215,24 +215,41 @@ export type FormulaPreview = z.infer<typeof FormulaPreview>;
 export const RollPeriodBody = z.object({ kind: PeriodKindSchema });
 export type RollPeriodBody = z.infer<typeof RollPeriodBody>;
 
-// A Bounty as its reel shows it (the recap, a reroll, one rolled when another was won): the task it
-// landed on, what it multiplies, the rerolls left (the week's free ones and any bought), and other
-// candidates' names for the reel (display only).
+// A Bounty as a landed reel shows it: the task it landed on, what it multiplies, and other candidates'
+// names to draw around it (display only).
 export const RolledBounty = z.object({
   taskId: z.string(),
   text: z.string(),
   multiplier: z.number(),
-  rerollsLeft: z.number().int().nonnegative(),
   reel: z.array(z.string()),
 });
 export type RolledBounty = z.infer<typeof RolledBounty>;
 
-// The open week's Bounties still to win, and the rerolls left (GET /api/bounty).
+// A week's reel while it has stops left: the task names on its spots, in order — a stop names one by its
+// place — how many stops are left, and what a Bounty rolled on it now multiplies.
+export const BountyReel = z.object({
+  spots: z.array(z.string()),
+  rolls: z.number().int().positive(),
+  multiplier: z.number(),
+});
+export type BountyReel = z.infer<typeof BountyReel>;
+
+// The open week's Bounties still to win, the rerolls left (the week's free ones and any bought), and its
+// reel while a Bounty is still to roll (GET /api/bounty; a week's recap; a reroll's answer).
 export const BountyStatus = z.object({
   bounties: z.array(RolledBounty),
   rerollsLeft: z.number().int().nonnegative(),
+  reel: BountyReel.nullable().default(null),
 });
 export type BountyStatus = z.infer<typeof BountyStatus>;
+
+// Roll a Bounty on the spot the week's reel stopped on, by its place on the reel.
+export const RollBountyBody = z.object({ spot: z.number().int().nonnegative() });
+export type RollBountyBody = z.infer<typeof RollBountyBody>;
+
+// A stop's answer: the Bounty it rolled, with the week's Bounties as they now stand.
+export const BountyStopped = BountyStatus.extend({ rolled: RolledBounty });
+export type BountyStopped = z.infer<typeof BountyStopped>;
 
 // A week's Booster hand as the recap and a pick show it: how many cards are face down, the tasks among them
 // (sorted by name — which card holds which stays the server's until it's picked), how many to pick, what's
@@ -294,7 +311,7 @@ export const BackupPreview = z.object({
 });
 export type BackupPreview = z.infer<typeof BackupPreview>;
 
-// Reroll one of this week's Bounties onto another task.
+// Reroll one of this week's Bounties: it stops being one, and a new reel is dealt without it, good for one stop.
 export const RerollBountyBody = z.object({ taskId: z.string().min(1) });
 export type RerollBountyBody = z.infer<typeof RerollBountyBody>;
 
@@ -353,7 +370,7 @@ export type RecapFrozen = z.infer<typeof RecapFrozen>;
 
 // Recap returned after a roll: the closed period day by day (one day for a day; each day of a week),
 // its totals, and — for a week — its streaks from start to end, the frost its close banked, the tasks it
-// froze, the next week's Bounties, and its Booster hand.
+// froze, the next week's Bounty reel, and its Booster hand.
 export const PeriodRecap = z.object({
   kind: PeriodKindSchema,
   periodKey: z.string(),
@@ -363,9 +380,10 @@ export const PeriodRecap = z.object({
   streaks: z.array(RecapStreak),
   frost: z.array(RecapFrost).default([]),
   frozen: z.array(RecapFrozen).default([]),
-  // A week close rolls the next week's Bounties (none when they're off or nothing could be rolled, and
-  // for a day). `bountyEmpty`: they're on, but nothing was on ice to roll.
-  bounties: z.array(RolledBounty).default([]),
+  // A week close deals the next week's Bounty reel: its Bounties as the close leaves them — the reel to
+  // stop, none rolled yet (null when they're off, and for a day). `bountyEmpty`: they're on, but nothing
+  // was on ice to roll.
+  bounty: BountyStatus.nullable().default(null),
   bountyEmpty: z.boolean().default(false),
   // A week close deals the next week's Booster hand (none when they're off or there's nothing to deal).
   booster: BoosterHand.nullable().default(null),

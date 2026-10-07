@@ -4,7 +4,7 @@ import { dayKeyFor, weekKeyFor, windDownState, DEFAULT_SETTINGS } from "../dist/
 import { computeStreak } from "../dist/streak.js";
 
 // Israel is UTC+3 in Sept 2026 (DST). 22:00Z on the 23rd = 01:00 local on the 24th.
-const S = DEFAULT_SETTINGS; // tz Asia/Jerusalem, dayStart 0, weekStart Sat(6)
+const S = DEFAULT_SETTINGS; // tz Asia/Jerusalem, dayStart 0, weekStart Sun(0) 00:01
 
 test("day key is the local civil date at default (midnight) boundary", () => {
   assert.equal(dayKeyFor("2026-09-23T22:00:00.000Z", S), "2026-09-24"); // 01:00 local = the 24th
@@ -19,11 +19,16 @@ test("a 4am day-start pushes early-morning hours back to the previous day", () =
   assert.equal(dayKeyFor("2026-09-24T07:00:00.000Z", s), "2026-09-24");
 });
 
-test("week key anchors to the configured start weekday (Saturday)", () => {
-  // 2026-09-23 is a Wednesday; the Saturday that opens its week is 2026-09-19.
-  assert.equal(weekKeyFor("2026-09-23T07:00:00.000Z", S), "2026-09-19");
-  // 2026-09-19 (the Saturday itself) anchors to itself.
-  assert.equal(weekKeyFor("2026-09-19T07:00:00.000Z", S), "2026-09-19");
+test("week key anchors to the configured start weekday", () => {
+  // 2026-09-23 is a Wednesday; the Sunday that opens its week (the default) is 2026-09-20.
+  assert.equal(weekKeyFor("2026-09-23T07:00:00.000Z", S), "2026-09-20");
+  // 2026-09-20 (the Sunday itself) anchors to itself; the Saturday before still belongs to the week before.
+  assert.equal(weekKeyFor("2026-09-20T07:00:00.000Z", S), "2026-09-20");
+  assert.equal(weekKeyFor("2026-09-19T07:00:00.000Z", S), "2026-09-13");
+  // A week set to start on Saturday anchors there instead.
+  const sat = { ...S, weekStartDay: 6 };
+  assert.equal(weekKeyFor("2026-09-23T07:00:00.000Z", sat), "2026-09-19");
+  assert.equal(weekKeyFor("2026-09-19T07:00:00.000Z", sat), "2026-09-19");
 });
 
 // --- wind-down nudge timing curve (Israel is UTC+3 in Sept 2026, so local = UTC+3) ---

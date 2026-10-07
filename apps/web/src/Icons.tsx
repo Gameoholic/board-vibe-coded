@@ -413,6 +413,17 @@ export function MeterIcon({ size = 14 }: IconProps) {
   );
 }
 
+// A dumbbell — how much a task takes out of you (its effort level).
+export function DumbbellIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5.5 8h5M1.75 6.5v3M14.25 6.5v3" />
+      <rect x="3.25" y="4.25" width="2.25" height="7.5" rx="0.9" />
+      <rect x="10.5" y="4.25" width="2.25" height="7.5" rx="0.9" />
+    </svg>
+  );
+}
+
 // A die — an Item reward in the shop.
 export function DieIcon({ size = 14 }: IconProps) {
   return (

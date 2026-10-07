@@ -8,7 +8,9 @@ import type { BoosterHand } from "./types";
 // over, shuffled and fanned out for you to pick from (hover lifts a card; a click or a tap takes it). A card is
 // turned over only once the server says what the deal put under it, so the pick is a real draw. The card rises,
 // flips with a foil shine and the boost is stamped on; once every pick is made the rest turn over too, showing
-// what was where. Shown on the week recap's last page, and over the board when a pick was left (BoosterReveal).
+// what was where. Skip passes all of it by: a card is picked at random for each pick left, and the hand is laid
+// out as that leaves it. Shown on the week recap's last page, and over the board when a pick was left
+// (BoosterReveal).
 
 type Phase = "dealing" | "picking" | "drawing" | "done";
 
@@ -62,6 +64,8 @@ const SPARKS = Array.from({ length: 18 }, (_, i) => {
 });
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+// The card a skipped pick takes: any of those left, each as likely.
+const anyOf = (cards: number[]) => cards[Math.floor(Math.random() * cards.length)];
 
 // A card moved (instantly when `still`), and a card turned face up or down from where it is — `turns` holds
 // each card's turn about its upright (0 face up, 180 face down).
@@ -72,12 +76,31 @@ function turn(el: HTMLElement | null | undefined, turns: number[], i: number, fa
   const to = faceUp ? (from >= 180 ? 360 : 0) : 180;
   turns[i] = to % 360;
   if (!el) return Promise.resolve();
+  // Left as its latest turn has it — a later one (a skipped deal's) may have overtaken this one.
   return animate(el, { rotateY: [from, to] }, { duration: still ? 0 : duration, ease: [0.4, 0.1, 0.2, 1] }).then(() => {
-    el.style.transform = `rotateY(${to % 360}deg)`;
+    el.style.transform = `rotateY(${turns[i]}deg)`;
   });
 }
 // Which card sits on top (a CSS variable, so a hovered card can still rise above the rest).
 const layer = (el: HTMLElement | null | undefined, z: number) => el?.style.setProperty("--z", String(z));
+
+// What each card's face says: the hand's tasks while it's dealt face up, then each card's own task once the
+// server has turned it over.
+const facesOf = (hand: BoosterHand) => hand.revealed ?? hand.names.map((name, i) => hand.picked.find((p) => p.card === i)?.text ?? name);
+
+// `hand` laid out where it has got to, at once: its picked cards in their slots, face up, and the rest in the
+// fan — or, once every pick is made, turned over in their rows.
+function settle(g: ReturnType<typeof layout>, hand: BoosterHand, cards: (HTMLElement | null)[], flips: (HTMLElement | null)[], turns: number[]) {
+  const all = Array.from({ length: hand.cards }, (_, i) => i);
+  const unpicked = all.filter((i) => !hand.picked.some((p) => p.card === i));
+  all.forEach((i) => {
+    const at = hand.picked.findIndex((p) => p.card === i);
+    const spot = at >= 0 ? g.slots[at] : hand.revealed ? g.rest[unpicked.indexOf(i)] : g.fan[i];
+    layer(cards[i], at >= 0 ? 80 + at : i + 1);
+    move(cards[i], { ...spot, opacity: hand.revealed && at < 0 ? 0.6 : 1 }, {}, true);
+    turn(flips[i], turns, i, at >= 0 || !!hand.revealed, 0, true);
+  });
+}
 
 interface BoosterDealProps {
   hand: BoosterHand;
@@ -94,8 +117,12 @@ export function BoosterDeal({ hand, onPick, onLanded }: BoosterDealProps) {
   const flips = useRef<(HTMLSpanElement | null)[]>([]);
   const turns = useRef<number[]>([]);
   const alive = useRef(true);
+  // Whether the deal is still to play out — a skip stops it where it is.
+  const dealing = useRef(true);
   // What the deal plays from: the hand as it was first shown (a pick updates it without dealing again).
   const start = useRef({ hand, reduce });
+  // The hand as the server last gave it.
+  const latest = useRef(hand);
   const landedRef = useRef(onLanded);
   useLayoutEffect(() => {
     landedRef.current = onLanded;
@@ -105,11 +132,7 @@ export function BoosterDeal({ hand, onPick, onLanded }: BoosterDealProps) {
   // The stage's layout, once it's measured.
   const [geo, setGeo] = useState<ReturnType<typeof layout> | null>(null);
   const size = geo?.size ?? 96;
-  // What each card's face says: the hand's tasks while it's dealt face up, then each card's own task once the
-  // server has turned it over.
-  const [faces, setFaces] = useState<string[]>(
-    () => hand.revealed ?? hand.names.map((name, i) => hand.picked.find((p) => p.card === i)?.text ?? name),
-  );
+  const [faces, setFaces] = useState<string[]>(() => facesOf(hand));
   const [picked, setPicked] = useState(() => hand.picked.map((p) => ({ card: p.card, amount: p.amount })));
   const [spent, setSpent] = useState(!!hand.revealed);
   const [failed, setFailed] = useState(false);
@@ -125,17 +148,11 @@ export function BoosterDeal({ hand, onPick, onLanded }: BoosterDealProps) {
     setGeo(g);
     const all = Array.from({ length: dealt.cards }, (_, i) => i);
     const el = (i: number) => cards.current[i];
+    const going = () => alive.current && dealing.current;
 
     const run = async () => {
       if (dealt.picked.length > 0 || still) {
-        const unpicked = all.filter((i) => !dealt.picked.some((p) => p.card === i));
-        all.forEach((i) => {
-          const at = dealt.picked.findIndex((p) => p.card === i);
-          const spot = at >= 0 ? g.slots[at] : dealt.revealed ? g.rest[unpicked.indexOf(i)] : g.fan[i];
-          layer(el(i), at >= 0 ? 80 + at : i + 1);
-          move(el(i), { ...spot, opacity: dealt.revealed && at < 0 ? 0.6 : 1 }, {}, true);
-          turn(flips.current[i], turns.current, i, at >= 0 || !!dealt.revealed, 0, true);
-        });
+        settle(g, dealt, cards.current, flips.current, turns.current);
         if (dealt.revealed) {
           setPhase("done");
           landedRef.current?.();
@@ -149,24 +166,25 @@ export function BoosterDeal({ hand, onPick, onLanded }: BoosterDealProps) {
         move(el(i), { x: spot.x, rotate: spot.rotate, y: [spot.y + 30, spot.y], scale: [0.6, 1], opacity: [0, 1] }, { delay: i * 0.055, type: "spring", stiffness: 420, damping: 20 }, false);
       });
       await wait(420 + dealt.cards * 55 + 650);
-      if (!alive.current) return;
+      if (!going()) return;
       // Over, one after another, then into one stack.
-      all.forEach((i) => window.setTimeout(() => alive.current && turn(flips.current[i], turns.current, i, false, 0.36, false), i * 45));
+      all.forEach((i) => window.setTimeout(() => going() && turn(flips.current[i], turns.current, i, false, 0.36, false), i * 45));
       await wait(360 + dealt.cards * 45 + 120);
-      if (!alive.current) return;
+      if (!going()) return;
       await Promise.all(all.map((i) => move(el(i), { x: ((i * 5) % 7) - 3, y: ((i * 3) % 7) - 3, rotate: ((i * 11) % 15) - 7 }, { duration: 0.42, delay: i * 0.03, ease: [0.5, 0, 0.2, 1] }, false)));
       // Riffled twice, quicker the second time.
       for (const [k, d] of [[1, 0.2], [2, 0.14]] as const) {
-        if (!alive.current) return;
+        if (!going()) return;
         await Promise.all(all.map((i) => move(el(i), { x: (i % 2 ? 1 : -1) * g.size * 0.72, y: ((i * 5) % 13) - 6, rotate: i % 2 ? 8 : -8 }, { duration: d, ease: [0.4, 0, 0.2, 1] }, false)));
+        if (!going()) return;
         all.forEach((i) => layer(el(i), ((i + k) % 2) * 10 + i + 1));
         await Promise.all(all.map((i) => move(el(i), { x: ((i * 7) % 7) - 3, y: ((i * 3) % 9) - 4, rotate: ((i * 13) % 13) - 6 }, { duration: d, ease: [0.4, 0, 0.2, 1] }, false)));
       }
-      if (!alive.current) return;
+      if (!going()) return;
       // Fanned out to pick from.
       all.forEach((i) => layer(el(i), i + 1));
       await Promise.all(all.map((i) => move(el(i), { ...g.fan[i] }, { delay: i * 0.04, type: "spring", stiffness: 300, damping: 20 }, false)));
-      if (alive.current) setPhase("picking");
+      if (going()) setPhase("picking");
     };
     run();
     return () => {
@@ -192,6 +210,7 @@ export function BoosterDeal({ hand, onPick, onLanded }: BoosterDealProps) {
       move(el, { scale: 1 }, { duration: 0.2 }, reduce);
       return;
     }
+    latest.current = next;
     // Its face now says what the deal put there — while it's still face down.
     setFaces((f) => f.map((name, i) => (i === card ? mine.text : name)));
     const slot = g.slots[picked.length] ?? g.slots[g.slots.length - 1];
@@ -219,6 +238,33 @@ export function BoosterDeal({ hand, onPick, onLanded }: BoosterDealProps) {
     if (!alive.current) return;
     setPhase("done");
     landedRef.current?.();
+  }
+
+  // Skip it: a card is picked at random for every pick still to make, and the hand is laid out as that leaves
+  // it — no dealing, flipping or waiting. A pick the server turns away leaves the fan to pick from by hand.
+  async function skip() {
+    const g = geo;
+    if (!g || (phase !== "dealing" && phase !== "picking")) return;
+    dealing.current = false;
+    setPhase("drawing");
+    setFailed(false);
+    let refused = false;
+    while (!refused && latest.current.picked.length < latest.current.picks) {
+      const taken = latest.current.picked.map((p) => p.card);
+      const free = Array.from({ length: latest.current.cards }, (_, i) => i).filter((i) => !taken.includes(i));
+      const next = await onPick(anyOf(free));
+      if (!alive.current) return;
+      if (next) latest.current = next;
+      else refused = true;
+    }
+    const now = latest.current;
+    setFaces(facesOf(now));
+    setPicked(now.picked.map((p) => ({ card: p.card, amount: p.amount })));
+    setSpent(!!now.revealed);
+    settle(g, now, cards.current, flips.current, turns.current);
+    setFailed(refused);
+    setPhase(now.revealed ? "done" : "picking");
+    if (now.revealed) landedRef.current?.();
   }
 
   const g = geo;
@@ -316,6 +362,11 @@ export function BoosterDeal({ hand, onPick, onLanded }: BoosterDealProps) {
 
       <div className="booster-under">
         {prompt && <p className={`booster-prompt${failed ? " failed" : ""}`}>{prompt}</p>}
+        {(phase === "dealing" || phase === "picking") && (
+          <button type="button" className="ghost-btn skip-btn" onClick={skip}>
+            Skip
+          </button>
+        )}
         <motion.p
           className="booster-explain"
           initial={false}

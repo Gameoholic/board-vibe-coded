@@ -353,7 +353,7 @@ function SettingsView({
           <span className="field-label">Effort multipliers</span>
           <div className="effort-rows">
             {formulaDraft.effortLevels.map((lvl, i) => (
-              <div className="effort-row" key={i}>
+              <div className="effort-row" key={lvl.id}>
                 <input
                   type="text"
                   className="effort-label"

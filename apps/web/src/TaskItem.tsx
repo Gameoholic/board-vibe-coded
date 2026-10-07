@@ -1,4 +1,4 @@
-import { behaviorOf, formatPercent, parsePercent, POINTS_PER_PERCENT } from "@board/contracts";
+import { behaviorOf, DEFAULT_EFFORT_ID, formatPercent, parsePercent, POINTS_PER_PERCENT } from "@board/contracts";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FlyOrigin } from "./FlyingPoints";
 import type { RowAction } from "./ActionMenu";
@@ -11,7 +11,8 @@ import { lookOf } from "./modifierLooks";
 import { PieceList, PieceStrip, PiecesSummary, type RowPieces } from "./Pieces";
 import { deleteAction, editAction } from "./rowActions";
 import PointsBracket from "./PointsBracket";
-import PointsBuilder, { type BuilderEstimate, TierBuilderRow, type TierRow } from "./PointsBuilder";
+import DescriptionField from "./DescriptionField";
+import PointsBuilder, { type BuilderEstimate, POINTS_FORM_WIDTH, TierBuilderRow, type TierRow } from "./PointsBuilder";
 import Popover from "./Popover";
 import ScheduleEditor, { rowsFromSchedule, scheduleFromRows, type Cadence, type ScheduleRow } from "./ScheduleEditor";
 import StatusPill from "./StatusPill";
@@ -20,6 +21,7 @@ import { inHandLabel, pieceStatusActions, statusActions } from "./taskStatus";
 import Tooltip from "./Tooltip";
 import { boxScheduleLabel, isBoxLocked, isRetired, onWholeTask, statusOf, wholeWorth } from "./types";
 import type { AppliedModifier, BoxSchedule, Task, TaskSchedule, TaskStatus, TierDef } from "./types";
+import { formatMinutes } from "./duration";
 import { uid } from "./uid";
 import { useBoardClock } from "./useBoardClock";
 import { useClickOutside } from "./useClickOutside";
@@ -35,7 +37,7 @@ const PIECE_CASCADE_MS = 100;
 
 // The task-edit / add-task patch shape, shared by the row callbacks (kept in one alias so the
 // schedule field is threaded through every call site consistently).
-type TaskPatch = { text?: string; points?: number; estimateMinutes?: number | null; estimateEffortIndex?: number | null; pointsSource?: "builder" | "manual"; description?: string | null; tiers?: TierDef[]; count?: number; progress?: number; schedule?: TaskSchedule };
+type TaskPatch = { text?: string; points?: number; estimateMinutes?: number | null; estimateEffort?: string | null; pointsSource?: "builder" | "manual"; description?: string | null; tiers?: TierDef[]; count?: number; progress?: number; schedule?: TaskSchedule };
 
 interface TaskItemProps {
   task: Task;
@@ -129,7 +131,7 @@ function TaskEditForm({ task, cadence, onSave, onCancel }: TaskEditFormProps) {
     (task.tiers ?? []).map((t) => ({
       id: uid(),
       points: String(t.points / POINTS_PER_PERCENT),
-      est: { minutes: t.minutes ?? null, effortIndex: t.effortIndex ?? 0, source: t.pointsSource ?? "manual" },
+      est: { minutes: t.minutes ?? null, effort: t.effort ?? DEFAULT_EFFORT_ID, source: t.pointsSource ?? "manual" },
     })),
   );
   // Stable (no deps) — each tier's builder treats them as effect dependencies.
@@ -142,7 +144,7 @@ function TaskEditForm({ task, cadence, onSave, onCancel }: TaskEditFormProps) {
   const [amount, setAmount] = useState(String(task.count ?? 1));
   const boxCount = Math.max(1, Number(amount) || 1);
   const [scheduleRows, setScheduleRows] = useState<ScheduleRow[]>(() => rowsFromSchedule(task.schedule, boxCount));
-  // The builder's report during this edit (minutes/effortIndex/source). The builder is seeded from a
+  // The builder's report during this edit (minutes/effort/source). The builder is seeded from a
   // builder-sourced task so it reports "builder" on mount; a manual task's isn't seeded (so seeding
   // can't overwrite its %). On save we stamp the reported source + estimate.
   const [editEst, setEditEst] = useState<BuilderEstimate | null>(null);
@@ -160,7 +162,7 @@ function TaskEditForm({ task, cadence, onSave, onCancel }: TaskEditFormProps) {
       // estimate only when a duration is currently chosen (otherwise the tier keeps what it had).
       patch.tiers = task.tiers.map((t, i) => {
         const row = tierRows[i];
-        const estimate = row.est.minutes != null ? { minutes: row.est.minutes, effortIndex: row.est.effortIndex } : {};
+        const estimate = row.est.minutes != null ? { minutes: row.est.minutes, effort: row.est.effort } : {};
         return { ...t, points: parsePercent(row.points) ?? t.points, pointsSource: row.est.source, ...estimate };
       });
     } else {
@@ -172,7 +174,7 @@ function TaskEditForm({ task, cadence, onSave, onCancel }: TaskEditFormProps) {
         patch.pointsSource = editEst.source;
         if (editEst.minutes != null) {
           patch.estimateMinutes = editEst.minutes;
-          patch.estimateEffortIndex = editEst.effortIndex;
+          patch.estimateEffort = editEst.effort;
         }
       }
     }
@@ -198,17 +200,6 @@ function TaskEditForm({ task, cadence, onSave, onCancel }: TaskEditFormProps) {
         />
       </label>
 
-      <label className="field">
-        <span className="field-label">Description (optional)</span>
-        <textarea
-          className="field-textarea"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={2}
-          autoComplete="off"
-        />
-      </label>
-
       {task.tiers ? (
         <div className="field">
           <span className="field-label">Tiers</span>
@@ -226,7 +217,7 @@ function TaskEditForm({ task, cadence, onSave, onCancel }: TaskEditFormProps) {
                   onPointsChange={setTierPoints}
                   onEstimateChange={setTierEstimate}
                   initialMinutes={seeded ? tier?.minutes : undefined}
-                  initialEffortIndex={seeded ? tier?.effortIndex : undefined}
+                  initialEffort={seeded ? tier?.effort : undefined}
                 />
               );
             })}
@@ -238,7 +229,7 @@ function TaskEditForm({ task, cadence, onSave, onCancel }: TaskEditFormProps) {
           onPointsChange={setPoints}
           onBuilderChange={setEditEst}
           initialMinutes={task.pointsSource === "builder" ? task.estimateMinutes : undefined}
-          initialEffortIndex={task.pointsSource === "builder" ? task.estimateEffortIndex : undefined}
+          initialEffort={task.pointsSource === "builder" ? task.estimateEffort : undefined}
         />
       )}
 
@@ -259,6 +250,8 @@ function TaskEditForm({ task, cadence, onSave, onCancel }: TaskEditFormProps) {
         <ScheduleEditor count={boxCount} cadence={cadence} rows={scheduleRows} onChange={setScheduleRows} />
       )}
 
+      <DescriptionField value={description} onChange={setDescription} />
+
       <div className="popover-actions">
         <button type="button" className="ghost-btn" onClick={onCancel}>
           Cancel
@@ -273,17 +266,6 @@ function TaskEditForm({ task, cadence, onSave, onCancel }: TaskEditFormProps) {
 function ticked(task: Task): Task {
   const b = behaviorOf(task);
   return { ...task, ...b.patchForLevel(task, b.boxes(task)) };
-}
-
-// A task's estimated minutes as a compact "1h 30m" / "45m" / "2h" string.
-// 2m is the builder's smallest bucket, labeled "<2m" — mirror that here.
-function formatMinutes(total: number): string {
-  if (total === 2) return "<2m";
-  const h = Math.floor(total / 60);
-  const m = Math.round(total % 60);
-  if (h && m) return `${h}h ${m}m`;
-  if (h) return `${h}h`;
-  return `${m}m`;
 }
 
 function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, pointsHidden, onSetLevel, onRemove, onEdit, onDuplicate, prune, onSetPruned, status, pieces, onMakeOwn, modifiers, lines, reroll, onIce, freeze, showAge }: TaskItemProps) {
@@ -597,7 +579,7 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
   const editPopover = (
     <div className="popover-anchor row-edit-anchor" ref={editRef}>
       {/* Scrollable like the add form: a tiered task's builders (one per tier) can outgrow the board. */}
-      <Popover title="Edit task" open={editOpen} onClose={() => setEditOpen(false)} align="right" width={300} scrollable>
+      <Popover title="Edit task" open={editOpen} onClose={() => setEditOpen(false)} align="right" width={POINTS_FORM_WIDTH} scrollable>
         <TaskEditForm
           task={task}
           cadence={scheduleCadence}

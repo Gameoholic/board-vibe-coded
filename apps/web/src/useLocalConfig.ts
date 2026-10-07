@@ -9,6 +9,9 @@ export interface CardLayout {
   w: number;
   h: number;
   z: number;
+  // Sized by hand: `h` is the card's height and its list scrolls inside it. Until then `h` is only a floor,
+  // and the card grows to fit what it lists.
+  fixed?: boolean;
 }
 
 // Per-device knobs for how the canvas behaves — see CanvasSettingsMenu (the top-bar popover).

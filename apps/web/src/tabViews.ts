@@ -1,4 +1,4 @@
-import { behaviorOf } from "@board/contracts";
+import { behaviorOf, effortRank } from "@board/contracts";
 import {
   AgeIcon,
   ArrowDownIcon,
@@ -6,6 +6,7 @@ import {
   BagIcon,
   CircleCheckIcon,
   CircleIcon,
+  DumbbellIcon,
   FlameIcon,
   GroupBracketIcon,
   HourglassIcon,
@@ -55,6 +56,17 @@ const isDone = (task: Task): boolean => behaviorOf(task).isDone(task);
 const maxValue = (task: Task): number => behaviorOf(task).maxValue(task);
 // A checkbox task's estimated minutes (a tiered one keeps its estimate per tier).
 const estMinutes = (task: Task): number | undefined => task.estimateMinutes;
+// A task's effort level as its place on the scale, lightest first: its estimate's, or a tiered task's hardest
+// timed tier's. Undefined for a task never given an estimate, so never given an effort.
+const effortOf = (task: Task, ctx: TaskSortContext): number | undefined => {
+  const formula = ctx.settings.pointsFormula;
+  const ranks =
+    task.estimateMinutes != null
+      ? [effortRank(formula, task.estimateEffort)]
+      : (task.tiers ?? []).filter((t) => t.minutes != null).map((t) => effortRank(formula, t.effort));
+  const rank = Math.max(-1, ...ranks);
+  return rank >= 0 ? rank : undefined;
+};
 // Whether the box you'd act on next is schedule-locked — its time hasn't come, so you can't knock it out now.
 const isLocked = (task: Task, ctx: TaskSortContext): boolean => {
   const entry = task.schedule?.[behaviorOf(task).filled(task)];
@@ -86,6 +98,19 @@ export const TASK_SORTS = catalog<SortOption<Task, TaskSortContext>>()({
     compare: () => (a, b) => (estMinutes(a) ?? Infinity) - (estMinutes(b) ?? Infinity),
   },
   timeDesc: { key: "time-desc", label: "Time: long to short", icon: TimerIcon, compare: () => (a, b) => (estMinutes(b) ?? -1) - (estMinutes(a) ?? -1) },
+  // Tasks without an effort sink to the bottom either way, like the time sorts.
+  effortAsc: {
+    key: "effort-asc",
+    label: "Effort: lightest first",
+    icon: DumbbellIcon,
+    compare: (ctx) => (a, b) => (effortOf(a, ctx) ?? Infinity) - (effortOf(b, ctx) ?? Infinity),
+  },
+  effortDesc: {
+    key: "effort-desc",
+    label: "Effort: hardest first",
+    icon: DumbbellIcon,
+    compare: (ctx) => (a, b) => (effortOf(b, ctx) ?? -1) - (effortOf(a, ctx) ?? -1),
+  },
   // How long a task has waited — its Age chip (in the Freezer, how long it's been frozen).
   ageOldest: { key: "age-oldest", label: "Age: oldest", icon: AgeIcon, compare: (ctx) => (a, b) => waitedMs(b, ctx.now) - waitedMs(a, ctx.now) },
   ageNewest: { key: "age-newest", label: "Age: newest", icon: AgeIcon, compare: (ctx) => (a, b) => waitedMs(a, ctx.now) - waitedMs(b, ctx.now) },
@@ -132,21 +157,43 @@ export function taskTabOffer(section: Section): TabOffer<Task, TaskSortContext> 
     // A checklist you tick through: get the quick ones done, keep its groups, and see what's pruned.
     case "routine":
       return {
-        sorts: [offer(s.manual, pinned), offer(s.quick, pinned), s.incompleteFirst, s.completeFirst, s.pointsDesc, s.pointsAsc, s.timeAsc, s.timeDesc],
+        sorts: [
+          offer(s.manual, pinned),
+          offer(s.quick, pinned),
+          offer(s.effortAsc, pinned),
+          s.effortDesc,
+          s.incompleteFirst,
+          s.completeFirst,
+          s.pointsDesc,
+          s.pointsAsc,
+          s.timeAsc,
+          s.timeDesc,
+        ],
         displays: [offer(d.grouping, pinned), offer(d.estimate, pinned), ...(section.period ? [offer(d.pruned, pinned)] : []), d.timer, d.add],
       };
     // Habits you level up: what's left today, and the timer that picks a tier. Their time lives in their tiers,
-    // so the time sorts mean nothing here.
+    // so the time sorts mean nothing here; their effort is their tiers'.
     case "habits":
       return {
-        sorts: [offer(s.manual, pinned), offer(s.incompleteFirst, pinned), s.completeFirst, s.pointsDesc, s.pointsAsc],
+        sorts: [offer(s.manual, pinned), offer(s.incompleteFirst, pinned), s.completeFirst, s.pointsDesc, s.pointsAsc, s.effortAsc, s.effortDesc],
         displays: [offer(d.timer, pinned), offer(d.grouping, pinned), d.estimate, d.add],
       };
     // A to-do list: its order is the priority; what's been waiting longest is worth seeing. Done tasks leave it,
     // so done-first sorts mean nothing here. Only here do tasks have a status.
     case "todo":
       return {
-        sorts: [offer(s.manual, pinned), offer(s.quick, pinned), offer(s.ageOldest, pinned), s.ageNewest, s.pointsDesc, s.pointsAsc, s.timeAsc, s.timeDesc],
+        sorts: [
+          offer(s.manual, pinned),
+          offer(s.quick, pinned),
+          offer(s.ageOldest, pinned),
+          offer(s.effortAsc, pinned),
+          s.effortDesc,
+          s.ageNewest,
+          s.pointsDesc,
+          s.pointsAsc,
+          s.timeAsc,
+          s.timeDesc,
+        ],
         displays: [
           offer(d.status, { ...pinned, defaultOn: true }),
           offer(d.age, { ...pinned, defaultOn: true }),
@@ -168,6 +215,8 @@ export function taskTabOffer(section: Section): TabOffer<Task, TaskSortContext> 
           s.pointsAsc,
           s.timeAsc,
           s.timeDesc,
+          s.effortAsc,
+          s.effortDesc,
         ],
         displays: [
           offer(d.age, { ...pinned, defaultOn: true, label: "Days frozen", icon: SnowflakeIcon }),

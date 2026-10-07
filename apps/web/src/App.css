@@ -254,7 +254,7 @@ main {
      spring a phantom layout "correction" (all card text jumps for ~0.5s) whenever scale != 1. */
 }
 
-/* SectionCard.tsx's motion.section deliberately has NO framer `layout` prop: `layout` runs a
+/* CanvasCard.tsx's motion.section deliberately has NO framer `layout` prop: `layout` runs a
    ResizeObserver and applies corrective transforms for size changes it didn't cause, which
    fought the manual pointer-drag move/resize (SectionCard startMove/startResize) every way it
    was tried. Position and size are driven by framer motion values (x/y transform, width,
@@ -269,15 +269,41 @@ main {
   border-radius: var(--radius);
   padding: 20px;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  /* height is a floor, never a cap (min-height via motion value): content taller than the set
-     size grows the card downward rather than clipping it — the popovers anchored inside must
-     never be cut off (a deliberate, long-standing scope decision). */
+  /* A column: the header, then the list, which gives way when the card is shorter than it (see
+     .board-card-body). Until a card is resized its height is a floor (min-height) and it grows to fit
+     its list; once resized it's a height. Popovers can't be cut off either way — they open in the
+     top layer (Popover.tsx). */
+  display: flex;
+  flex-direction: column;
 }
 
+/* The card's list, and its add button under it. In a card sized shorter than its list it scrolls
+   (CanvasCard's `overflows`) — and only then, since a scroll box clips: a list that fits leaves a row's
+   hover bubbles free to reach past its edges. It reaches into the card's side padding so the row
+   handles that sit there (.drag-handle, left: -16px) stay inside it. */
+.board-card-body {
+  flex: 0 1 auto;
+  min-height: 0;
+  margin: 0 -20px;
+  padding: 0 20px;
+}
+
+.board-card-body.overflows {
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* Scrolling a tab's list to its end doesn't go on to pan the board, and a finger drags the list. */
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* The grab area straddles the card's corner — 12px out past it, 16px in — so a press just outside it still
+   resizes; the L mark sits 4px inside the corner. */
 .resize-corner {
   position: absolute;
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   touch-action: none;
   z-index: 10;
   pointer-events: auto;
@@ -299,38 +325,39 @@ main {
 }
 
 .resize-corner.corner-nw {
-  top: 4px;
-  left: 4px;
+  top: -12px;
+  left: -12px;
   cursor: nw-resize;
 }
-.resize-corner.corner-nw::before { top: 0; left: 0; width: 10px; height: 2px; }
-.resize-corner.corner-nw::after  { top: 0; left: 0; width: 2px;  height: 10px; }
+.resize-corner.corner-nw::before { top: 16px; left: 16px; width: 10px; height: 2px; }
+.resize-corner.corner-nw::after  { top: 16px; left: 16px; width: 2px;  height: 10px; }
 
 .resize-corner.corner-ne {
-  top: 4px;
-  right: 4px;
+  top: -12px;
+  right: -12px;
   cursor: ne-resize;
 }
-.resize-corner.corner-ne::before { top: 0; right: 0; width: 10px; height: 2px; }
-.resize-corner.corner-ne::after  { top: 0; right: 0; width: 2px;  height: 10px; }
+.resize-corner.corner-ne::before { top: 16px; right: 16px; width: 10px; height: 2px; }
+.resize-corner.corner-ne::after  { top: 16px; right: 16px; width: 2px;  height: 10px; }
 
 .resize-corner.corner-sw {
-  bottom: 4px;
-  left: 4px;
+  bottom: -12px;
+  left: -12px;
   cursor: sw-resize;
 }
-.resize-corner.corner-sw::before { bottom: 0; left: 0; width: 10px; height: 2px; }
-.resize-corner.corner-sw::after  { bottom: 0; left: 0; width: 2px;  height: 10px; }
+.resize-corner.corner-sw::before { bottom: 16px; left: 16px; width: 10px; height: 2px; }
+.resize-corner.corner-sw::after  { bottom: 16px; left: 16px; width: 2px;  height: 10px; }
 
 .resize-corner.corner-se {
-  bottom: 4px;
-  right: 4px;
+  bottom: -12px;
+  right: -12px;
   cursor: se-resize;
 }
-.resize-corner.corner-se::before { bottom: 0; right: 0; width: 10px; height: 2px; }
-.resize-corner.corner-se::after  { bottom: 0; right: 0; width: 2px;  height: 10px; }
+.resize-corner.corner-se::before { bottom: 16px; right: 16px; width: 10px; height: 2px; }
+.resize-corner.corner-se::after  { bottom: 16px; right: 16px; width: 2px;  height: 10px; }
 
 .board-card-header {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1318,18 +1345,25 @@ main {
   background: var(--danger-soft);
 }
 
+/* In the top layer (ConfirmPopover, useTopLayer): the backdrop covers the window; the panel is placed by
+   script. Both undo the browser's own popover look. */
 .confirm-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 30;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: none;
   background: transparent;
 }
 
 .confirm-popover {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 31;
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  overflow: visible;
+  color: inherit;
   width: 190px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1373,8 +1407,7 @@ main {
   gap: 6px;
 }
 
-/* Each tier is a full points builder (Duration + Effort), so tiers are separated by a rule and
-   gap rather than sitting on one line like the old bare-% inputs. */
+/* Each tier is its own points sentence under its "Tier N" head, the tiers separated by a rule. */
 .tier-builder-row {
   display: flex;
   flex-direction: column;
@@ -1405,7 +1438,9 @@ main {
   cursor: default;
 }
 
-.add-tier-btn {
+/* A "+ …" line in a form that adds a part of it: another tier, the description. With .ghost-btn in the
+   selector so its flush-left padding beats that later rule's (alone, it lost to it and sat 8px in). */
+.ghost-btn.form-add-btn {
   align-self: flex-start;
   padding: 4px 0;
   margin-top: 4px;
@@ -1744,8 +1779,13 @@ main {
 
 /* ---- Popover (inline, anchored — no backdrop) ---- */
 
+/* In the top layer, placed by script (Popover, useTopLayer) — and undoing the browser's own popover look. */
 .popover {
-  position: absolute;
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  overflow: visible;
+  color: inherit;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -1753,8 +1793,6 @@ main {
     0 1px 2px rgba(15, 23, 42, 0.06),
     0 12px 28px rgba(15, 23, 42, 0.14);
   padding: 14px;
-  z-index: 50;
-  transform-origin: top;
 }
 
 .popover-header {
@@ -1882,61 +1920,6 @@ main {
   color: var(--text);
 }
 
-/* ---- Calculator reference panel ---- */
-
-.calc-ref-trigger {
-  position: relative;
-  margin-left: auto;
-}
-
-.calc-ref-btn {
-  font-size: 0.75rem;
-  font-weight: 700;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-dim);
-  cursor: default;
-}
-
-.calc-ref-tooltip {
-  display: none;
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 100;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 0.78rem;
-  color: var(--text-dim);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-  white-space: nowrap;
-  gap: 16px;
-  flex-direction: row;
-}
-
-.calc-ref-trigger:hover .calc-ref-tooltip {
-  display: flex;
-}
-
-.calc-ref-section {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.calc-ref-heading {
-  font-weight: 600;
-  color: var(--text);
-  margin-bottom: 4px;
-}
-
 /* ---- Calculator pills ---- */
 
 .calc-pills {
@@ -1969,54 +1952,214 @@ main {
   color: var(--surface);
 }
 
-.calc-custom-wrap {
+/* ---- Points builder (PointsBuilder.tsx): the pick as a sentence, "1h at Ugh difficulty = 3.75%" — the time
+   and the effort are chips that open their choices under the line ---- */
+
+.points-sentence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.sentence-chip {
   display: inline-flex;
   align-items: center;
+  height: 30px;
+  padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-  height: 26px;
-}
-
-.calc-custom-wrap:focus-within {
-  border-color: var(--border);
-  outline: none;
-  box-shadow: none;
-}
-
-.calc-custom-mins {
-  width: 48px;
-  border: none;
-  outline: none;
-  background: transparent;
+  border-radius: 8px;
+  background: var(--surface-2);
   color: var(--text);
   font-family: inherit;
-  font-size: 0.78rem;
-  padding: 0 4px;
-  text-align: center;
-  -moz-appearance: textfield;
-}
-
-.calc-custom-mins::-webkit-outer-spin-button,
-.calc-custom-mins::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-}
-
-.calc-custom-unit {
-  font-size: 0.78rem;
-  color: var(--text-dim);
-  padding: 0 5px;
-  line-height: 1;
-  align-self: stretch;
-  border: none;
-  border-left: 1px solid var(--border);
-  background: transparent;
-  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.calc-custom-unit:hover {
+.sentence-chip:hover {
+  border-color: var(--text-dim);
+}
+
+.sentence-chip.open {
+  border-color: var(--text);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--text);
+}
+
+/* No time picked yet. */
+.sentence-chip.empty {
+  border-style: dashed;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.sentence-word {
+  font-size: 0.86rem;
+  color: var(--text-dim);
+}
+
+/* "= 3.75%" wraps as one piece, and = and ≠ take the same room, so typing a % of your own never moves it. */
+.sentence-result {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.sentence-sign {
+  width: 1ch;
+  text-align: center;
+}
+
+/* A % typed over the picks: they stay, dashed, as what it no longer follows. */
+.points-sentence.by-hand .sentence-chip {
+  border-style: dashed;
+}
+
+.points-sentence.by-hand .sentence-sign {
+  color: var(--heat-ink);
+}
+
+.sentence-value {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
   color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: text;
+}
+
+.sentence-value:focus-within {
+  border-color: var(--text-dim);
+}
+
+/* The % itself: sized to what's typed (PointsBuilder), with none of a form field's own box. */
+.field .sentence-value input[type="number"] {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: right;
+  -moz-appearance: textfield;
+}
+
+.sentence-value input::-webkit-outer-spin-button,
+.sentence-value input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+
+/* An effort's mark, in its place on the scale's colour (PointsBuilder's effortTone). */
+.effort-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--effort-tone);
+}
+
+/* What an open chip offers, under the sentence. */
+.sentence-choices {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.field .sentence-choices input.typed-time {
+  width: 62px;
+  height: 25px;
+  padding: 0 6px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.field .sentence-choices input.typed-time:focus,
+.field .sentence-choices input.typed-time.active {
+  border-style: solid;
+  border-color: var(--text-dim);
+}
+
+.field .sentence-choices input.typed-time.invalid {
+  border-color: var(--danger-text);
+}
+
+.typed-time-error {
+  flex-basis: 100%;
+  font-size: 0.74rem;
+  color: var(--danger-text);
+}
+
+/* The effort levels side by side, however many the board has. */
+.sentence-choices.effort-choices {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+.effort-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.effort-choice:hover {
+  border-color: var(--effort-tone);
+}
+
+.effort-choice.on {
+  border-color: var(--effort-tone);
+  box-shadow: inset 0 0 0 1px var(--effort-tone);
+}
+
+.effort-choice-name {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--effort-tone);
+}
+
+.effort-choice-mult {
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The way back from a typed %. */
+.ghost-btn.or-use-btn {
+  align-self: flex-start;
+  padding: 0;
+  font-size: 0.75rem;
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
 }
 
 /* ---- Color picker ---- */
@@ -5482,11 +5625,14 @@ main.shop-open > .zoom-controls {
 }
 
 /* A sticky note: square-cornered paper, lifted off the board. Its colour is its own (a day's is set
-   inline); a plain one is the classic yellow. */
+   inline); a plain one is the classic yellow. Its ink is set here too: a note has the light theme's tokens
+   (theme.css), but anything on it that names no colour would still inherit the app's — pale, under a dark
+   theme, on pale paper. */
 .recap-note {
   border: none;
   border-radius: 3px;
   background: #fef08a;
+  color: var(--text);
   box-shadow: 0 12px 20px rgba(15, 23, 42, 0.14), 0 2px 3px rgba(15, 23, 42, 0.08);
 }
 
@@ -5695,7 +5841,23 @@ main.shop-open > .zoom-controls {
   border-bottom: 14px solid #ef4444;
 }
 
+/* While it waits to be swung: it's held and thrown sideways, so a touch on it only ever scrolls the page up
+   and down, and its names aren't picked up as text on the way. */
+.bounty-stage.can-swing {
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.bounty-stage.can-swing:active {
+  cursor: grabbing;
+}
+
+/* Every spot is as wide as any other (--reel-cell), whatever its name's length: each spends the same time
+   under the pointer, so a stop is as likely to land on one as on another. */
 .bounty-reel {
+  --reel-cell: clamp(140px, 40vw, 180px);
   position: relative;
   overflow: hidden;
   padding: 18px 0;
@@ -5703,16 +5865,27 @@ main.shop-open > .zoom-controls {
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 25%, #000 75%, transparent);
 }
 
+/* Starts at the reel's middle; BountyRoll moves it left by spots, so the spot it's on sits under the pointer. */
 .bounty-reel-track {
   display: flex;
-  gap: 10px;
   width: max-content;
+  margin-left: 50%;
 }
 
 .bounty-reel-track span {
-  position: relative;
   flex: none;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: center;
+  width: var(--reel-cell);
+  padding: 0 5px;
+}
+
+/* A spot's name, cut short where it's longer than its spot. */
+.bounty-reel-track b {
+  position: relative;
   overflow: hidden;
+  max-width: 100%;
   padding: 9px 16px;
   border: 1.5px solid var(--border);
   border-radius: 10px;
@@ -5721,20 +5894,29 @@ main.shop-open > .zoom-controls {
   font-size: 1rem;
   font-weight: 700;
   white-space: nowrap;
+  text-overflow: ellipsis;
   transition: opacity 0.3s;
 }
 
 /* The name passing under the pointer — lit at once (a fade would trail behind a fast reel). */
-.bounty-reel-track span.under {
+.bounty-reel-track span.under b {
   border-color: var(--text);
   color: var(--text);
 }
 
-.bounty-roll.landed .bounty-reel-track span {
+.bounty-roll.landed .bounty-reel-track b {
   opacity: 0.3;
 }
 
+/* The one it landed on is said in full, over its neighbours if it has to be. */
 .bounty-roll.landed .bounty-reel-track span.hit {
+  position: relative;
+  z-index: 1;
+}
+
+.bounty-roll.landed .bounty-reel-track span.hit b {
+  flex: none;
+  max-width: none;
   opacity: 1;
   border-color: #fecaca;
   background: #dc2626;
@@ -5743,7 +5925,7 @@ main.shop-open > .zoom-controls {
 }
 
 /* A shine sweeps across the winner as it lands. */
-.bounty-roll.landed .bounty-reel-track span.hit::after {
+.bounty-roll.landed .bounty-reel-track span.hit b::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -5780,13 +5962,59 @@ main.shop-open > .zoom-controls {
   }
 }
 
-/* Under the reel: the multiplier stamped on (like the board's BOUNTY stamp), and its reroll. */
+/* Under the reel: what to do with it, and Skip under that; landed, the multiplier stamped on (like the
+   board's BOUNTY stamp) and its reroll. As tall either way, so nothing jumps. */
 .bounty-roll-under {
+  position: relative;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  min-height: 56px;
+  gap: 4px 16px;
+  min-height: 64px;
+}
+
+.bounty-roll-under .btn-primary {
+  min-width: 96px;
+}
+
+/* What to do with the reel — or what came of the last try — on the box's first line. */
+.bounty-prompt {
+  align-self: flex-start;
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  color: var(--text-2);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.bounty-prompt.missed {
+  color: var(--danger-text);
+}
+
+/* Skip, on the reel and the Booster's deal: just under where their prompt goes, out of sight until it's
+   pointed at (or reached with the keyboard), like a tab's add button. Out of the flow, so it moves nothing
+   as it comes and goes — and above the words that wait there to fade in. */
+.skip-btn {
+  position: absolute;
+  top: 28px;
+  left: 50%;
+  z-index: 1;
+  translate: -50% 0;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.skip-btn:hover,
+.skip-btn:focus-visible {
+  opacity: 1;
+}
+
+/* Nothing points at it on a touch screen, so it's simply there. */
+@media (hover: none) {
+  .skip-btn {
+    opacity: 1;
+  }
 }
 
 .bounty-mult {
@@ -5801,14 +6029,12 @@ main.shop-open > .zoom-controls {
   box-shadow: 0 8px 22px rgba(127, 29, 29, 0.35);
 }
 
-.bounty-roll-under .ghost-btn {
+/* The reel's Skip and Reroll, and the Booster deal's Skip: one look. */
+.bounty-roll-under .ghost-btn,
+.booster-under .ghost-btn {
   padding: 7px 14px;
   border: 1.5px solid var(--border);
   border-radius: 8px;
-}
-
-.bounty-roll-under .ghost-btn:disabled {
-  visibility: hidden;
 }
 
 /* What a Bounty means, said once the reels land. */
@@ -6047,12 +6273,15 @@ main.shop-open > .zoom-controls {
   box-shadow: 0 8px 22px rgba(88, 28, 135, 0.35);
 }
 
+/* Under the stage: what to do, with Skip under it (.skip-btn), then — once it's done — what the pick means.
+   As tall either way, so nothing jumps. */
 .booster-under {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  min-height: 3.2em;
+  min-height: 4em;
 }
 
 .booster-prompt {
@@ -6095,8 +6324,8 @@ main.shop-open > .zoom-controls {
 
 @media (prefers-reduced-motion: reduce) {
   .bounty-rays,
-  .bounty-roll.landed .bounty-reel-track span.hit,
-  .bounty-roll.landed .bounty-reel-track span.hit::after,
+  .bounty-roll.landed .bounty-reel-track span.hit b,
+  .bounty-roll.landed .bounty-reel-track span.hit b::after,
   .recap-wall.leaving .recap-drop {
     animation: none;
   }

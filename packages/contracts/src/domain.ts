@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { Points } from "./points.js";
 import { TaskSchedule } from "./period.js";
-import { PointsSource } from "./pointsFormula.js";
+import { EffortId, PointsSource } from "./pointsFormula.js";
 
 // Trust-boundary caps: generous for a personal board, but bounded so a malformed or hostile body
 // can't store unbounded strings. `%` values are validated as integer thousandths (see points.ts).
@@ -41,9 +41,9 @@ export const TierDef = z.object({
   // timer's auto-advance thresholds (see TierTimer) — previously those were scraped from the tier
   // label, which is auto-generated ("Tier 1") and so never matched. Absent ≡ no estimate for this tier.
   minutes: z.number().nonnegative().max(MINUTES_MAX).optional(),
-  // Which effort preset (index into Settings.pointsFormula.effortLevels) this tier's builder used, so a
-  // rate/effort change can recompute its %. Absent ≡ Normal (index 0).
-  effortIndex: z.number().int().nonnegative().optional(),
+  // The id of the effort level (Settings.pointsFormula.effortLevels) this tier's builder used, so a
+  // rate/effort change can recompute its %. Absent ≡ the default level.
+  effort: EffortId.optional(),
   // Whether this tier's % came from the builder's time calc or was overridden — see PointsSource.
   // Absent on tiers with no estimate; the projection defaults it (derive-once) for pre-feature tiers.
   pointsSource: PointsSource.optional(),
@@ -133,9 +133,9 @@ export const Task = z.object({
   // Optional estimated duration in minutes for a checkbox task, derived from its points builder (a
   // duration was picked). Absent ≡ no estimate. Tiered tasks store their estimate per-tier (TierDef).
   estimateMinutes: z.number().nonnegative().max(MINUTES_MAX).optional(),
-  // Which effort preset (index into Settings.pointsFormula.effortLevels) a checkbox task's builder used.
-  // Absent ≡ Normal (index 0). Lets a rate/effort change recompute the % from the estimate.
-  estimateEffortIndex: z.number().int().nonnegative().optional(),
+  // The id of the effort level (Settings.pointsFormula.effortLevels) a checkbox task's builder used.
+  // Absent ≡ the default level. Lets a rate/effort change recompute the % from the estimate.
+  estimateEffort: EffortId.optional(),
   // Whether a checkbox task's % came from the builder's time calc or was overridden (see PointsSource).
   // Stored, not re-derived. Absent for tiered tasks and pre-feature tasks (projection derives once).
   pointsSource: PointsSource.optional(),

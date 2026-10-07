@@ -8,6 +8,9 @@ import {
   BOOSTER_HAND_MAX,
   type BoosterHand,
   type BoosterStatus,
+  bountyReel,
+  type BountyReel,
+  type BountyStopped,
   bountyWeight,
   canBoost,
   canBounty,
@@ -26,6 +29,7 @@ import {
   DEFAULT_SETTINGS,
   doneFromPieces,
   effortMultOf,
+  legacyEffortId,
   type FormulaPreview,
   freezeRefusal,
   freezerOf,
@@ -61,7 +65,6 @@ import {
   type PriceContext,
   priceModifiersOf,
   saleOn,
-  pickWeighted,
   rerollSource,
   PIECES_MAX,
   releasedFrom,
@@ -91,6 +94,7 @@ import {
   type TaskStatus,
   type TaskType,
   type TierDef,
+  type StoredTierDef,
   type Timer,
   wholeWorth,
 } from "@board/contracts";
@@ -106,10 +110,17 @@ const MIN_ESTIMATE_MINUTES = 2;
 function floorMinutes(m: number | undefined): number | undefined {
   return m === undefined ? undefined : Math.max(m, MIN_ESTIMATE_MINUTES);
 }
-function floorTiers(tiers: TierDef[]): TierDef[] {
-  return tiers.map((t) =>
-    t.minutes != null && t.minutes < MIN_ESTIMATE_MINUTES ? { ...t, minutes: MIN_ESTIMATE_MINUTES } : t,
-  );
+// A stored tier as the board keeps it: its minutes floored, and an old tier's effort place resolved to
+// the level it meant.
+function storedTiers(tiers: StoredTierDef[]): TierDef[] {
+  return tiers.map(({ effortIndex, ...t }) => {
+    const effort = t.effort ?? legacyEffortId(effortIndex);
+    return {
+      ...t,
+      ...(effort !== undefined ? { effort } : {}),
+      ...(t.minutes != null && t.minutes < MIN_ESTIMATE_MINUTES ? { minutes: MIN_ESTIMATE_MINUTES } : {}),
+    };
+  });
 }
 
 type TaskCreated = Extract<BoardEvent, { type: "TaskCreated" }>;
@@ -124,7 +135,7 @@ function taskDefinition(t: Task): Omit<TaskCreated, "type" | "taskId" | "section
     ...(t.points !== undefined ? { points: t.points } : {}),
     ...(t.estimate ? { estimate: t.estimate } : {}),
     ...(t.estimateMinutes !== undefined ? { estimateMinutes: t.estimateMinutes } : {}),
-    ...(t.estimateEffortIndex != null ? { estimateEffortIndex: t.estimateEffortIndex } : {}),
+    ...(t.estimateEffort !== undefined ? { estimateEffort: t.estimateEffort } : {}),
     ...(t.pointsSource !== undefined ? { pointsSource: t.pointsSource } : {}),
     ...(t.description ? { description: t.description } : {}),
     ...(t.tiers ? { tiers: t.tiers } : {}),
@@ -198,11 +209,13 @@ export class BoardStore {
   // Boxes kept the same way, per task: the filled level each task held whenever a roll unchecked it,
   // summed. An "all time" counter adds this to the live level (see computeCounter).
   private bankedLevels = new Map<string, number>();
-  // The week's Bounties, per week key, in the order rolled: the task each is on now (a reroll swaps it)
-  // and its multiplier. They're on while their week is the open one (see bountyOn), so a week close ends
-  // them with no event.
+  // The week's Bounties, per week key, in the order rolled: the task each is on and its multiplier. They're
+  // on while their week is the open one (see bountyOn), so a week close ends them with no event.
   private bounties = new Map<string, { taskId: string; multiplier: number }[]>();
-  // Every task each week has had as a Bounty, rerolled away or not — a roll leaves them be while it can.
+  // Each week's reel while it has stops left, per week key: the tasks on its spots, in the order dealt, and
+  // how many stops it's still good for. A stop takes its task off the reel, so the next lands on another.
+  private bountyReels = new Map<string, { taskIds: string[]; rolls: number }>();
+  // Every task each week has had as a Bounty, rerolled away or not — a reel leaves them off while it can.
   private bountiedIn = new Map<string, Set<string>>();
   // Rerolls (see rerollsLeft): each week's free ones as granted at its start (null for a week from before
   // grants were recorded — Settings' allowance stands in) and how many it spent; and bought ones, banked
@@ -228,8 +241,8 @@ export class BoardStore {
   // that week's days on ice.
   private frostFrom = new Map<string, string>();
 
-  // `random` is the Bounty roll's and the Booster deal's randomness (recorded; a rebuild never calls it) —
-  // injectable so tests can roll deterministically.
+  // `random` is the Bounty reel's and the Booster deal's randomness (recorded; a rebuild never calls it) —
+  // injectable so tests can deal deterministically.
   constructor(
     private readonly store: EventStore,
     private readonly random: () => number = Math.random,
@@ -375,10 +388,10 @@ export class BoardStore {
     // Always return a concrete pointsSource: the stored flag if present, else derived once against the
     // historic default formula (pre-feature values). Same per tier. Never derived against the *current*
     // formula, so a rate change never silently reclassifies an untouched value (see resolvePointsSource).
-    const pointsSource = resolvePointsSource(task.pointsSource, task.estimateMinutes, task.points, task.estimateEffortIndex);
+    const pointsSource = resolvePointsSource(task.pointsSource, task.estimateMinutes, task.points, task.estimateEffort);
     const tiers = task.tiers?.map((tier) => ({
       ...tier,
-      pointsSource: resolvePointsSource(tier.pointsSource, tier.minutes, tier.points, tier.effortIndex),
+      pointsSource: resolvePointsSource(tier.pointsSource, tier.minutes, tier.points, tier.effort),
     }));
     const pruned = this.isPruned(task);
     const bounty = this.bountyOn(task);
@@ -608,6 +621,7 @@ export class BoardStore {
     if (!section.allowedTypes.some((a) => a.type === body.type)) {
       throw badRequest(`section does not allow ${body.type} tasks`);
     }
+    this.assertEfforts(body.estimateEffort, body.tiers);
     const event: BoardEvent = {
       type: "TaskCreated",
       taskId: randomUUID(),
@@ -617,7 +631,7 @@ export class BoardStore {
       ...(body.points !== undefined ? { points: body.points } : {}),
       ...(body.estimate ? { estimate: body.estimate } : {}),
       ...(body.estimateMinutes !== undefined ? { estimateMinutes: body.estimateMinutes } : {}),
-      ...(body.estimateEffortIndex !== undefined ? { estimateEffortIndex: body.estimateEffortIndex } : {}),
+      ...(body.estimateEffort !== undefined ? { estimateEffort: body.estimateEffort } : {}),
       ...(body.pointsSource !== undefined ? { pointsSource: body.pointsSource } : {}),
       ...(body.description ? { description: body.description } : {}),
       ...(body.tiers ? { tiers: body.tiers } : {}),
@@ -877,12 +891,13 @@ export class BoardStore {
 
   editTask(id: string, changes: TaskEditFields, idempotencyKey?: string | null): Task {
     const task = this.requireTask(id);
+    this.assertEfforts(changes.estimateEffort ?? undefined, changes.tiers);
     const previous: TaskEditFields = {};
     if (changes.text !== undefined) previous.text = task.text;
     if (changes.points !== undefined) previous.points = task.points;
     if (changes.estimate !== undefined) previous.estimate = task.estimate ?? null;
     if (changes.estimateMinutes !== undefined) previous.estimateMinutes = task.estimateMinutes ?? null;
-    if (changes.estimateEffortIndex !== undefined) previous.estimateEffortIndex = task.estimateEffortIndex ?? null;
+    if (changes.estimateEffort !== undefined) previous.estimateEffort = task.estimateEffort ?? null;
     if (changes.pointsSource !== undefined) previous.pointsSource = task.pointsSource;
     if (changes.description !== undefined) previous.description = task.description ?? null;
     if (changes.tiers !== undefined) previous.tiers = task.tiers;
@@ -1151,7 +1166,23 @@ export class BoardStore {
 
   // Merge a partial patch over current settings and log the full result (SettingsChanged is a
   // snapshot, not a delta). Changing the timezone / boundaries re-derives streak keys live on read.
+  // A task and its tiers can only be on one of the board's effort levels.
+  private assertEfforts(effort: string | undefined, tiers: { effort?: string }[] | undefined): void {
+    const known = new Set(this.settings.pointsFormula.effortLevels.map((l) => l.id));
+    for (const id of [effort, ...(tiers ?? []).map((t) => t.effort)]) {
+      if (id !== undefined && !known.has(id)) throw badRequest(`unknown effort level ${id}`);
+    }
+  }
+
+  // Effort levels are edited in place (name and multiplier): a formula must keep the board's levels, in
+  // their order, or the tasks on a dropped level would lose what they were priced at.
+  private assertSameLevels(formula: PointsFormula): void {
+    const ids = (f: PointsFormula) => f.effortLevels.map((l) => l.id).join(",");
+    if (ids(formula) !== ids(this.settings.pointsFormula)) throw badRequest("effort levels can be renamed and repriced, not added, removed or reordered");
+  }
+
   patchSettings(patch: PatchSettingsBody, idempotencyKey?: string | null): Settings {
+    if (patch.pointsFormula) this.assertSameLevels(patch.pointsFormula);
     const next: Settings = { ...this.settings, ...patch };
     this.commit({ type: "SettingsChanged", settings: next }, idempotencyKey);
     return { ...this.settings };
@@ -1162,7 +1193,7 @@ export class BoardStore {
     this.commit({ type: "SettingsChanged", settings: DEFAULT_SETTINGS });
   }
 
-  // Every builder-sourced value (a checkbox or one-time task, or a tiered task's tier) that carries a time estimate,
+  // Every builder-sourced value (a task's own points, or each tier of a tiered one) that carries a time estimate,
   // with the points it would earn under `formula`. Manual and estimate-less values are excluded — those
   // are what "won't update". pointsSource is resolved (stored flag, else derived vs the historic formula).
   private builderValues(
@@ -1170,16 +1201,18 @@ export class BoardStore {
   ): Array<{ task: Task; tierIndex?: number; text: string; tierLabel?: string; oldPoints: number; newPoints: number }> {
     const out: Array<{ task: Task; tierIndex?: number; text: string; tierLabel?: string; oldPoints: number; newPoints: number }> = [];
     for (const t of this.tasks) {
-      if (t.type === "checkbox" || t.type === "once") {
-        const source = resolvePointsSource(t.pointsSource, t.estimateMinutes, t.points, t.estimateEffortIndex);
+      // Told apart by where a task keeps its points, not by naming types — so every kind with one value (a tally
+      // too) is repriced, and a kind added later can't be left out.
+      if (!t.tiers) {
+        const source = resolvePointsSource(t.pointsSource, t.estimateMinutes, t.points, t.estimateEffort);
         if (source !== "builder" || t.estimateMinutes == null) continue;
-        const newPoints = pointsFromMinutes(t.estimateMinutes, effortMultOf(formula, t.estimateEffortIndex), formula);
+        const newPoints = pointsFromMinutes(t.estimateMinutes, effortMultOf(formula, t.estimateEffort), formula);
         out.push({ task: t, text: t.text, oldPoints: t.points ?? 0, newPoints });
-      } else if (t.type === "tiered" && t.tiers) {
+      } else {
         t.tiers.forEach((tier, i) => {
-          const source = resolvePointsSource(tier.pointsSource, tier.minutes, tier.points, tier.effortIndex);
+          const source = resolvePointsSource(tier.pointsSource, tier.minutes, tier.points, tier.effort);
           if (source !== "builder" || tier.minutes == null) return;
-          const newPoints = pointsFromMinutes(tier.minutes, effortMultOf(formula, tier.effortIndex), formula);
+          const newPoints = pointsFromMinutes(tier.minutes, effortMultOf(formula, tier.effort), formula);
           out.push({ task: t, tierIndex: i, text: t.text, tierLabel: tier.label, oldPoints: tier.points, newPoints });
         });
       }
@@ -1190,6 +1223,7 @@ export class BoardStore {
   // Dry run: what a formula change would move (old→new per value) and how many values it would leave
   // alone (manual or no estimate). No writes — the confirm dialog shows this before the owner chooses.
   previewFormula(formula: PointsFormula): FormulaPreview {
+    this.assertSameLevels(formula);
     const values = this.builderValues(formula);
     const willUpdate = values
       .filter((v) => v.newPoints !== v.oldPoints)
@@ -1224,9 +1258,9 @@ export class BoardStore {
     // estimate-less tiers pass through untouched).
     for (const task of tieredTasks.values()) {
       const tiers = (task.tiers ?? []).map((tier) => {
-        const source = resolvePointsSource(tier.pointsSource, tier.minutes, tier.points, tier.effortIndex);
+        const source = resolvePointsSource(tier.pointsSource, tier.minutes, tier.points, tier.effort);
         if (source !== "builder" || tier.minutes == null) return tier;
-        const np = pointsFromMinutes(tier.minutes, effortMultOf(formula, tier.effortIndex), formula);
+        const np = pointsFromMinutes(tier.minutes, effortMultOf(formula, tier.effort), formula);
         return np === tier.points ? tier : { ...tier, points: np, pointsSource: "builder" as const };
       });
       this.editTask(task.id, { tiers });
@@ -1284,8 +1318,8 @@ export class BoardStore {
           this.commit({ type: "TasksReset", taskIds: reset.map((t) => t.id), pointsBanked });
         }
         start();
-        // A week close banks the frost the Freezer gathered, freezes what has waited too long, rolls the new
-        // week's Bounties from the Freezer and deals its Booster hand (a first start closes nothing, so it does
+        // A week close banks the frost the Freezer gathered, freezes what has waited too long, deals the new
+        // week's Bounty reel from the Freezer and its Booster hand (a first start closes nothing, so it does
         // none of it).
         if (kind === "week") {
           frost = this.bankFrost(open.key);
@@ -1305,7 +1339,7 @@ export class BoardStore {
             .sort()
             .map((dayKey) => this.recapDay(dayKey, tally.has(dayKey) ? [tally.get(dayKey)!] : []))
         : [this.recapDay(closedKey, [...tally.values()])];
-    const recap: Omit<PeriodRecap, "bounties" | "bountyEmpty" | "booster"> = {
+    const recap: Omit<PeriodRecap, "bounty" | "bountyEmpty" | "booster"> = {
       kind,
       periodKey: closedKey,
       days,
@@ -1322,9 +1356,9 @@ export class BoardStore {
       frozen,
     };
     const weekClosed = kind === "week" && !!open && open.key !== currentKey;
-    const bounties = weekClosed ? this.bountiesView(now) : [];
+    const bounty = weekClosed && this.settings.bounty.enabled ? this.bountyStatus(now) : null;
     // Bounties are on, but there was nothing on ice to roll — the recap says so.
-    const bountyEmpty = weekClosed && this.settings.bounty.enabled && bounties.length === 0;
+    const bountyEmpty = !!bounty && !bounty.reel;
     const booster = weekClosed ? this.boosterHand() : null;
     // The week ends with the day that ends it: once the week a day was in is over, ending the day ends the
     // week too — a follow-up of the owner's one answer, so a week is never asked about. Its recap comes
@@ -1332,9 +1366,9 @@ export class BoardStore {
     if (kind === "day" && this.periodStatus(now).week.due) {
       const weekWasOpen = this.openPeriods.week !== undefined;
       const week = this.rollPeriod("week", now);
-      return { recap: { ...recap, bounties, bountyEmpty, booster }, streaks: week.streaks, ...(weekWasOpen ? { week: week.recap } : {}) };
+      return { recap: { ...recap, bounty, bountyEmpty, booster }, streaks: week.streaks, ...(weekWasOpen ? { week: week.recap } : {}) };
     }
-    return { recap: { ...recap, bounties, bountyEmpty, booster }, streaks: this.listStreaks() };
+    return { recap: { ...recap, bounty, bountyEmpty, booster }, streaks: this.listStreaks() };
   }
 
   // A week close's frost: every task in a Freezer banks the whole days it spent there since its last bank,
@@ -1401,12 +1435,12 @@ export class BoardStore {
   }
 
   // A new week's Bounties, while they're on: its free rerolls granted (frozen, so a later change to the
-  // setting leaves this week's alone), then as many Bounties as may be on at once.
+  // setting leaves this week's alone), then its reel dealt — good for as many Bounties as may be on at once.
   private startWeekBounties(periodKey: string, now: Date): void {
     const { enabled, max, rerolls } = this.settings.bounty;
     if (!enabled) return;
     this.commit({ type: "BountyRerollsGranted", count: rerolls, source: "week", periodKey });
-    for (let i = 0; i < max; i++) if (!this.rollBounty(periodKey, now)) break;
+    this.dealBountyReel(periodKey, max, now);
   }
 
   // A new week's Booster hand, while Boosters are on: the Registry's habits shuffled and dealt face down (a
@@ -1481,44 +1515,74 @@ export class BoardStore {
     return this.boosterHand()!;
   }
 
-  // Winning a Bounty rolls another when Settings say so (rollOnWin) — up to the most that may be on at
-  // once — as a follow-up of the command that won it. Only a win: `before` is how many were still to win
-  // before it, so an untick-and-retick can't farm new ones.
+  // Winning a Bounty deals a reel for another when Settings say so (rollOnWin) — up to the most that may be
+  // on at once, counting any still to roll — as a follow-up of the command that won it. Only a win: `before`
+  // is how many were still to win before it, so an untick-and-retick can't farm new ones.
   private rollAfterWin(before: number, now: Date = clockNow()): void {
     const week = this.openPeriods.week?.key;
     const { enabled, rollOnWin, max } = this.settings.bounty;
     if (!week || !enabled || !rollOnWin) return;
-    let active = this.activeBounties().length;
+    const active = this.activeBounties().length;
     if (active >= before) return;
-    while (active < max && this.rollBounty(week, now)) active++;
+    const rolls = max - active;
+    if (rolls > (this.openReel()?.rolls ?? 0)) this.dealBountyReel(week, rolls, now);
   }
 
-  // Roll a Bounty for `periodKey`: one candidate (canBounty) not already one of its Bounties, weighted by
-  // how long it's been on the board — recorded, never re-rolled. A reroll `replaces` one, spending from
-  // `rerollFrom`. Returns the task it landed on (null: nothing to roll).
-  private rollBounty(
+  // Deal `periodKey`'s reel, good for `rolls` stops: every candidate (canBounty) not already one of its
+  // Bounties, on as many spots as its weight — how long it's been on ice — shuffled, and recorded, so a stop
+  // is a real draw and a rebuild never deals again. A reroll's reel `replaces` a Bounty, spending from
+  // `rerollFrom`. False with nothing to deal.
+  private dealBountyReel(
     periodKey: string,
+    rolls: number,
     now: Date,
     reroll?: { replaces: string; rerollFrom: "week" | "bank" },
     idempotencyKey?: string | null,
-  ): string | null {
+  ): boolean {
     const taken = new Set((this.bounties.get(periodKey) ?? []).map((b) => b.taskId));
     const open = this.bountyCandidates().filter((t) => !taken.has(t.id));
-    // Never a task the week's already had (a reroll would just bring the last one back) — unless there's
-    // nothing else left.
+    // Never a task the week's already had (a reroll would just bring the last one back) — unless too few
+    // others are left.
     const had = this.bountiedIn.get(periodKey);
     const fresh = open.filter((t) => !had?.has(t.id));
-    const candidates = fresh.length > 0 ? fresh : open;
-    const pick = pickWeighted(candidates, (t) => bountyWeight(t, now.toISOString()), this.random());
-    if (!pick) return null;
-    this.commit({
-      type: "BountyRolled",
-      taskId: pick.id,
-      periodKey,
-      multiplier: this.settings.bounty.multiplier,
-      ...(reroll ? { reroll: true, ...reroll } : {}),
-    }, idempotencyKey);
-    return pick.id;
+    const candidates = fresh.length >= rolls ? fresh : open;
+    const taskIds = bountyReel(candidates, (t) => bountyWeight(t, now.toISOString()), this.random).map((t) => t.id);
+    if (taskIds.length === 0) return false;
+    this.commit({ type: "BountyReelDealt", periodKey, taskIds, rolls: Math.min(rolls, new Set(taskIds).size), ...reroll }, idempotencyKey);
+    return true;
+  }
+
+  // The open week's reel while there's something on it to stop: the tasks on its spots that can still be
+  // rolled, in order — one that has left the Freezer (or the board) since the deal is off it — and the stops
+  // it has left. Null otherwise.
+  private openReel(): { tasks: Task[]; rolls: number } | null {
+    const week = this.openPeriods.week?.key;
+    const reel = week && this.settings.bounty.enabled ? this.bountyReels.get(week) : undefined;
+    if (!reel) return null;
+    const candidates = new Map(this.bountyCandidates().map((t) => [t.id, t]));
+    const tasks = reel.taskIds.flatMap((id) => {
+      const task = candidates.get(id);
+      return task ? [task] : [];
+    });
+    const rolls = Math.min(reel.rolls, new Set(tasks).size);
+    return rolls > 0 ? { tasks, rolls } : null;
+  }
+
+  // Stop the open week's reel on `spot`: the task the deal put there is a Bounty until the week closes, at
+  // the setting's multiplier now. Only while the reel has stops left, and only a spot that's on it.
+  rollBounty(spot: number, idempotencyKey?: string | null, now: Date = clockNow()): BountyStopped {
+    const week = this.openPeriods.week?.key;
+    const reel = this.openReel();
+    if (!week || !reel) throw badRequest("there's no Bounty to roll");
+    const task = reel.tasks[spot];
+    if (!task) throw badRequest("that spot isn't on the reel");
+    const { stored } = this.commit(
+      { type: "BountyRolled", taskId: task.id, periodKey: week, multiplier: this.settings.bounty.multiplier, spot },
+      idempotencyKey,
+    );
+    // A retried stop is answered with the Bounty its first try rolled (the reel has moved on since).
+    const rolled = stored.event.type === "BountyRolled" ? stored.event.taskId : task.id;
+    return { ...this.bountyStatus(now), rolled: this.bountyView(this.requireTask(rolled), now) };
   }
 
   // Rerolls left: the open week's free ones (granted at its start), and bought ones banked.
@@ -1529,6 +1593,16 @@ export class BoardStore {
     return { free, banked: Math.max(0, this.bankedRerolls) };
   }
 
+  // A reroll spent, in the fold: a bought one, else one of `periodKey`'s free ones.
+  private spendReroll(periodKey: string, from: "week" | "bank" | undefined): void {
+    if (from === "bank") {
+      this.bankedRerolls -= 1;
+      return;
+    }
+    const own = this.freeRerolls.get(periodKey) ?? { granted: null, used: 0 };
+    this.freeRerolls.set(periodKey, { ...own, used: own.used + 1 });
+  }
+
   private bountyCandidates(): Task[] {
     return this.tasks.filter((t) => {
       const section = this.sections.find((s) => s.id === t.sectionId);
@@ -1536,43 +1610,44 @@ export class BoardStore {
     });
   }
 
-  // A Bounty as its reel shows it, with other candidates' names for the reel (the most avoided first —
-  // display only, nothing random).
+  // A Bounty as a landed reel shows it, with other candidates' names to draw around it (the most avoided
+  // first — display only, nothing random).
   private bountyView(task: Task, now: Date = clockNow()): RolledBounty {
-    const { free, banked } = this.rerollsLeft();
     const reel = this.bountyCandidates()
       .filter((t) => t.id !== task.id)
       .sort((a, b) => bountyWeight(b, now.toISOString()) - bountyWeight(a, now.toISOString()))
       .slice(0, 7)
       .map((t) => t.text);
-    return { taskId: task.id, text: task.text, multiplier: this.bountyOn(task)?.multiplier ?? 1, rerollsLeft: free + banked, reel };
+    return { taskId: task.id, text: task.text, multiplier: this.bountyOn(task)?.multiplier ?? 1, reel };
   }
 
-  private bountiesView(now: Date = clockNow()): RolledBounty[] {
-    return this.activeBounties().map((task) => this.bountyView(task, now));
-  }
-
-  // The open week's Bounties still to win, and the rerolls left.
+  // The open week's Bounties still to win, the rerolls left, and its reel while a Bounty is still to roll.
   bountyStatus(now: Date = clockNow()): BountyStatus {
     const { free, banked } = this.rerollsLeft();
-    return { bounties: this.bountiesView(now), rerollsLeft: free + banked };
+    const reel = this.openReel();
+    return {
+      bounties: this.activeBounties().map((task) => this.bountyView(task, now)),
+      rerollsLeft: free + banked,
+      reel: reel && { spots: reel.tasks.map((t) => t.text), rolls: reel.rolls, multiplier: this.settings.bounty.multiplier },
+    };
   }
 
-  // Reroll one of this week's Bounties onto another candidate — while rerolls are left (the week's free
-  // ones first, then bought ones), and only before it's won (otherwise a finished Bounty could be traded
-  // for another). Returns the new one.
-  rerollBounty(taskId: string, idempotencyKey?: string | null, now: Date = clockNow()): RolledBounty {
+  // Reroll one of this week's Bounties: it stops being one, and a new reel is dealt without it, to stop
+  // once — while rerolls are left (the week's free ones first, then bought ones), only before it's won
+  // (otherwise a finished Bounty could be traded for another), and only once the week's own reel is all
+  // stopped. Returns the week's Bounties with the new reel.
+  rerollBounty(taskId: string, idempotencyKey?: string | null, now: Date = clockNow()): BountyStatus {
     const week = this.openPeriods.week?.key;
     const bounty = week && this.settings.bounty.enabled ? this.bounties.get(week)?.find((b) => b.taskId === taskId) : undefined;
     if (!week || !bounty) throw badRequest("that task isn't a Bounty this week");
     const task = this.tasks.find((t) => t.id === taskId);
     if (task && behaviorOf(task).isDone(task)) throw badRequest("this Bounty is already won");
+    if (this.openReel()) throw badRequest("this week's Bounties aren't all rolled yet");
     const { free, banked } = this.rerollsLeft();
     const rerollFrom = rerollSource(free, banked);
     if (!rerollFrom) throw badRequest("no rerolls left");
-    const picked = this.rollBounty(week, now, { replaces: taskId, rerollFrom }, idempotencyKey);
-    if (!picked) throw badRequest("there's nothing else to roll");
-    return this.bountyView(this.requireTask(picked), now);
+    if (!this.dealBountyReel(week, 1, now, { replaces: taskId, rerollFrom }, idempotencyKey)) throw badRequest("there's nothing else to roll");
+    return this.bountyStatus(now);
   }
 
   // "Reset progress, keep the board": wipe all history/state but rebuild the board from its CURRENT
@@ -1700,6 +1775,7 @@ export class BoardStore {
     this.banked = 0;
     this.bankedLevels.clear();
     this.bounties.clear();
+    this.bountyReels.clear();
     this.bountiedIn.clear();
     this.freeRerolls.clear();
     this.bankedRerolls = 0;
@@ -1827,6 +1903,8 @@ export class BoardStore {
         // `count` is the box count; `target` is its pre-merge name (count ?? target). A multi-box
         // task starts its ticks in `progress`; a plain checkbox (count absent/1) uses `done`.
         const count = event.count ?? event.target;
+        // Likewise `estimateEffortIndex` is the pre-id form of `estimateEffort`.
+        const effort = event.estimateEffort ?? legacyEffortId(event.estimateEffortIndex);
         this.tasks.push({
           id: event.taskId,
           sectionId: event.sectionId,
@@ -1836,10 +1914,10 @@ export class BoardStore {
           ...(event.points !== undefined ? { points: event.points } : {}),
           ...(event.estimate ? { estimate: event.estimate } : {}),
           ...(event.estimateMinutes !== undefined ? { estimateMinutes: floorMinutes(event.estimateMinutes) } : {}),
-          ...(event.estimateEffortIndex != null ? { estimateEffortIndex: event.estimateEffortIndex } : {}),
+          ...(effort !== undefined ? { estimateEffort: effort } : {}),
           ...(event.pointsSource !== undefined ? { pointsSource: event.pointsSource } : {}),
           ...(event.description ? { description: event.description } : {}),
-          ...(event.tiers ? { tiers: floorTiers(event.tiers), activeTier: null } : {}),
+          ...(event.tiers ? { tiers: storedTiers(event.tiers), activeTier: null } : {}),
           ...(count !== undefined ? { count } : {}),
           ...(count !== undefined && count > 1 ? { progress: 0 } : {}),
           ...(event.schedule?.some(Boolean) ? { schedule: event.schedule } : {}),
@@ -1913,10 +1991,11 @@ export class BoardStore {
           if (c.points !== undefined) t.points = c.points;
           if (c.estimate !== undefined) t.estimate = c.estimate ?? undefined;
           if (c.estimateMinutes !== undefined) t.estimateMinutes = floorMinutes(c.estimateMinutes ?? undefined);
-          if (c.estimateEffortIndex !== undefined) t.estimateEffortIndex = c.estimateEffortIndex ?? undefined;
+          if (c.estimateEffort !== undefined) t.estimateEffort = c.estimateEffort ?? undefined;
+          else if (c.estimateEffortIndex !== undefined) t.estimateEffort = legacyEffortId(c.estimateEffortIndex);
           if (c.pointsSource !== undefined) t.pointsSource = c.pointsSource;
           if (c.description !== undefined) t.description = c.description ?? undefined;
-          if (c.tiers !== undefined) t.tiers = floorTiers(c.tiers);
+          if (c.tiers !== undefined) t.tiers = storedTiers(c.tiers);
           // `count` is canonical; `target` is the pre-merge alias on old events. Shrinking the box
           // count below what's already ticked clamps progress so state stays valid.
           const nextCount = c.count ?? c.target;
@@ -1991,17 +2070,30 @@ export class BoardStore {
         task.updatedAt = occurredAt;
         return;
       }
+      case "BountyReelDealt": {
+        // A reroll's reel: the Bounty it gives up stops being one, and its reroll is spent.
+        if (event.replaces !== undefined) {
+          this.bounties.set(event.periodKey, (this.bounties.get(event.periodKey) ?? []).filter((b) => b.taskId !== event.replaces));
+          this.spendReroll(event.periodKey, event.rerollFrom);
+        }
+        this.bountyReels.set(event.periodKey, { taskIds: event.taskIds, rolls: event.rolls });
+        return;
+      }
       case "BountyRolled": {
-        // A reroll swaps the one it replaces (an older one, the week's only one); any other roll adds one.
+        // A roll adds one. (Before reels a reroll was a roll too: it swaps the one it replaces — an older
+        // one, the week's only one — and spends its reroll here.)
         const week = this.bounties.get(event.periodKey) ?? [];
         const at = event.replaces !== undefined ? week.findIndex((b) => b.taskId === event.replaces) : event.reroll ? week.length - 1 : -1;
         const rolled = { taskId: event.taskId, multiplier: event.multiplier };
         this.bounties.set(event.periodKey, at >= 0 ? week.map((b, i) => (i === at ? rolled : b)) : [...week, rolled]);
         this.bountiedIn.set(event.periodKey, new Set(this.bountiedIn.get(event.periodKey)).add(event.taskId));
-        if (event.reroll && event.rerollFrom === "bank") this.bankedRerolls -= 1;
-        else if (event.reroll) {
-          const own = this.freeRerolls.get(event.periodKey) ?? { granted: null, used: 0 };
-          this.freeRerolls.set(event.periodKey, { ...own, used: own.used + 1 });
+        if (event.reroll) this.spendReroll(event.periodKey, event.rerollFrom);
+        // Stopped on a reel: one stop fewer, and its task is off it — the next lands on another.
+        const reel = this.bountyReels.get(event.periodKey);
+        if (reel) {
+          const taskIds = reel.taskIds.filter((id) => id !== event.taskId);
+          if (reel.rolls > 1 && taskIds.length > 0) this.bountyReels.set(event.periodKey, { taskIds, rolls: reel.rolls - 1 });
+          else this.bountyReels.delete(event.periodKey);
         }
         return;
       }
@@ -2172,10 +2264,11 @@ export class BoardStore {
         return;
       case "PeriodStarted":
         this.openPeriods[event.kind] = { key: event.periodKey, startedAt: occurredAt };
-        // A week starting starts its Bounties, free rerolls, Booster hand and early sale afresh — the debug clock can reopen
-        // a week, and whatever an earlier run of it held ended when that run closed.
+        // A week starting starts its Bounties, their reel, free rerolls, Booster hand and early sale afresh — the debug
+        // clock can reopen a week, and whatever an earlier run of it held ended when that run closed.
         if (event.kind === "week") {
           this.bounties.delete(event.periodKey);
+          this.bountyReels.delete(event.periodKey);
           this.bountiedIn.delete(event.periodKey);
           this.freeRerolls.delete(event.periodKey);
           this.boosterHands.delete(event.periodKey);
