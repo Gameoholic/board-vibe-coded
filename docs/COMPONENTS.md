@@ -36,7 +36,7 @@ The owner's standing rule, repeated here because it keeps being broken: **nothin
 | A colour swatch row | `ColorPicker` | |
 | The `[%]` bracket | `PointsBracket` | Shared by the row and the flyer, so they're identical by construction. |
 | A % that counts up in a frame | `PointsPlate` | The HUD (`PointsCounter`) is this plus bursts. |
-| A stopwatch on a row | `TaskTimer` | Tier-aware only when handed tiers. |
+| A stopwatch on a row | `Stopwatch` (its reading: `useStopwatch`) | Start / pause / reset / type minutes. `trigger` for a row that draws its own button, children for what the reading is for (Buy, Submit). A task's is `TaskTimer` (tier-aware only when handed tiers); a timed reward's is its price tag. |
 | Link a task by dragging onto it | `usePickWhip` (`pickWhip.tsx`) | The streak form, the Blocked form, Break down's tuck. |
 
 ## A task's form fields
@@ -89,7 +89,7 @@ Retuning any of these is one edit in one file; nothing else repeats them.
 | How each modifier looks | `modifierLooks.ts` |
 | Flying-points sizes · freeze-effect sizes | `flyerTiers.ts` · `freezeFxTiers.ts` |
 | Shop items' names and emoji | `gameItems.ts` |
-| A duration as written and as typed | `duration.ts` |
+| A duration as written and as typed, a stopwatch's reading, and the minutes it counts as | `duration.ts` |
 | A tier as a form's row, and back (its label by place) | `tierRows.ts` |
 | Day and week keys as words | `periodLabels.ts` |
 | Canvas geometry (grid, snap, default placement, the docked counter's room) | `canvas.ts` |
@@ -110,6 +110,7 @@ Retuning any of these is one edit in one file; nothing else repeats them.
 | The theme | `useTheme` |
 | Whether the screen is phone-sized | `usePhoneScreen` |
 | The shop's data and edits | `useShop` |
+| A stopwatch's reading from a `Timer` | `useStopwatch` |
 
 ## Moments and screens
 

@@ -70,7 +70,7 @@ export { canBreakDown, doneFromPieces, newPiecePoints, wholeWorth } from "@board
 // they compose into, as the server pays a completion.
 export { modifiersOf, onWholeTask, payout } from "@board/contracts";
 // The shop: what a reward costs now (its price under the weekend sale), and whether a one-time one is bought.
-export { isBought, priceModifiersOf, priceOf, saleOn } from "@board/contracts";
+export { isBought, listPrice, priceModifiersOf, priceOf, saleOn } from "@board/contracts";
 // Which habits a Booster hand may deal.
 export { canBoost } from "@board/contracts";
 export type { GameItemId, InventoryItem, PriceContext, RewardKind, SaleSettings, SaleWeek } from "@board/contracts";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fromBoost, modifiersOf, onWholeTask, payout, priceModifiersOf, priceOf } from "../dist/modifiers.js";
+import { fromBoost, listPrice, modifiersOf, onWholeTask, payout, priceModifiersOf, priceOf } from "../dist/modifiers.js";
 import { DEFAULT_SETTINGS, saleOn } from "../dist/period.js";
 import { taskPointValue } from "../dist/taskKinds.js";
 
@@ -138,4 +138,18 @@ test("a price takes the sale as a factor, composed by the same payout and rounde
   assert.equal(priceOf(reward(true, 333), { settings: withSale({ percentOff: 50 }), now: THU_1700 }), 167, "half-up, once");
   assert.equal(priceOf(reward(true), { settings: withSale({ percentOff: 100 }), now: THU_1700 }), 0);
   assert.equal(payout(2000, [factor(0.5), factor(0.9)]), 900, "another price factor stacks by multiplying");
+});
+
+test("a timed reward's price is its cost for an hour over the minutes bought — still rounded once", () => {
+  const video = { cost: 2500, onSale: true, timed: true };
+  const fullPrice = { settings: DEFAULT_SETTINGS, now: THU_1659 };
+  const onSale = { settings: DEFAULT_SETTINGS, now: THU_1700 };
+  assert.equal(priceOf(video, fullPrice), 2500, "with no minutes named, an hour of it: its rate");
+  assert.equal(priceOf(video, fullPrice, 30), 1250);
+  assert.equal(priceOf(video, fullPrice, 17), 708, "2500 × 17 ÷ 60 = 708.33");
+  assert.equal(priceOf(video, fullPrice, 90), 3750, "past the hour");
+  assert.equal(priceOf(video, onSale, 30), 625);
+  // 1000 × 7 ÷ 60 = 116.67, half of it 58.33 — rounded first it would be 117, and half of that 59.
+  assert.equal(priceOf({ ...video, cost: 1000 }, onSale, 7), 58);
+  assert.equal(listPrice({ cost: 2000, timed: false }, 30), 2000, "a reward paid for each time has no minutes to count");
 });

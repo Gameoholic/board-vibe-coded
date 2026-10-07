@@ -51,6 +51,7 @@ import {
   type Group,
   isBought,
   isRetired,
+  listPrice,
   newPiecePoints,
   paidAt,
   type PatchSettingsBody,
@@ -65,6 +66,7 @@ import {
   type PeriodStatus,
   type PriceContext,
   priceModifiersOf,
+  type PurchaseRewardBody,
   priorityOf,
   saleOn,
   rerollSource,
@@ -208,6 +210,9 @@ export class BoardStore {
   private shopSections: ShopSection[] = [];
   private rewards: Reward[] = [];
   private spent = 0;
+  // Each timed reward's stopwatch while there's time on it (RewardTimerSet; a purchase clears it). Unlike a
+  // task's it's in the log: that time is what gets paid for, so a restart mustn't lose it.
+  private rewardTimers = new Map<string, Timer>();
   // Points kept from tasks a period roll unchecked — the sum of every TasksReset's frozen pointsBanked.
   private banked = 0;
   // Boxes kept the same way, per task: the filled level each task held whenever a roll unchecked it,
@@ -336,9 +341,15 @@ export class BoardStore {
     },
   };
 
-  // A reward as served: its position in its shop section stamped on, like readTask does for tasks.
+  // A reward as served: its position in its shop section stamped on, like readTask does for tasks, and a
+  // timed one's stopwatch.
   private readReward(reward: Reward): Reward {
-    return { ...reward, order: this.orderIndex(reward.shopSectionId, reward.id) };
+    const timer = this.rewardTimers.get(reward.id);
+    return { ...reward, order: this.orderIndex(reward.shopSectionId, reward.id), ...(timer ? { timer } : {}) };
+  }
+
+  getReward(id: string): Reward {
+    return this.readReward(this.requireReward(id));
   }
 
   // The owner's spendable points: what the board currently holds plus what period rolls banked, minus
@@ -1117,6 +1128,7 @@ export class BoardStore {
       kind: body.kind,
       ...(body.item ? { item: body.item } : {}),
       onSale: body.onSale ?? body.kind === "repeatable",
+      ...(body.timed ? { timed: true } : {}),
     };
     this.commit(event, idempotencyKey);
     return this.readReward(this.requireReward(event.rewardId));
@@ -1124,14 +1136,25 @@ export class BoardStore {
 
   editReward(id: string, changes: RewardEditFields, idempotencyKey?: string | null): Reward {
     const reward = this.requireReward(id);
+    if (changes.timed && reward.kind !== "repeatable") throw badRequest("only a repeatable reward can be timed");
     const previous: RewardEditFields = {};
     if (changes.name !== undefined) previous.name = reward.name;
     if (changes.emoji !== undefined) previous.emoji = reward.emoji;
     if (changes.cost !== undefined) previous.cost = reward.cost;
     if (changes.note !== undefined) previous.note = reward.note ?? null;
     if (changes.onSale !== undefined) previous.onSale = reward.onSale;
+    if (changes.timed !== undefined) previous.timed = reward.timed;
     this.commit({ type: "RewardEdited", rewardId: id, changes, previous }, idempotencyKey);
     return this.readReward(this.requireReward(id));
+  }
+
+  // A timed reward's stopwatch, as its owner left it (null resets it). The reading is theirs to set — they
+  // can type any time over it — so it's kept as given; what the server decides is what that time costs.
+  setRewardTimer(id: string, timer: Timer | null, idempotencyKey?: string | null): Reward {
+    const reward = this.requireReward(id);
+    if (!reward.timed) throw badRequest("that reward isn't timed");
+    this.commit({ type: "RewardTimerSet", rewardId: id, timer }, idempotencyKey);
+    return this.readReward(reward);
   }
 
   deleteReward(id: string, idempotencyKey?: string | null): void {
@@ -1150,19 +1173,31 @@ export class BoardStore {
 
   // Buy a reward at what it costs now (its price under its modifiers — the weekend sale), checked against the
   // server's own view of the points (the client is never trusted for them); the price, and what changed it,
-  // are frozen onto the purchase. `shown` is the price the owner saw: if the server's differs (the sale began
-  // or ended in between), nothing is bought. A one-time reward is bought once; an Item reward gives its item
-  // too, only when the purchase is new (a retried request gives nothing twice). Returns the whole shop so the
-  // client reconciles `spent`, the bought-count and what's held in one go.
-  purchaseReward(id: string, shown?: number, idempotencyKey?: string | null): Shop {
+  // are frozen onto the purchase. `price` is the one the owner saw: if the server's differs (the sale began
+  // or ended in between), nothing is bought. A timed reward is bought for `minutes` of it, at its cost an
+  // hour — frozen too — and no other reward takes any. A one-time reward is bought once; an Item reward gives
+  // its item too, only when the purchase is new (a retried request gives nothing twice). Returns the whole
+  // shop so the client reconciles `spent`, the bought-count and what's held in one go.
+  purchaseReward(id: string, { price: shown, minutes }: PurchaseRewardBody = {}, idempotencyKey?: string | null): Shop {
     const reward = this.requireReward(id);
     if (isBought(reward)) throw badRequest("already bought");
+    if (reward.timed && minutes === undefined) throw badRequest("a timed reward is bought by the minute");
+    if (!reward.timed && minutes !== undefined) throw badRequest("that reward isn't timed");
     const modifiers = priceModifiersOf(reward, this.priceContext());
-    const price = payout(reward.cost, modifiers);
+    const price = payout(listPrice(reward, minutes), modifiers);
     if (shown !== undefined && shown !== price) throw conflict("the price changed");
+    // Too short a time at too low a rate rounds to nothing — and a purchase always spends something.
+    if (price <= 0) throw badRequest("nothing to pay for");
     if (this.pointsAvailable() < price) throw badRequest("not enough points");
     const result = this.commit(
-      { type: "RewardPurchased", rewardId: id, pointsSpent: price, cost: reward.cost, ...(modifiers.length > 0 ? { modifiers } : {}) },
+      {
+        type: "RewardPurchased",
+        rewardId: id,
+        pointsSpent: price,
+        cost: reward.cost,
+        ...(modifiers.length > 0 ? { modifiers } : {}),
+        ...(minutes !== undefined ? { minutes } : {}),
+      },
       idempotencyKey,
     );
     if (result.created && reward.item) this.gameItems[reward.item].grant();
@@ -1760,6 +1795,7 @@ export class BoardStore {
           kind: r.kind,
           ...(r.item ? { item: r.item } : {}),
           onSale: r.onSale,
+          ...(r.timed ? { timed: true } : {}),
         });
       }
     }
@@ -1791,6 +1827,7 @@ export class BoardStore {
     this.shopSections = [];
     this.rewards = [];
     this.spent = 0;
+    this.rewardTimers.clear();
     this.banked = 0;
     this.bankedLevels.clear();
     this.bounties.clear();
@@ -1855,7 +1892,12 @@ export class BoardStore {
     }
     if (event.type === "RewardPurchased") {
       const reward = this.rewards.find((r) => r.id === event.rewardId);
-      const purchase: RecapPurchase = { name: reward?.name ?? "A reward", emoji: reward?.emoji ?? "", cost: event.pointsSpent };
+      const purchase: RecapPurchase = {
+        name: reward?.name ?? "A reward",
+        emoji: reward?.emoji ?? "",
+        cost: event.pointsSpent,
+        ...(event.minutes !== undefined ? { minutes: event.minutes } : {}),
+      };
       for (const tally of Object.values(this.tallies)) dayOf(tally).purchases.push(purchase);
     }
     // A deleted task's points are gone from the board, so they aren't the period's either.
@@ -2335,6 +2377,7 @@ export class BoardStore {
       }
       case "ShopSectionDeleted":
         this.shopSections = this.shopSections.filter((s) => s.id !== event.shopSectionId);
+        for (const r of this.rewards) if (r.shopSectionId === event.shopSectionId) this.rewardTimers.delete(r.id);
         this.rewards = this.rewards.filter((r) => r.shopSectionId !== event.shopSectionId);
         this.groups = this.groups.filter((g) => g.sectionId !== event.shopSectionId);
         this.itemOrder.delete(event.shopSectionId);
@@ -2352,6 +2395,7 @@ export class BoardStore {
           kind,
           ...(event.item ? { item: event.item } : {}),
           onSale: event.onSale ?? kind === "repeatable",
+          timed: event.timed ?? false,
           redeemed: 0,
           createdAt: occurredAt,
         });
@@ -2369,24 +2413,34 @@ export class BoardStore {
       case "RewardEdited": {
         const reward = this.rewards.find((r) => r.id === event.rewardId);
         if (!reward) return;
-        const { name, emoji, cost, note, onSale } = event.changes;
+        const { name, emoji, cost, note, onSale, timed } = event.changes;
         if (name !== undefined) reward.name = name;
         if (emoji !== undefined) reward.emoji = emoji;
         if (cost !== undefined) reward.cost = cost;
         if (note !== undefined) reward.note = note ?? undefined;
         if (onSale !== undefined) reward.onSale = onSale;
+        if (timed !== undefined) reward.timed = timed;
+        // A reward no longer paid for by its time has no use for a stopwatch.
+        if (timed === false) this.rewardTimers.delete(reward.id);
         return;
       }
       case "RewardDeleted": {
         const reward = this.rewards.find((r) => r.id === event.rewardId);
         if (reward) this.removeFromOrder(reward.shopSectionId, event.rewardId);
         this.rewards = this.rewards.filter((r) => r.id !== event.rewardId);
+        this.rewardTimers.delete(event.rewardId);
         this.dropGroupIfEmpty(reward?.groupId);
         return;
       }
+      case "RewardTimerSet":
+        if (event.timer && this.rewards.some((r) => r.id === event.rewardId)) this.rewardTimers.set(event.rewardId, event.timer);
+        else this.rewardTimers.delete(event.rewardId);
+        return;
       case "RewardPurchased": {
         // The frozen pointsSpent, not the reward's current cost — a later price edit never rewrites it.
         this.spent += event.pointsSpent;
+        // The time on its stopwatch is what was just paid for.
+        this.rewardTimers.delete(event.rewardId);
         const reward = this.rewards.find((r) => r.id === event.rewardId);
         if (!reward) return;
         reward.redeemed += 1;

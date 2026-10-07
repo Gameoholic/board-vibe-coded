@@ -13,6 +13,7 @@ import {
   TaskPriority,
   TaskStatus,
   TierDef,
+  Timer,
 } from "./domain.js";
 import { PeriodKindSchema, PeriodSnapshotEntry, Settings, TaskSchedule } from "./period.js";
 import { Points } from "./points.js";
@@ -101,6 +102,7 @@ export const RewardEditFields = z.object({
   // Nullable so an edit can clear the note (and `previous` can record that there was none).
   note: z.string().nullable().optional(),
   onSale: z.boolean().optional(),
+  timed: z.boolean().optional(),
 });
 export type RewardEditFields = z.infer<typeof RewardEditFields>;
 
@@ -423,6 +425,8 @@ export const BoardEvent = z.discriminatedUnion("type", [
     kind: RewardKind.optional(),
     item: GameItemId.optional(),
     onSale: z.boolean().optional(),
+    // Paid for by the time it takes, at `cost` an hour (absent ≡ paid for each time).
+    timed: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("RewardEdited"),
@@ -434,14 +438,19 @@ export const BoardEvent = z.discriminatedUnion("type", [
   // Reorders a shop section's rewards — the reward counterpart of TasksReordered (a group's members
   // are kept contiguous by the client, so this is just the flat reward-id order).
   z.object({ type: z.literal("RewardsReordered"), shopSectionId: z.string(), orderedIds: z.array(z.string()) }),
+  // A timed reward's stopwatch as it was left — started, paused, set by hand — or null once it's reset.
+  // Buying the time on it clears it (the fold, on RewardPurchased), so a purchase needs no second event.
+  z.object({ type: z.literal("RewardTimerSet"), rewardId: z.string(), timer: Timer.nullable() }),
   // `cost` is its price then and `modifiers` what changed it (the weekend sale), frozen like a completion's —
-  // both absent on purchases from before price modifiers, when what was spent was the price.
+  // both absent on purchases from before price modifiers, when what was spent was the price. A timed
+  // reward's purchase is for `minutes`, at `cost` an hour.
   z.object({
     type: z.literal("RewardPurchased"),
     rewardId: z.string(),
     pointsSpent: Points,
     cost: Points.optional(),
     modifiers: z.array(AppliedModifier).optional(),
+    minutes: z.number().int().positive().optional(),
   }),
 ]);
 export type BoardEvent = z.infer<typeof BoardEvent>;

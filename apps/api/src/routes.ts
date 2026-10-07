@@ -21,6 +21,7 @@ import {
   RerollBountyBody,
   RecolorSectionBody,
   ReorderBody,
+  type Reward,
   type RewardEditFields,
   RollBountyBody,
   RollPeriodBody,
@@ -248,7 +249,13 @@ export function buildRouter(store: BoardStore, backups: Backups): Router {
     if (body.cost !== undefined) changes.cost = body.cost;
     if (body.note !== undefined) changes.note = body.note || null;
     if (body.onSale !== undefined) changes.onSale = body.onSale;
-    res.json(store.editReward(req.params.id, changes, idemKey(req, "reward-edit")));
+    if (body.timed !== undefined) changes.timed = body.timed;
+    // Each part of the bundle is its own command, as a task's are.
+    const id = req.params.id;
+    let reward: Reward | undefined;
+    if (Object.keys(changes).length > 0) reward = store.editReward(id, changes, idemKey(req, "reward-edit"));
+    if (body.timer !== undefined) reward = store.setRewardTimer(id, body.timer, idemKey(req, "reward-timer"));
+    res.json(reward ?? store.getReward(id));
   });
 
   router.delete("/shop/rewards/:id", (req, res) => {
@@ -263,8 +270,8 @@ export function buildRouter(store: BoardStore, backups: Backups): Router {
 
   // Buy at the price the owner was shown (409 when it has changed since — see purchaseReward).
   router.post("/shop/rewards/:id/purchase", (req, res) => {
-    const { price } = PurchaseRewardBody.parse(req.body ?? {});
-    res.json(store.purchaseReward(req.params.id, price, idemKey(req, "reward-purchase")));
+    const body = PurchaseRewardBody.parse(req.body ?? {});
+    res.json(store.purchaseReward(req.params.id, body, idemKey(req, "reward-purchase")));
   });
 
   // ---- settings & periods ----

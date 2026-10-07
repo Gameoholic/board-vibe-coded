@@ -5,8 +5,9 @@ import {
   type Reward,
   type Shop,
   type ShopSection,
+  type Timer,
 } from "@board/contracts";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { groupsApi, withMembership, withOrder, withoutGroup } from "./listOps";
 
 // The shop's tabs, their rewards (with list order + groups, exactly like a board tab's tasks) and the
@@ -17,7 +18,7 @@ import { groupsApi, withMembership, withOrder, withoutGroup } from "./listOps";
 // the shared list plumbing (listOps), the same the board's tasks use.
 
 // What the edit form changes; a new reward also says what kind it is (set once, like a task's type).
-export type RewardInput = Pick<Reward, "emoji" | "name" | "cost" | "note" | "onSale">;
+export type RewardInput = Pick<Reward, "emoji" | "name" | "cost" | "note" | "onSale" | "timed">;
 export type NewReward = RewardInput & Pick<Reward, "kind" | "item">;
 
 const EMPTY: Shop = { sections: [], rewards: [], groups: [], spent: 0, inventory: [], saleStarted: false };
@@ -119,12 +120,34 @@ export function useShop() {
   }, []);
 
   // The edit form always sends every field it edits (a kind is set once); an empty note travels as null so
-  // the server clears it.
-  const editReward = useCallback((id: string, { emoji, name, cost, note, onSale }: RewardInput) => {
-    const patch = { emoji, name, cost, note, onSale };
-    setShop((prev) => ({ ...prev, rewards: prev.rewards.map((r) => (r.id === id ? { ...r, ...patch } : r)) }));
+  // the server clears it. A reward no longer timed loses its stopwatch (the server's fold does the same).
+  const editReward = useCallback((id: string, { emoji, name, cost, note, onSale, timed }: RewardInput) => {
+    const patch = { emoji, name, cost, note, onSale, timed };
+    setShop((prev) => ({
+      ...prev,
+      rewards: prev.rewards.map((r) => (r.id === id ? { ...r, ...patch, timer: timed ? r.timer : undefined } : r)),
+    }));
     fetch(`/api/shop/rewards/${id}`, { method: "PATCH", ...jsonBody({ ...patch, note: note ?? null }) });
   }, []);
+
+  // A timed reward's stopwatch saves, and the purchase of the time on it, reach the server in the order they
+  // were made: a purchase that overtook the save before it would be followed by that save, putting time just
+  // paid for back on the clock. Each reward's writes wait for its last one.
+  const timerWrites = useRef(new Map<string, Promise<unknown>>());
+  const afterTimerWrites = useCallback(<T,>(id: string, write: () => Promise<T>): Promise<T> => {
+    const done = (timerWrites.current.get(id) ?? Promise.resolve()).then(write);
+    timerWrites.current.set(id, done.catch(() => undefined));
+    return done;
+  }, []);
+
+  // A timed reward's stopwatch as it's left — started, paused, set by hand — or null once it's reset.
+  const setRewardTimer = useCallback(
+    (id: string, timer: Timer | null) => {
+      setShop((prev) => ({ ...prev, rewards: prev.rewards.map((r) => (r.id === id ? { ...r, timer: timer ?? undefined } : r)) }));
+      afterTimerWrites(id, () => fetch(`/api/shop/rewards/${id}`, { method: "PATCH", ...jsonBody({ timer }) }));
+    },
+    [afterTimerWrites],
+  );
 
   const removeReward = useCallback((id: string) => {
     setShop((prev) => ({ ...prev, rewards: prev.rewards.filter((r) => r.id !== id) }));
@@ -133,24 +156,27 @@ export function useShop() {
 
   // Optimistic so the points drop lands with the purchase animation; the server's reply reconciles. `price`
   // is what the owner was shown — the server refuses a different one (the sale began or ended meanwhile),
-  // and the fresh read then shows the real price. Resolves once the server has answered.
+  // and the fresh read then shows the real price. A timed reward is bought for `minutes`, which clears its
+  // stopwatch. Resolves once the server has answered.
   const buy = useCallback(
-    (reward: Reward, price: number): Promise<void> => {
+    (reward: Reward, price: number, minutes?: number): Promise<void> => {
       setShop((prev) => ({
         ...prev,
         spent: prev.spent + price,
         rewards: prev.rewards.map((r) =>
-          r.id === reward.id ? { ...r, redeemed: r.redeemed + 1, boughtAt: new Date().toISOString() } : r,
+          r.id === reward.id ? { ...r, redeemed: r.redeemed + 1, boughtAt: new Date().toISOString(), timer: undefined } : r,
         ),
       }));
-      return fetch(`/api/shop/rewards/${reward.id}/purchase`, { method: "POST", ...jsonBody({ price }) })
+      return afterTimerWrites(reward.id, () =>
+        fetch(`/api/shop/rewards/${reward.id}/purchase`, { method: "POST", ...jsonBody({ price, minutes }) }),
+      )
         .then(async (res) => {
           if (!res.ok) throw new Error(`purchase refused (${res.status})`);
           setShop(ShopSchema.parse(await res.json()));
         })
         .catch(refresh);
     },
-    [refresh],
+    [refresh, afterTimerWrites],
   );
 
   // Start the weekend sale early, for the rest of the week. The server says no once it's on, so its reply (or
@@ -172,6 +198,7 @@ export function useShop() {
     removeSection,
     addReward,
     editReward,
+    setRewardTimer,
     removeReward,
     reorderRewards,
     addGroup,

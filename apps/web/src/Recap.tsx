@@ -3,6 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useState, type CSSProperties } from "react";
 import { BoosterDeal } from "./BoosterDeal";
 import { BountyRolls } from "./BountyRoll";
+import { writeMinutes } from "./duration";
 import { FlameIcon, SnowflakeIcon } from "./Icons";
 import Tooltip from "./Tooltip";
 import { tabInk } from "./palette";
@@ -221,6 +222,7 @@ function Purchases({ day }: { day: RecapDay }) {
             <span className="recap-purchase-name">
               {p.emoji} {p.name}
             </span>
+            {p.minutes !== undefined && <span className="recap-purchase-time">{writeMinutes(p.minutes)}</span>}
             <span className="lost">−{formatPercent(p.cost)}</span>
           </Tooltip>
         </li>

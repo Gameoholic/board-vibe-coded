@@ -350,7 +350,8 @@ export const Reward = z.object({
   shopSectionId: z.string(),
   name: z.string().max(TEXT_MAX),
   emoji: z.string().max(EMOJI_MAX),
-  // Its price before modifiers (the weekend sale) — what it costs now is priceOf (modifiers.ts).
+  // Its price before modifiers (the weekend sale) — what it costs now is priceOf (modifiers.ts). A timed
+  // reward's is its price for an hour.
   cost: Points,
   note: z.string().max(DESCRIPTION_MAX).optional(),
   kind: RewardKind,
@@ -358,6 +359,12 @@ export const Reward = z.object({
   item: GameItemId.optional(),
   // Whether the weekend sale takes its share off this reward (Settings → Weekend sale).
   onSale: z.boolean(),
+  // Whether it's paid for by the time it takes (a video, a game): `cost` is then for an hour, and each
+  // purchase says how many minutes it's for. Only a repeatable reward can be; every reward from before
+  // timed ones is paid for each time.
+  timed: z.boolean().default(false),
+  // A timed reward's stopwatch while there's time on it — until that time is bought, or it's reset.
+  timer: Timer.optional(),
   // Times bought, and when it last was — derived from RewardPurchased events, never stored.
   redeemed: z.number().int().nonnegative(),
   boughtAt: z.string().optional(),

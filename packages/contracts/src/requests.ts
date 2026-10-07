@@ -332,7 +332,8 @@ export const RecapTab = z.object({
 });
 export type RecapTab = z.infer<typeof RecapTab>;
 
-export const RecapPurchase = z.object({ name: z.string(), emoji: z.string(), cost: Points });
+// `minutes` on a timed reward's: how long was bought.
+export const RecapPurchase = z.object({ name: z.string(), emoji: z.string(), cost: Points, minutes: z.number().int().positive().optional() });
 export type RecapPurchase = z.infer<typeof RecapPurchase>;
 
 export const RecapDay = z.object({
@@ -420,7 +421,8 @@ export type PatchShopSectionBody = z.infer<typeof PatchShopSectionBody>;
 const RewardCost = Points.refine((n) => n > 0, "cost must be positive");
 
 // A reward's kind is set when it's made (like a task's type): a "game" reward names the item it gives, and
-// no other kind does. Without `onSale`, the weekend sale takes a repeatable reward and nothing else.
+// no other kind does. Without `onSale`, the weekend sale takes a repeatable reward and nothing else. Only a
+// repeatable reward can be `timed` — paid for by the time it takes, its cost being for an hour.
 export const CreateRewardBody = z
   .object({
     shopSectionId: z.string().min(1),
@@ -431,10 +433,14 @@ export const CreateRewardBody = z
     kind: RewardKind.default("repeatable"),
     item: GameItemId.optional(),
     onSale: z.boolean().optional(),
+    timed: z.boolean().default(false),
   })
-  .refine((b) => (b.kind === "game") === (b.item !== undefined), { message: "an Item reward needs an item, and only it has one" });
+  .refine((b) => (b.kind === "game") === (b.item !== undefined), { message: "an Item reward needs an item, and only it has one" })
+  .refine((b) => !b.timed || b.kind === "repeatable", { message: "only a repeatable reward can be timed" });
 export type CreateRewardBody = z.infer<typeof CreateRewardBody>;
 
+// A bundle of independent edits, like a task's: its definition (`timed` can change, a kind can't), and —
+// apart from that — a timed reward's stopwatch (`null` resets it).
 export const PatchRewardBody = z.object({
   name: z.string().trim().min(1).max(TEXT_MAX).optional(),
   emoji: z.string().trim().min(1).max(EMOJI_MAX).optional(),
@@ -442,12 +448,18 @@ export const PatchRewardBody = z.object({
   // Nullable so a patch can clear the note; absent leaves it untouched.
   note: z.string().trim().max(DESCRIPTION_MAX).nullable().optional(),
   onSale: z.boolean().optional(),
+  timed: z.boolean().optional(),
+  timer: Timer.nullable().optional(),
 });
 export type PatchRewardBody = z.infer<typeof PatchRewardBody>;
 
 // Buy a reward. `price` is what the owner was shown: when the server's price differs (the sale started or
-// ended in between), nothing is bought — never a price they didn't see.
-export const PurchaseRewardBody = z.object({ price: Points.optional() });
+// ended in between), nothing is bought — never a price they didn't see. A timed reward is bought by the
+// minute: `minutes` is how long it's for (the server prices them), and no other reward takes any.
+export const PurchaseRewardBody = z.object({
+  price: Points.optional(),
+  minutes: z.number().int().positive().max(MINUTES_MAX).optional(),
+});
 export type PurchaseRewardBody = z.infer<typeof PurchaseRewardBody>;
 
 // Debug clock: pin the server's notion of "now" to an ISO instant to simulate opening the app at

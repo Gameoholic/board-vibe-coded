@@ -275,7 +275,8 @@ export const STREAKS_OFFER: TabOffer<StreakView, void> = {
 
 // ---- Rewards ----
 
-/** What the reward sorts need to know: what each costs now (the weekend sale off it), and what you can spend. */
+/** What the reward sorts need to know: what each costs now (the weekend sale off it — a timed one's, for an
+ *  hour), and what you can spend. */
 export interface RewardSortContext {
   price: (reward: Reward) => number;
   points: number;

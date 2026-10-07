@@ -27,7 +27,7 @@ interface ShopViewProps {
   points: number; // the owner's spendable points (board total + banked − spent), thousandths-of-a-percent
   shop: ShopApi;
   local: LocalConfigApi; // device-local layouts, canvas settings and tab prefs — shared with the board
-  onBuy: (reward: Reward, price: number) => void;
+  onBuy: (reward: Reward, price: number, minutes?: number) => void;
 }
 
 function ShopView({ points, shop, local, onBuy }: ShopViewProps) {
@@ -105,6 +105,7 @@ function ShopView({ points, shop, local, onBuy }: ShopViewProps) {
             onEditReward={shop.editReward}
             onRemoveReward={shop.removeReward}
             onBuy={onBuy}
+            onRewardTimer={shop.setRewardTimer}
             onReorder={(orderedIds) => shop.reorderRewards(section.id, orderedIds)}
             onAddGroup={(rewardIds) => shop.addGroup(section.id, rewardIds)}
             onExtendGroup={shop.extendGroup}

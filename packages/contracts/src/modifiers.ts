@@ -113,6 +113,13 @@ export interface PriceContext extends SaleWeek {
   now: string;
 }
 
+/** What a reward's price starts from, before its modifiers: its cost — or, for a timed reward, its cost for an
+ *  hour over the `minutes` it's bought for (an hour when none are named: its rate). Left unrounded, so the
+ *  whole price is still rounded once, by payout. */
+export function listPrice(reward: Pick<Reward, "cost" | "timed">, minutes = 60): number {
+  return reward.timed ? (reward.cost * minutes) / 60 : reward.cost;
+}
+
 const PRICE_MODIFIERS: Modifier<Pick<Reward, "onSale">, PriceContext>[] = [
   // The weekend sale: a factor off the price of a reward that's on sale, while the sale is on.
   {
@@ -130,9 +137,10 @@ export function priceModifiersOf(reward: Pick<Reward, "onSale">, ctx: PriceConte
   });
 }
 
-/** What `reward` costs right now: its price under its modifiers, composed and rounded once. */
-export function priceOf(reward: Pick<Reward, "cost" | "onSale">, ctx: PriceContext): number {
-  return payout(reward.cost, priceModifiersOf(reward, ctx));
+/** What `reward` costs right now: its price under its modifiers, composed and rounded once. A timed reward's
+ *  is for `minutes` of it (an hour when none are named). */
+export function priceOf(reward: Pick<Reward, "cost" | "onSale" | "timed">, ctx: PriceContext, minutes?: number): number {
+  return payout(listPrice(reward, minutes), priceModifiersOf(reward, ctx));
 }
 
 /** The modifiers frozen on an old completion that only recorded a Bounty's factor (`boost`). */

@@ -7,8 +7,9 @@ import { ApiError } from "../dist/errors.js";
 import { BoardStore } from "../dist/projection.js";
 
 // The shop through the real projection: a reward's kind (repeatable, one-time, Item), the weekend sale as a
-// modifier on its price (frozen on the purchase), the items a purchase gives (a Bounty reroll, a
-// Booster reroll — and the Booster reroll's new deal), and a rebuild landing where the commands left it.
+// modifier on its price (frozen on the purchase), a timed reward bought by the minute and its stopwatch, the
+// items a purchase gives (a Bounty reroll, a Booster reroll — and the Booster reroll's new deal), and a rebuild
+// landing where the commands left it.
 
 // The board's timezone is Asia/Jerusalem (UTC+3 in early October 2026). 2026-09-27 is a Sunday.
 const THURSDAY_EVENING = "2026-10-01T15:00:00.000Z"; // 18:00 — the sale is on (from 17:00)
@@ -166,10 +167,124 @@ test("a purchase at a price the owner wasn't shown is refused, and nothing is bo
   const { store, reward, purchases } = board(THURSDAY_EVENING);
   const video = reward("Watch a video", 2000);
   // The page still showed the full price as the sale began.
-  assert.throws(() => store.purchaseReward(video.id, 2000), refused(409));
+  assert.throws(() => store.purchaseReward(video.id, { price: 2000 }), refused(409));
   assert.equal(purchases().length, 0);
-  store.purchaseReward(video.id, 1000);
+  store.purchaseReward(video.id, { price: 1000 });
   assert.equal(purchases().length, 1);
+});
+
+test("a timed reward is bought by the minute, at its cost for an hour", (t) => {
+  t.after(() => setDebugNow(null));
+  const { store, reward, rewardOf, purchases, rebuild } = board();
+  const video = reward("YouTube", 2500, { timed: true });
+  const film = reward("Watch a film", 4000);
+  assert.equal(video.timed, true);
+  assert.equal(film.timed, false, "a reward is paid for each time unless it says otherwise");
+
+  store.purchaseReward(video.id, { minutes: 17 });
+  const [first] = purchases();
+  assert.equal(first.pointsSpent, 708, "2500 × 17 ÷ 60 = 708.33");
+  assert.equal(first.minutes, 17);
+  assert.equal(first.cost, 2500, "what an hour cost then is kept");
+
+  // A later change to its rate never reprices what was bought.
+  store.editReward(video.id, { cost: 6000 });
+  assert.equal(store.getShop().spent, 708);
+  store.purchaseReward(video.id, { minutes: 90, price: 9000 });
+  assert.equal(purchases()[1].pointsSpent, 9000);
+  assert.equal(rewardOf(video.id).redeemed, 2);
+
+  assert.throws(() => store.purchaseReward(video.id), refused(400), "it has to say how long");
+  assert.throws(() => store.purchaseReward(film.id, { minutes: 5 }), refused(400), "and no other reward does");
+  assert.throws(() => store.purchaseReward(video.id, { minutes: 30, price: 1 }), refused(409), "never a price the owner wasn't shown");
+  assert.throws(() => store.purchaseReward(video.id, { minutes: 100_000 }), refused(400), "more time than there are points for");
+  store.editReward(video.id, { cost: 1 });
+  assert.throws(() => store.purchaseReward(video.id, { minutes: 1 }), refused(400), "a purchase always spends something");
+  assert.equal(purchases().length, 2);
+  assert.deepEqual(rebuild().getShop(), store.getShop());
+});
+
+test("the weekend sale takes its share off a timed reward's time, rounded once", (t) => {
+  t.after(() => setDebugNow(null));
+  const { store, reward, purchases } = board(THURSDAY_EVENING);
+  const video = reward("YouTube", 1000, { timed: true });
+  assert.equal(video.onSale, true, "repeatable, so on the sale");
+  store.purchaseReward(video.id, { minutes: 7 });
+  const [bought] = purchases();
+  // 116.67 for the 7 minutes, half of it 58.33 — not 117 halved to 59.
+  assert.equal(bought.pointsSpent, 58);
+  assert.deepEqual(bought.modifiers, [{ id: "sale", kind: "factor", value: 0.5 }]);
+  assert.equal(bought.minutes, 7);
+});
+
+test("a timed reward's stopwatch is kept as it was left, until its time is bought", (t) => {
+  t.after(() => setDebugNow(null));
+  const { store, shelf, reward, rewardOf, rebuild } = board();
+  const video = reward("YouTube", 2500, { timed: true });
+  const film = reward("Watch a film", 4000);
+  const running = { elapsedMs: 0, isRunning: true, startedAt: 1_790_000_000_000 };
+  const paused = { elapsedMs: 17 * 60_000, isRunning: false };
+
+  assert.deepEqual(store.setRewardTimer(video.id, running).timer, running);
+  assert.deepEqual(rebuild().getShop(), store.getShop(), "a restart doesn't lose it");
+  store.setRewardTimer(video.id, paused);
+  assert.deepEqual(rewardOf(video.id).timer, paused);
+  store.setRewardTimer(video.id, null);
+  assert.equal(rewardOf(video.id).timer, undefined, "reset");
+  assert.throws(() => store.setRewardTimer(film.id, paused), refused(400), "only a timed reward has one");
+
+  store.setRewardTimer(video.id, paused);
+  store.purchaseReward(video.id, { minutes: 17 });
+  assert.equal(rewardOf(video.id).timer, undefined, "its time is paid for");
+  assert.deepEqual(rebuild().getShop(), store.getShop());
+
+  // Gone with its reward, and with its reward's tab.
+  store.setRewardTimer(video.id, paused);
+  store.deleteShopSection(shelf.id);
+  assert.deepEqual(rebuild().getShop(), store.getShop());
+});
+
+test("a repeatable reward can be made timed, or not, later — and no other kind can", (t) => {
+  t.after(() => setDebugNow(null));
+  const { events, store, shelf, reward, rebuild } = board();
+  const video = reward("YouTube", 2000);
+  const keyboard = reward("Keyboard", 10_000, { kind: "once" });
+  assert.equal(store.editReward(video.id, { timed: true }).timed, true);
+  assert.throws(() => store.editReward(keyboard.id, { timed: true }), refused(400));
+  assert.throws(() => CreateRewardBody.parse({ shopSectionId: shelf.id, name: "x", emoji: "🎲", cost: 1000, kind: "once", timed: true }));
+
+  store.setRewardTimer(video.id, { elapsedMs: 60_000, isRunning: false });
+  const back = store.editReward(video.id, { timed: false });
+  assert.equal(back.timed, false);
+  assert.equal(back.timer, undefined, "its stopwatch goes with it");
+  const edits = events.readAll().filter((e) => e.event.type === "RewardEdited").map((e) => e.event);
+  assert.deepEqual(edits.map((e) => [e.changes.timed, e.previous.timed]), [[true, false], [false, true]]);
+  assert.deepEqual(rebuild().getShop(), store.getShop());
+});
+
+test("resetting progress keeps a reward timed, and clears its stopwatch with everything else", (t) => {
+  t.after(() => setDebugNow(null));
+  const { store, reward, rewardOf, rebuild } = board();
+  const video = reward("YouTube", 2500, { timed: true });
+  store.setRewardTimer(video.id, { elapsedMs: 60_000, isRunning: false });
+  store.reseedFromCurrent();
+  assert.equal(rewardOf(video.id).timed, true);
+  assert.equal(rewardOf(video.id).timer, undefined);
+  assert.deepEqual(rebuild().getShop(), store.getShop());
+});
+
+test("a day's recap says how long a timed purchase was for", (t) => {
+  t.after(() => setDebugNow(null));
+  const { store, reward, endDayAt } = board(WEDNESDAY);
+  endDayAt(WEDNESDAY);
+  store.purchaseReward(reward("YouTube", 2500, { timed: true }).id, { minutes: 30 });
+  store.purchaseReward(reward("Watch a film", 4000).id);
+  setDebugNow(THURSDAY_AFTERNOON);
+  const { recap } = store.rollPeriod("day");
+  assert.deepEqual(recap.days[0].purchases, [
+    { name: "YouTube", emoji: "🎬", cost: 1250, minutes: 30 },
+    { name: "Watch a film", emoji: "🎬", cost: 4000 },
+  ]);
 });
 
 test("Bounty rerolls: the week's free one and bought ones are counted apart — only bought ones carry over", (t) => {
@@ -221,6 +336,7 @@ test("a reward from before kinds reads as a repeatable on the sale", (t) => {
   const old = reread.getShop().rewards.find((r) => r.id === "old");
   assert.equal(old.kind, "repeatable");
   assert.equal(old.onSale, true);
+  assert.equal(old.timed, false);
   reread.purchaseReward("old");
   assert.equal(reread.getShop().spent, 1000);
 });

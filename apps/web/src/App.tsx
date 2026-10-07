@@ -499,10 +499,10 @@ function App() {
   // from events), so every device agrees.
   const points = displayedPoints + (status?.banked ?? 0) - shopState.shop.spent;
 
-  // At the price the owner was shown. An item lands once the server has it: the rerolls it gives are
-  // read back for the Bounty's and the Booster's menus.
-  function buyReward(reward: Reward, price: number) {
-    shopState.buy(reward, price).then(() => {
+  // At the price the owner was shown (a timed reward's, for those minutes). An item lands once the server
+  // has it: the rerolls it gives are read back for the Bounty's and the Booster's menus.
+  function buyReward(reward: Reward, price: number, minutes?: number) {
+    shopState.buy(reward, price, minutes).then(() => {
       if (!reward.item) return;
       refreshBounty();
       refreshBooster();

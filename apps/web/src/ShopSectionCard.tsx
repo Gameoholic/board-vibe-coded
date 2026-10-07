@@ -8,8 +8,8 @@ import RewardItem, { RewardForm } from "./RewardItem";
 import { tabInk } from "./palette";
 import { DisplayMenu, SortMenu, sortItems, tabView } from "./TabControls";
 import { ADD_BUTTON_KEY, GROUPING_KEY, canAfford, shopTabOffer } from "./tabViews";
-import { isBought, payout, priceModifiersOf } from "./types";
-import type { AppliedModifier, Group, InventoryItem, Reward, ShopSection } from "./types";
+import { isBought, listPrice, payout, priceModifiersOf } from "./types";
+import type { AppliedModifier, Group, InventoryItem, Reward, ShopSection, Timer } from "./types";
 import { useBoardClock } from "./useBoardClock";
 import type { TabPrefs } from "./useLocalConfig";
 import type { NewReward, RewardInput } from "./useShop";
@@ -19,7 +19,8 @@ import type { NewReward, RewardInput } from "./useShop";
 // here is only what's specific to rewards: the reward row, the add form, and the tab settings (unlike the
 // board's fixed tabs, shop tabs are renamed and deleted here). What its menus offer is tabViews.ts's.
 
-// A reward as it's priced now: what it costs, and the modifiers that make it so (the weekend sale).
+// A reward as it's priced now: what it costs (a timed one: for an hour), and the modifiers that make it so
+// (the weekend sale).
 interface Priced {
   price: number;
   modifiers: AppliedModifier[];
@@ -41,7 +42,8 @@ interface ShopSectionCardProps {
   onAddReward: (input: NewReward) => void;
   onEditReward: (id: string, input: RewardInput) => void;
   onRemoveReward: (id: string) => void;
-  onBuy: (reward: Reward, price: number) => void;
+  onBuy: (reward: Reward, price: number, minutes?: number) => void;
+  onRewardTimer: (id: string, timer: Timer | null) => void;
   onReorder: (orderedIds: string[]) => void;
   onAddGroup: (rewardIds: string[]) => void;
   onExtendGroup: (groupId: string, rewardIds: string[]) => void;
@@ -67,6 +69,7 @@ function ShopSectionCard({
   onEditReward,
   onRemoveReward,
   onBuy,
+  onRewardTimer,
   onReorder,
   onAddGroup,
   onExtendGroup,
@@ -87,7 +90,7 @@ function ShopSectionCard({
     const byId = new Map<string, Priced>();
     for (const r of rewards) {
       const modifiers = priceModifiersOf(r, { settings, now, openDay, startedEarly: saleStarted });
-      byId.set(r.id, { price: payout(r.cost, modifiers), modifiers });
+      byId.set(r.id, { price: payout(listPrice(r), modifiers), modifiers });
     }
     return byId;
   }, [rewards, settings, now, openDay, saleStarted]);
@@ -157,11 +160,12 @@ function ShopSectionCard({
             row={row}
             price={priceOf(reward)}
             modifiers={priced.get(reward.id)?.modifiers ?? []}
-            affordable={canAfford(priceOf(reward), { points, closed })}
+            affords={(price) => canAfford(price, { points, closed })}
             showNote={view.shown("note")}
             showBought={view.shown("bought")}
             held={reward.item ? inventory.find((i) => i.item === reward.item) : undefined}
-            onBuy={() => onBuy(reward, priceOf(reward))}
+            onBuy={(price, minutes) => onBuy(reward, price, minutes)}
+            onTimer={(timer) => onRewardTimer(reward.id, timer)}
             onEdit={(input) => onEditReward(reward.id, input)}
             onRemove={() => onRemoveReward(reward.id)}
           />
