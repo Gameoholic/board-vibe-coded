@@ -40,6 +40,10 @@ const DEFAULT_GAP = 24;
 // leaving a big empty band above the tabs. A modest inset keeps them near the top.
 const PLACE_INSET = 24;
 
+// The room the points counter takes at a canvas's top-centre while it's docked there (App.css's .hud-dock:
+// its inset, the plate's height, and air under it) — the arranged block starts below it.
+export const DOCK_CLEARANCE = 128;
+
 // `top` lets a canvas start the block lower — the shop keeps its first row clear of the docked
 // points counter.
 export function defaultLayout(index: number, total: number = 1, top: number = PLACE_INSET): CardLayout {

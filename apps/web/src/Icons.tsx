@@ -507,6 +507,26 @@ export function MoonIcon({ size = 14 }: IconProps) {
   );
 }
 
+// The canvas toolbar's view switch: one tab filling the frame, or every tab laid out on the canvas.
+export function OneTabIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3.5" y="2" width="9" height="12" rx="1.5" />
+      <path d="M6 5.2h4M6 8h4" />
+    </svg>
+  );
+}
+
+export function AllTabsIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round">
+      <rect x="1.8" y="2" width="5.4" height="7.4" rx="1.2" />
+      <rect x="9" y="3.6" width="5.2" height="5" rx="1.2" />
+      <rect x="5.4" y="11.2" width="6.8" height="3" rx="1.2" />
+    </svg>
+  );
+}
+
 // A screen — the theme menu's Match system.
 export function MonitorIcon({ size = 14 }: IconProps) {
   return (

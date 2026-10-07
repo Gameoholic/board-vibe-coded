@@ -8,20 +8,17 @@ import { GAME_ITEMS } from "./gameItems";
 import { PALETTE } from "./palette";
 import { HeldChips } from "./RewardItem";
 import ShopSectionCard from "./ShopSectionCard";
-import { saleOn } from "./types";
+import { isBought, saleOn } from "./types";
 import type { InventoryItem, Reward } from "./types";
 import { useBoardClock } from "./useBoardClock";
 import type { LocalConfigApi } from "./useLocalConfig";
 import type { ShopApi } from "./useShop";
 
 // Shop mode — not a separate place but a mode of the board's: the board's tabs burst away, the points
-// counter docks into `.hud-dock` at the top, and the shop's own canvas appears in the same frame. It
+// counter docks at the top of the shop's canvas, and that canvas appears in the same frame. It
 // is the same canvas base as the board (CardCanvas — free-placed tabs, pan/zoom, grid/snap, reset)
 // holding the same tab base (ShopSectionCard on CanvasCard), so every canvas/tab feature is shared.
 // Buying spends the board's real points (server-checked); a negative total closes the shop.
-
-// The default arrangement starts below the docked counter so the first row isn't under it.
-const DOCK_CLEARANCE = 128;
 
 // The shop content fades in once the board's burst and the counter's move have had their moment.
 const ENTER_DELAY = 0.45;
@@ -47,9 +44,6 @@ function ShopView({ points, shop, local, onBuy }: ShopViewProps) {
       animate={{ opacity: 1, transition: { delay: ENTER_DELAY, duration: 0.3 } }}
       exit={{ opacity: 0, transition: { duration: 0.18 } }}
     >
-      {/* The points counter's parking slot (useFreeSpot `dock`): fixed at the top-centre of the frame,
-          outside the canvas, so the counter stays put while the shop pans. */}
-      <div className="hud-dock" />
       {sale && (
         <div className="sale-banner">
           <TagIcon size={13} />
@@ -66,7 +60,14 @@ function ShopView({ points, shop, local, onBuy }: ShopViewProps) {
         onResetLayouts={local.resetLayouts}
         settings={local.config.settings}
         onSettingsChange={local.setSettings}
-        topInset={DOCK_CLEARANCE}
+        dock
+        face={(section) => ({
+          name: section.name,
+          color: section.color,
+          count: rewards.filter((r) => r.shopSectionId === section.id && !isBought(r)).length,
+        })}
+        shown={local.config.shownTabs.shop}
+        onShow={(id) => local.setShownTab("shop", id)}
         toolbar={
           <>
             <ToolbarGroup icon={<BagIcon size={16} />} label="Inventory" title="Inventory" width={280}>

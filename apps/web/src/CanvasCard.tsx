@@ -12,6 +12,9 @@ import type { CardLayout } from "./useLocalConfig";
 // touching. It knows nothing about what it lists — the tab kind fills the header, body and footer.
 // A card fits what it lists until it's resized; from then on it keeps the size it was given, down to
 // just its header, and its list scrolls inside it when it's taller.
+//
+// In a canvas's one-tab view the card is docked instead: it fills the frame, with nothing to move or resize,
+// and its list scrolls inside it once it's taller than the frame.
 
 // Everything a card needs from its canvas to be placed: its saved (or default) layout, the canvas's
 // "reset positions" signal, and where to persist a move/resize. Handed to each card by CardCanvas.
@@ -21,6 +24,8 @@ export interface CardFrame {
   // rather than reacting to `layout` directly so a normal drag/resize commit doesn't get overridden.
   resetSignal: number;
   onLayoutChange: (layout: CardLayout) => void;
+  // The one-tab view: the card fills the frame rather than sitting at its layout.
+  docked?: boolean;
 }
 
 // Whichever card was last grabbed floats above the rest — across every canvas. Seeded high so it
@@ -39,7 +44,7 @@ interface CanvasCardProps {
 }
 
 function CanvasCard({ frame, title, actions, footer, children, className }: CanvasCardProps) {
-  const { layout, resetSignal, onLayoutChange } = frame;
+  const { layout, resetSignal, onLayoutChange, docked = false } = frame;
   // The scale context provides a stable ref (not a reactive value) so the card doesn't re-render on
   // zoom — re-rendering would trigger Reorder.Item layout animations on every zoom step.
   const scaleRef = useCanvasScale();
@@ -76,7 +81,7 @@ function CanvasCard({ frame, title, actions, footer, children, className }: Canv
   const cardRef = useRef<HTMLElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const overflows = useOverflows(bodyRef, contentRef, fixed);
+  const overflows = useOverflows(bodyRef, contentRef, fixed || docked);
 
   function bringToFront() {
     onLayoutChange({ ...layoutRef.current, z: ++zCounter });
@@ -191,26 +196,33 @@ function CanvasCard({ frame, title, actions, footer, children, className }: Canv
   return (
     <motion.section
       ref={cardRef}
-      className={`board-card${className ? ` ${className}` : ""}`}
-      // Both sizes are always set, so turning sized can't leave the old floor behind on the element.
-      style={{ x, y, width: w, height: fixed ? h : "auto", minHeight: fixed ? 0 : h, zIndex: layout.z }}
-      onPointerDown={focusCard}
+      className={`board-card${docked ? " docked" : ""}${className ? ` ${className}` : ""}`}
+      // Both sizes are always set, so turning sized can't leave the old floor behind on the element. Docked,
+      // its place and size are the frame's (App.css).
+      style={docked ? undefined : { x, y, width: w, height: fixed ? h : "auto", minHeight: fixed ? 0 : h, zIndex: layout.z }}
+      onPointerDown={docked ? undefined : focusCard}
       initial={{ opacity: 0, scale: 0.94 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.9 }}
       transition={{ type: "spring", stiffness: 380, damping: 32 }}
     >
-      <span className="resize-corner corner-nw" onPointerDown={(e) => startResize(e, -1, -1)} />
-      <span className="resize-corner corner-ne" onPointerDown={(e) => startResize(e, 1, -1)} />
-      <span className="resize-corner corner-sw" onPointerDown={(e) => startResize(e, -1, 1)} />
-      <span className="resize-corner corner-se" onPointerDown={(e) => startResize(e, 1, 1)} />
+      {!docked && (
+        <>
+          <span className="resize-corner corner-nw" onPointerDown={(e) => startResize(e, -1, -1)} />
+          <span className="resize-corner corner-ne" onPointerDown={(e) => startResize(e, 1, -1)} />
+          <span className="resize-corner corner-sw" onPointerDown={(e) => startResize(e, -1, 1)} />
+          <span className="resize-corner corner-se" onPointerDown={(e) => startResize(e, 1, 1)} />
+        </>
+      )}
 
       <div className="board-card-header">
         <div className="header-left">{title}</div>
         <div className="header-right">
-          <span className="drag-handle section-drag-handle" aria-label="Drag to move tab" onPointerDown={startMove}>
-            ⠿
-          </span>
+          {!docked && (
+            <span className="drag-handle section-drag-handle" aria-label="Drag to move tab" onPointerDown={startMove}>
+              ⠿
+            </span>
+          )}
           {actions}
         </div>
       </div>
@@ -219,9 +231,11 @@ function CanvasCard({ frame, title, actions, footer, children, className }: Canv
       <motion.div ref={bodyRef} className={`board-card-body${overflows ? " overflows" : ""}`} layoutScroll>
         <div ref={contentRef}>
           {children}
-          {footer}
+          {!docked && footer}
         </div>
       </motion.div>
+      {/* Docked, the footer stays put under the list: a long tab's add button isn't a scroll away. */}
+      {docked && footer && <div className="board-card-footer">{footer}</div>}
     </motion.section>
   );
 }

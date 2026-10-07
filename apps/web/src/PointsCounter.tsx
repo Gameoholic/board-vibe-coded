@@ -48,7 +48,8 @@ interface Shockwave {
 }
 
 // The board HUD: a `PointsPlate` (the framed count-up readout) placed on the free canvas via
-// `useFreeSpot`/`useDiegeticDepth` — or, in shop mode, docked in the shop's `.hud-dock` slot — with
+// `useFreeSpot`/`useDiegeticDepth` — or docked in a canvas's `.hud-dock` slot (the shop, the one-tab view, a
+// phone's board: see CardCanvas) — with
 // flyer-landing bursts (pulse, particles, shockwaves, shake, corner flare) and
 // purchase flinches layered on top. The plate owns the number; this owns the drama.
 const PointsCounter = forwardRef<PointsCounterHandle, PointsCounterProps>(({ total, docked }, ref) => {

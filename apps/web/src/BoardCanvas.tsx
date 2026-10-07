@@ -6,6 +6,13 @@ import { useCanvasSettings } from "./useCanvasSettings";
 import { loadCamera, saveCamera } from "./useLocalConfig";
 import type { Camera } from "./useLocalConfig";
 
+// How far (px) a finger pressed on a card travels before the camera takes it — until then it may be a tap,
+// or a hold for the row's menu (ItemRow gives up its hold at the same distance).
+const PAN_SLOP = 8;
+// What takes a finger's drag for itself, so the camera leaves it alone: the handles (move a row or a tab,
+// bundle a group, resize, link by pick-whip) and anything a finger selects or types in.
+const OWN_DRAG = ".drag-handle, .group-handle, .resize-corner, .whip-handle, .popover, .confirm-popover, textarea, select, input:not([type='checkbox'])";
+
 interface BoardCanvasProps {
   // Which canvas this is ("board", "shop") — stamped as data-canvas on the viewport so styles and DOM
   // queries can target one canvas's cards when two are mounted at once.
@@ -67,6 +74,12 @@ function BoardCanvas({ name, worldW, worldH, children }: BoardCanvasProps) {
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const panBase = useRef({ left: 0, top: 0, x: 0, y: 0 });
   const pinchBase = useRef<{ dist: number; scale: number } | null>(null);
+  // A press on a card may still be a tap (a checkbox, a button), so the camera only takes the gesture once
+  // the finger has travelled; a press on empty canvas, a middle button or a second finger takes it at once.
+  const taken = useRef(false);
+  // Set by a gesture that began on a card and moved the camera, until the next press: the lift that ends it
+  // must not also land as a click on whatever is under the finger.
+  const moved = useRef(false);
 
   const clampScroll = useCallback(() => {
     const vp = viewportRef.current;
@@ -156,12 +169,21 @@ function BoardCanvas({ name, worldW, worldH, children }: BoardCanvasProps) {
         const dist = Math.hypot(a.x - b.x, a.y - b.y);
         const base = pinchBase.current;
         zoom(() => base.scale * (dist / base.dist), { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-      } else {
-        vp.scrollLeft = panBase.current.left - (p.x - panBase.current.x);
-        vp.scrollTop = panBase.current.top - (p.y - panBase.current.y);
+        return;
       }
+      if (!taken.current) {
+        if (Math.hypot(p.x - panBase.current.x, p.y - panBase.current.y) < PAN_SLOP) return;
+        // The pan starts from where the finger is now, so the board doesn't jump by the slop.
+        taken.current = true;
+        moved.current = true;
+        rebaseline();
+        vp.classList.add("grabbing");
+        return;
+      }
+      vp.scrollLeft = panBase.current.left - (p.x - panBase.current.x);
+      vp.scrollTop = panBase.current.top - (p.y - panBase.current.y);
     },
-    [zoom],
+    [zoom, rebaseline],
   );
 
   const onGestureEnd = useCallback(
@@ -181,31 +203,48 @@ function BoardCanvas({ name, worldW, worldH, children }: BoardCanvasProps) {
 
   // Grab-to-pan / pinch-to-zoom. Left click stays free for interaction, so a mouse only grabs on the
   // MIDDLE button; touch pans one-finger and zooms two-finger (touch-action: none on the viewport
-  // hands us the raw pointers, since the browser's native pinch is off). Bails when the press lands
-  // on a card so card move/resize keeps its own pointer stream. preventDefault stops the browser's
-  // own middle-click autoscroll.
-  // ponytail: a gesture must start on empty canvas — a two-finger pinch with both fingers over a
-  // card won't zoom. Fine on a whiteboard with margins; revisit if cards ever fill the screen.
+  // hands us the raw pointers, since the browser's native pinch is off). Both work from anywhere, a card
+  // included — on a phone the cards cover the screen, so there'd be no canvas left to grab — except on
+  // what takes a finger's drag for itself (OWN_DRAG). preventDefault stops the browser's own middle-click
+  // autoscroll; a touch is left alone, so a press that turns out to be a tap still clicks and focuses.
   function onPanStart(e: React.PointerEvent) {
+    const first = pointers.current.size === 0;
+    if (first) moved.current = false;
     const isMiddleMouse = e.button === 1;
     const isTouch = e.pointerType === "touch";
     if (!isMiddleMouse && !isTouch) return;
-    // Touch must start on empty canvas so card drag/resize keeps its pointer stream.
-    // Middle mouse pans from anywhere — tasks should not block camera movement.
-    if (isTouch && (e.target as HTMLElement).closest(".board-card")) return;
     const vp = viewportRef.current;
     if (!vp) return;
-    e.preventDefault();
-    const first = pointers.current.size === 0;
+    const target = e.target as HTMLElement;
+    if (isTouch && target.closest(OWN_DRAG)) return;
+    if (isMiddleMouse) e.preventDefault();
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    // A second finger makes it a pinch, which is the camera's wherever it lands.
+    if (first) taken.current = isMiddleMouse || !target.closest(".board-card");
+    else taken.current = moved.current = true;
     rebaseline();
+    if (taken.current) vp.classList.add("grabbing");
     if (first) {
-      vp.classList.add("grabbing");
       window.addEventListener("pointermove", onGestureMove);
       window.addEventListener("pointerup", onGestureEnd);
       window.addEventListener("pointercancel", onGestureEnd);
     }
   }
+
+  // Swallow the click that ends a pan begun on a card. A native capture listener, not React's
+  // onClickCapture, for ItemRow's reason: a checkbox's onChange is derived from the same click.
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    function swallow(e: MouseEvent) {
+      if (!moved.current) return;
+      moved.current = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    vp.addEventListener("click", swallow, true);
+    return () => vp.removeEventListener("click", swallow, true);
+  }, []);
 
   return (
     <>

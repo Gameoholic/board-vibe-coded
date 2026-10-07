@@ -19,6 +19,7 @@ The owner's standing rule, repeated here because it keeps being broken: **nothin
 | a classless `<button>` | `.btn-primary` / `.ghost-btn` / `.danger-btn` / `.icon-btn` |
 | a centred modal over a dark backdrop | `Popover`, anchored to what opened it |
 | a colour literal (`#fff`) | a token from `theme.css` (`var(--surface)`); a tab's colour through `tabInk()` |
+| a control that only shows on hover | the row's `actions` menu as well, or always shown under `@media (hover: none)` — a phone has no hover |
 
 ## Small pieces — hints, forms, menus, panels
 
@@ -53,8 +54,8 @@ A new tab kind or canvas declares its options and renders its cells. It never re
 
 | Layer | Base | Owns | Kinds on it |
 | --- | --- | --- | --- |
-| Canvas | `CardCanvas` (over `BoardCanvas`) | pan / zoom, card placement, the corner toolbar (`CanvasToolbar`, `ToolbarGroup`) | the board, the shop |
-| Tab | `CanvasCard` (+ `CardTitle`, `CardAdd`) | move, resize, header / body / footer, the title's popover, the `+` | `SectionCard`, `ShopSectionCard` |
+| Canvas | `CardCanvas` (over `BoardCanvas`) | pan / zoom, card placement, the corner toolbar (`CanvasToolbar`, `ToolbarGroup`), the one-tab view and its switcher (`TabDeck`), where the points counter docks | the board, the shop |
+| Tab | `CanvasCard` (+ `CardTitle`, `CardAdd`) | move, resize, header / body / footer, the title's popover, the `+`, filling the frame in the one-tab view | `SectionCard`, `ShopSectionCard` |
 | Tab controls | `SortMenu`, `DisplayMenu`, `tabView`, `sortItems` (`TabControls.tsx`) | the two menus, pinning, persisted choices | **what a tab offers is declared in `tabViews.ts`, nowhere else** — a sort has a `compare`, or `parts` (headed parts of a list) |
 | List | `ItemList` (+ `GroupBlock`) | reorder, groups, drag into / out of a group, drop on another list | tasks, streaks, rewards |
 | Row | `ItemRow` (+ `RowRemove`) | drag + group handles, the trash's confirm, the actions menu | `TaskItem`, `StreakItem`, `RewardItem` |
@@ -89,7 +90,8 @@ Retuning any of these is one edit in one file; nothing else repeats them.
 | Shop items' names and emoji | `gameItems.ts` |
 | A duration as written and as typed | `duration.ts` |
 | Day and week keys as words | `periodLabels.ts` |
-| Canvas geometry (grid, snap, default placement) | `canvas.ts` |
+| Canvas geometry (grid, snap, default placement, the docked counter's room) | `canvas.ts` |
+| The phone breakpoint | `usePhoneScreen.ts` (`PHONE_SCREEN`) — and `App.css`'s "Phones and touch", kept in step by hand |
 | List order / group updates the optimistic state applies | `listOps.ts` |
 | Types and shared rules | `types.ts` re-exports `@board/contracts` — import from `./types`, never restate a shape |
 
@@ -104,6 +106,7 @@ Retuning any of these is one edit in one file; nothing else repeats them.
 | The canvas zoom · snap / grid settings | `useCanvasScale` · `useCanvasSettings` |
 | A free spot on screen for a floating thing | `useFreeSpot` |
 | The theme | `useTheme` |
+| Whether the screen is phone-sized | `usePhoneScreen` |
 | The shop's data and edits | `useShop` |
 
 ## Moments and screens

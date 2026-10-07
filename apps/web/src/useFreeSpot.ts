@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef } from "react";
 
 const GAP = 20;
 const OBSTACLES = ".board-card, .add-section-anchor, .popover, .top";
+const NAV = ".app-nav";
 
 interface Box {
   left: number;
@@ -83,7 +84,10 @@ export function useFreeSpot(extraObstacles?: string, dock?: string) {
         return;
       }
       const vw = window.innerWidth;
-      const vh = window.innerHeight;
+      // On a phone the rail of places lies along the foot of the screen: the widget parks above it, never
+      // on it. (As the left rail it starts at the top, and takes no height.)
+      const navTop = document.querySelector(NAV)?.getBoundingClientRect().top ?? 0;
+      const vh = navTop > 0 ? navTop : window.innerHeight;
       const blocked = Array.from(document.querySelectorAll(selector))
         .map((node) => node.getBoundingClientRect())
         .filter((r) => r.right > 0 && r.left < vw && r.bottom > 0 && r.top < vh)

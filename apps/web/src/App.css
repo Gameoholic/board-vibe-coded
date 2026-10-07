@@ -7,8 +7,11 @@
 .page {
   /* Definite height (not min-height) so the flex chain below — shell → main → board-viewport
      height:100% — resolves to a real pixel height and the board stays a bounded scroll container.
-     The board scrolls internally, so the page itself never needs to grow past the viewport. */
+     The board scrolls internally, so the page itself never needs to grow past the viewport. The dynamic
+     unit is the screen a phone's browser actually shows (its address bar comes and goes); vh is for a
+     browser without it. */
   height: 100vh;
+  height: 100dvh;
   display: flex;
   justify-content: center;
   /* Extra left padding clears the fixed nav rail (56px + gutter); the rest matches the old inset. */
@@ -4024,12 +4027,14 @@ main.shop-open > .board-viewport {
 }
 
 main > .canvas-toolbar,
-main > .zoom-controls {
+main > .zoom-controls,
+main > .tab-deck-anchor {
   transition: opacity 0.2s;
 }
 
 main.shop-open > .canvas-toolbar,
-main.shop-open > .zoom-controls {
+main.shop-open > .zoom-controls,
+main.shop-open > .tab-deck-anchor {
   opacity: 0;
   pointer-events: none;
 }
@@ -4084,7 +4089,8 @@ main.shop-open > .zoom-controls {
 }
 
 /* Where the docked points counter parks: top-centre of the frame, over the canvas (see useFreeSpot's
-   dock). Sized like the counter's plate; purely a measuring target. */
+   dock) — the shop's, and any canvas showing one tab at a time (CardCanvas). Sized like the counter's
+   plate; purely a measuring target. */
 .hud-dock {
   position: absolute;
   top: 16px;
@@ -4122,12 +4128,20 @@ main.shop-open > .zoom-controls {
   opacity: 0.85;
 }
 
+/* Under the counter on a narrow screen, in the gap it leaves above the tabs: there it's just the sale, without
+   how long it runs. */
 @media (max-width: 720px) {
   .sale-banner {
-    top: 108px;
+    top: 104px;
     right: auto;
     left: 50%;
     translate: -50% 0;
+    padding: 1px 10px;
+    font-size: 0.76rem;
+  }
+
+  .sale-banner-until {
+    display: none;
   }
 }
 
@@ -6374,5 +6388,258 @@ main.shop-open > .zoom-controls {
   .bounty-roll.landed .bounty-reel-track span.hit b::after,
   .recap-wall.leaving .recap-drop {
     animation: none;
+  }
+}
+
+/* ---- One tab at a time (CardCanvas's other view) ---- */
+
+/* The tab the canvas is on fills the frame in place of the free canvas. There's no camera here, so nothing
+   pans or zooms: the tab's own list scrolls inside it. Room for the docked points counter is left above the
+   tab (CardCanvas pads the frame by canvas.ts's DOCK_CLEARANCE). One cell, shared by the tab leaving and
+   the tab arriving, so a switch cross-fades in place instead of stacking the two. */
+.board-viewport.one-tab {
+  overflow: hidden;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  padding: 0 12px 12px;
+}
+
+/* As tall as its list until that's taller than the frame; then the list scrolls (CanvasCard's \`overflows\`).
+   Wide enough to read on a big screen without its rows stretching the whole way across. */
+.board-card.docked {
+  position: relative;
+  grid-area: 1 / 1;
+  align-self: start;
+  justify-self: center;
+  width: 100%;
+  max-width: 640px;
+  max-height: 100%;
+}
+
+.board-card-footer {
+  flex: none;
+}
+
+/* The deck that turns to another tab (TabDeck), in the corner the canvas's zoom controls sit in. */
+.tab-deck-anchor {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 20;
+}
+
+.toolbar-btn.tab-deck {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: 12px;
+}
+
+/* The pile, seen from above and to one side. Each ply is lifted along the pile's own z (TabDeck sets it),
+   so the ones under the top show as a stair of coloured edges. */
+.tab-deck-pile {
+  position: relative;
+  display: block;
+  width: 22px;
+  height: 22px;
+  transform: translateY(5px) rotateX(54deg) rotateZ(-42deg);
+  transform-style: preserve-3d;
+}
+
+/* A ply: its tab's colour, pale, filled solid from its foot as far as the tab is done. Its edge leans
+   toward the theme's ink so two plies of one colour still read apart, and plies further down sit in shade. */
+.tab-deck-ply {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--c) 72%, var(--text));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--c) 42%, var(--surface));
+  filter: brightness(calc(1 - var(--depth) * 0.05));
+}
+
+.tab-deck-ply::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: calc(var(--fill) * 100%);
+  background: var(--c);
+  transition: height 0.3s ease;
+}
+
+/* A tab in the deck's list: its name in its colour (a tab's title is its swatch), then how much it holds. */
+.tab-pick-name {
+  flex: 1;
+  font-weight: 700;
+}
+
+.tab-pick-count {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.tab-pick-check {
+  display: inline-flex;
+  width: 12px;
+}
+
+/* ---- Phones and touch ---- */
+
+/* A phone-sized screen (the same width as useLocalConfig's PHONE_SCREEN): the rail of places lies along the
+   foot of the screen, under a thumb, and gives its width back to the board; the date takes less room. */
+@media (max-width: 720px) {
+  .page {
+    padding: 12px 12px 68px;
+  }
+
+  .app-nav {
+    top: auto;
+    right: 0;
+    width: auto;
+    height: 56px;
+    flex-direction: row;
+    padding: 0 14px;
+    border-right: none;
+    border-top: 1px solid var(--border);
+  }
+
+  .nav-theme {
+    margin-top: 0;
+    margin-left: auto;
+    flex-direction: row;
+  }
+
+  .nav-btn.nav-more {
+    width: 24px;
+    height: 38px;
+  }
+
+  /* The header's extras (the debug clock's badge) go under the date rather than off the screen's edge: a
+     page wider than a phone's screen takes its fixed bar and overlays out of view with it. */
+  .top {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .date-num {
+    font-size: 1.25rem;
+  }
+
+  .date-day {
+    font-size: 0.85rem;
+  }
+
+  /* Down the frame's edge instead of along its top, clear of the points counter docked beside it. */
+  .canvas-toolbar {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  /* The page scrolls under the bar at its foot, so its last lines need the bar's height to clear it. */
+  .settings-view {
+    padding-bottom: 96px;
+  }
+}
+
+/* A panel never opens wider than the screen it's on (a task's form is as wide as a small phone). */
+.popover {
+  max-width: calc(100vw - 16px);
+}
+
+/* A touch screen: nothing points, and a finger is blunter than a cursor. */
+@media (hover: none) {
+  /* What a row only shows when pointed at is either always there, or left to its press-and-hold menu. Its
+     trash is that menu's Delete — unseen, it would still take a tap at the row's end. The button goes, not
+     its wrapper: the menu's Delete opens the confirm that sits in it. */
+  .item-row .remove {
+    display: none;
+  }
+
+  .item-row > .drag-handle,
+  .group-header .drag-handle,
+  .group-header .remove,
+  .resize-corner {
+    opacity: 0.5;
+  }
+
+  .item-row > .drag-handle.disabled,
+  .group-header .drag-handle.disabled {
+    opacity: 0;
+  }
+
+  .add-item-fab {
+    opacity: 1;
+  }
+
+  /* The strip along a row's left edge that bundles rows into a group is found by pointing at it; unseen, it
+     would only take the touches a pan starts with. */
+  .group-handle {
+    display: none;
+  }
+
+  /* A tap leaves "hover" on what it touched, so the name of a place or a view would stay up over its
+     neighbours after taking you there. */
+  .app-nav .tooltip-bubble,
+  .canvas-toolbar .tooltip-bubble,
+  .tab-deck-anchor .tooltip-bubble {
+    display: none;
+  }
+}
+
+@media (pointer: coarse) {
+  /* Room for a fingertip: rows a little taller, and each box takes a touch from just around it (the boxes
+     themselves stay the size they are everywhere). */
+  .item-row {
+    padding-block: 10px;
+  }
+
+  .task-item input[type="checkbox"]::before,
+  .tier-dot::before,
+  .counter-box::before,
+  .item-row > .drag-handle::before {
+    content: "";
+    position: absolute;
+    inset: -10px -8px;
+  }
+
+  .tier-dots {
+    gap: 12px;
+  }
+
+  .tier-dot::before {
+    inset: -10px -6px;
+  }
+
+  .counter-box {
+    position: relative;
+  }
+
+  .toolbar-btn,
+  .zoom-controls .toolbar-btn {
+    min-width: 34px;
+    height: 34px;
+  }
+
+  .toolbar-btn svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .sort-btn {
+    width: 34px;
+    height: 34px;
+  }
+
+  .nav-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* iOS zooms the whole page into any field whose text is under 16px, and stays zoomed. */
+  input:not([type="checkbox"], [type="radio"], [type="range"]),
+  textarea,
+  select {
+    font-size: 16px;
   }
 }

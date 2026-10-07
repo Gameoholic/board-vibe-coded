@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
+import { AllTabsIcon, OneTabIcon } from "./Icons";
 import Popover from "./Popover";
+import Tooltip from "./Tooltip";
 import { useClickOutside } from "./useClickOutside";
 import type { CanvasSettings } from "./useLocalConfig";
 
@@ -99,9 +101,25 @@ export function ToolbarGroup({
 }
 
 function CanvasToolbar({ settings, onChange, onReset, children }: CanvasToolbarProps) {
+  // The switch between the canvas's two views says where pressing it takes you, like the theme switch.
+  const otherView = settings.oneTab ? "All tabs" : "One tab at a time";
   return (
     <div className="canvas-toolbar">
       {children}
+      {/* The grid and the tabs' positions are the canvas's: nothing to set with one tab filling the frame. */}
+      {!settings.oneTab && <PlacementGroups settings={settings} onChange={onChange} onReset={onReset} />}
+      <Tooltip label={otherView} position="bottom" align="end">
+        <button type="button" className="toolbar-btn" aria-label={otherView} onClick={() => onChange({ oneTab: !settings.oneTab })}>
+          {settings.oneTab ? <AllTabsIcon /> : <OneTabIcon />}
+        </button>
+      </Tooltip>
+    </div>
+  );
+}
+
+function PlacementGroups({ settings, onChange, onReset }: Omit<CanvasToolbarProps, "children">) {
+  return (
+    <>
       <ToolbarGroup icon={<GridIcon />} label="Grid settings" title="Grid" width={244}>
         {() => (
           <div className="settings-menu">
@@ -152,7 +170,7 @@ function CanvasToolbar({ settings, onChange, onReset, children }: CanvasToolbarP
           </div>
         )}
       </ToolbarGroup>
-    </div>
+    </>
   );
 }
 

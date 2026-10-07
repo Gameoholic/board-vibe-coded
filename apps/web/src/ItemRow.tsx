@@ -66,17 +66,44 @@ const fromNestedRow = (e: React.SyntheticEvent) => (e.target as Element).closest
 const HOLD_MS = 500;
 const HOLD_SLOP = 8;
 
+// The lift that ends a hold would otherwise land as a click on whatever is under the finger: the row's
+// checkbox — or an action of the menu itself, which on a small screen can only open over the finger.
+// Swallowed wherever it lands, by a native capture listener on the document rather than React's
+// onClickCapture: React derives a checkbox's onChange from the same click, and only stopping the native
+// event before it reaches React's root listener keeps the box from toggling. The next press disarms it,
+// for a hold whose lift brought no click (Android's). Returns the disarm.
+function swallowLiftClick(): () => void {
+  const swallow = (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    disarm();
+  };
+  const disarm = () => {
+    document.removeEventListener("click", swallow, true);
+    document.removeEventListener("pointerdown", disarm, true);
+  };
+  document.addEventListener("click", swallow, true);
+  document.addEventListener("pointerdown", disarm, true);
+  return disarm;
+}
+
 function useLongPress(onHold: (at: MenuPoint) => void) {
   const press = useRef<{ timer: number; x: number; y: number } | null>(null);
-  // Set once a hold has opened the menu, until the next press: the lift that ends the hold would
-  // otherwise land as a click on whatever is under the finger (ticking a checkbox), and Android follows
-  // a hold with its own contextmenu event for a menu that's already open.
+  // Set once a hold has opened the menu, until the next press: Android follows a hold with its own
+  // contextmenu event for a menu that's already open.
   const held = useRef(false);
+  const disarmLift = useRef<(() => void) | null>(null);
   const cancel = useCallback(() => {
     if (press.current) window.clearTimeout(press.current.timer);
     press.current = null;
   }, []);
-  useEffect(() => cancel, [cancel]);
+  useEffect(
+    () => () => {
+      cancel();
+      disarmLift.current?.();
+    },
+    [cancel],
+  );
 
   const handlers = {
     onPointerDown(e: React.PointerEvent) {
@@ -89,6 +116,7 @@ function useLongPress(onHold: (at: MenuPoint) => void) {
         timer: window.setTimeout(() => {
           press.current = null;
           held.current = true;
+          disarmLift.current = swallowLiftClick();
           onHold(at);
         }, HOLD_MS),
       };
@@ -105,26 +133,9 @@ function useLongPress(onHold: (at: MenuPoint) => void) {
 
 function ItemRow<T>({ value, id, row, className, attrs, actions, exitDelay, children }: ItemRowProps<T>) {
   const controls = useDragControls();
-  const rowRef = useRef<HTMLLIElement>(null);
   const [menuAt, setMenuAt] = useState<MenuPoint | null>(null);
   const closeMenu = useCallback(() => setMenuAt(null), []);
   const { handlers: holdHandlers, held } = useLongPress(setMenuAt);
-
-  // Swallow the click that ends a hold. A native capture listener, not React's onClickCapture: React
-  // derives a checkbox's onChange from the same click, and only stopping the native event before it
-  // reaches React's root listener keeps the box from toggling.
-  useEffect(() => {
-    const el = rowRef.current;
-    if (!el) return;
-    function swallow(e: MouseEvent) {
-      if (!held.current) return;
-      held.current = false;
-      e.preventDefault();
-      e.stopPropagation();
-    }
-    el.addEventListener("click", swallow, true);
-    return () => el.removeEventListener("click", swallow, true);
-  }, [held]);
 
   function onContextMenu(e: React.MouseEvent) {
     if ((e.target as Element).closest(NATIVE_TARGETS) || fromNestedRow(e)) return;
@@ -137,7 +148,6 @@ function ItemRow<T>({ value, id, row, className, attrs, actions, exitDelay, chil
     : itemMotionProps.exit;
   return (
     <Reorder.Item
-      ref={rowRef}
       value={value}
       dragListener={false}
       dragControls={controls}

@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { PHONE_SCREEN } from "./usePhoneScreen";
 
 // A card's free-canvas placement: top-left position (x,y), box size (w,h), and a stacking
 // order (z) so the last-touched card floats above its neighbours when they overlap. All in
@@ -20,9 +21,17 @@ export interface CanvasSettings {
   snap: boolean; // settle a moved/resized card onto the grid instead of leaving it exactly where dropped
   gridSize: number; // the grid step (world px) — drives both snapping and the visible grid
   showGrid: boolean; // paint a faint dot grid on the canvas as a placement guide
+  oneTab: boolean; // show one tab at a time, filling the screen, instead of the free canvas
 }
 
-const DEFAULT_SETTINGS: CanvasSettings = { snap: true, gridSize: 20, showGrid: false };
+// A phone-sized screen starts in the one-tab view: a canvas of tabs each as wide as the screen is all
+// panning there.
+export const DEFAULT_SETTINGS: CanvasSettings = {
+  snap: true,
+  gridSize: 20,
+  showGrid: false,
+  oneTab: typeof window !== "undefined" && window.matchMedia(PHONE_SCREEN).matches,
+};
 
 // Per-tab view preferences — how one tab's items are sorted, which optional row extras show, and which
 // menu options sit up front. Device-local like layouts/settings (a display transform, not board truth),
@@ -60,6 +69,8 @@ interface LocalConfig {
   layouts: Record<string, CardLayout>;
   settings: CanvasSettings;
   tabPrefs: Record<string, TabPrefs>;
+  // The tab each canvas's one-tab view is on, by canvas name ("board", "shop"). Absent ≡ its first.
+  shownTabs: Record<string, string>;
 }
 
 const KEY = "board-config";
@@ -81,13 +92,14 @@ function load(): LocalConfig {
       );
       return {
         layouts: {},
+        shownTabs: {},
         ...parsed,
         tabPrefs,
         settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
       };
     }
   } catch {}
-  return { layouts: {}, settings: DEFAULT_SETTINGS, tabPrefs: {} };
+  return { layouts: {}, settings: DEFAULT_SETTINGS, tabPrefs: {}, shownTabs: {} };
 }
 
 function save(config: LocalConfig) {
@@ -164,6 +176,14 @@ export function useLocalConfig() {
     });
   }, []);
 
+  const setShownTab = useCallback((canvas: string, tabId: string) => {
+    setConfig((prev) => {
+      const next: LocalConfig = { ...prev, shownTabs: { ...prev.shownTabs, [canvas]: tabId } };
+      save(next);
+      return next;
+    });
+  }, []);
+
   // Wipe the given cards' saved placements so they fall back to their tidy default grid
   // (defaultLayout) — one canvas's cards at a time, so resetting the shop leaves the board as it was.
   // Device-local only — it never touches the server, so it's a safe "put my tabs back" escape hatch.
@@ -177,7 +197,7 @@ export function useLocalConfig() {
     });
   }, []);
 
-  return { config, setCardLayout, setSettings, setTabPref, resetLayouts };
+  return { config, setCardLayout, setSettings, setTabPref, setShownTab, resetLayouts };
 }
 
 export type LocalConfigApi = ReturnType<typeof useLocalConfig>;

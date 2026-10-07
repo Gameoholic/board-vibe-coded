@@ -20,7 +20,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import AppNav, { type AppView } from "./AppNav";
 import CardCanvas from "./CardCanvas";
-import { groupsApi, withGathered, withMembership, withOrder, withoutGroup, withTrailing } from "./listOps";
+import { groupsApi, listedByDefault, withGathered, withMembership, withOrder, withoutGroup, withTrailing } from "./listOps";
 import { CanvasSettingsProvider } from "./useCanvasSettings";
 import FlyingPoints, { type Flyer, type FlyOrigin, type Point } from "./FlyingPoints";
 import type { FlyerTier } from "./flyerTiers";
@@ -33,6 +33,7 @@ import PointsCounter, { type PointsCounterHandle } from "./PointsCounter";
 import Poof, { type PoofBurst } from "./Poof";
 import RebalanceConfirm from "./RebalanceConfirm";
 import SectionCard from "./SectionCard";
+import type { TabFace } from "./TabDeck";
 import SettingsView from "./SettingsView";
 import ShopView from "./ShopView";
 import type { StreakPayload } from "./StreakForm";
@@ -42,6 +43,7 @@ import { behaviorOf, doneFromPieces, frostFill, frostShare, isRetired, modifiers
 import type { BoosterHand, BountyReel, BountyStatus, BountyStopped, FormulaPreview, Group, PeriodRecap, PeriodStatus, PointsFormula, Reward, Section, Settings, StreakView, Task, TaskPriority, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
 import { BoardClockProvider } from "./useBoardClock";
 import { useLocalConfig } from "./useLocalConfig";
+import { usePhoneScreen } from "./usePhoneScreen";
 import { useShop } from "./useShop";
 import { uid } from "./uid";
 import { useSuppressPasswordManagers } from "./useSuppressPasswordManagers";
@@ -61,7 +63,10 @@ function App() {
   useSuppressPasswordManagers();
   // Device-local view config (layouts, canvas settings, tab prefs) — one store shared by both canvases.
   const local = useLocalConfig();
-  const { config, setCardLayout, setSettings, setTabPref, resetLayouts } = local;
+  const { config, setCardLayout, setSettings, setTabPref, setShownTab, resetLayouts } = local;
+  // On a phone the tabs cover the screen, leaving the points counter no gap to park in: it docks at the
+  // board's top, as it does in the shop.
+  const phone = usePhoneScreen();
   const shopState = useShop();
   const [sections, setSections] = useState<Section[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -503,6 +508,15 @@ function App() {
       refreshBooster();
     });
     counterRef.current?.spend(price);
+  }
+
+  // What the one-tab view's deck shows of a board tab: how much it lists and — in a tab that starts over
+  // each day or week — how much of that is done.
+  function sectionFace(section: Section): TabFace {
+    const face = { name: section.name, color: section.color };
+    if (section.kind === "streaks") return { ...face, count: streaks.filter((s) => s.sectionId === section.id).length };
+    const listed = tasks.filter((t) => t.sectionId === section.id && listedByDefault(t));
+    return { ...face, count: listed.length, ...(section.period ? { done: listed.filter((t) => behaviorOf(t).isDone(t)).length } : {}) };
   }
 
   function recolorSection(id: string, color: string) {
@@ -1111,6 +1125,10 @@ function App() {
                 onResetLayouts={resetLayouts}
                 settings={config.settings}
                 onSettingsChange={setSettings}
+                dock={phone}
+                face={sectionFace}
+                shown={config.shownTabs.board}
+                onShow={(id) => setShownTab("board", id)}
                 renderCard={(section, frame) => (
                   <SectionCard
                     key={section.id}

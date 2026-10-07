@@ -31,6 +31,8 @@ Every file in `docs/` has a row here; a new doc gets one.
 
 **Nothing the browser draws by itself belongs on the board** (the owner's standing rule, flagged because Claude keeps breaking it): no `title="…"` — that's Chrome's grey hover box; a hint is a `Tooltip`. No bare `<form>` — that's Chrome's "Please fill out this field." bubble; a form is a `Form`. No `alert()` / `confirm()`. The list of never-and-always is at the top of `docs/COMPONENTS.md`.
 
+**The board is used on a phone too.** It has a phone layout and a one-tab view (`docs/PRODUCT.md` → "On a phone"). Nothing may be reachable by hover alone or make the page wider than the screen, and a change that shows on the board is checked at a phone's size, by touch, as well as on a desktop — `docs/ARCHITECTURE.md` → "Phones and touch".
+
 **Reuse before you build** (the same rule, wider): every shared component, hook and "one home" file is listed in `docs/COMPONENTS.md`, imported below so it's always in context. Find what you need there first; extend it if it falls short; never build a second thing that does the same job. Adding a shared piece means adding its line there in the same change.
 
 **Anything that boosts or changes what a task pays is a modifier** (the owner's standing rule for every future gamified mechanic, MMO-style): one registry entry that stacks with the rest, never its own one-off payout, colour or badge. Rules in `docs/CONVENTIONS.md` → "Modifiers"; the Bounty, frost, Subzero and the Booster are its first four entries, and the weekend sale the first on a reward's price.

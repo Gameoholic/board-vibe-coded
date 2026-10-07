@@ -53,7 +53,7 @@ Ideas from a much larger earlier vision of this product. None is built; each is 
 
 ## Deferred infrastructure
 
-- **Mobile app.** The product is meant for PC + mobile; the mobile client isn't built. Backend-stored state is the prerequisite (done as part of the persistence step).
+- **Mobile app.** The product is meant for PC + mobile. The web app now has a phone layout and works by touch (see `PRODUCT.md` → "On a phone"); an installable or native client (home-screen app, offline) isn't built.
 - **Auth.** Single user, no login today. When it lands, the server stays the sole authority; the client is never trusted for points/time.
 - **Deploy story** — Docker, VPS behind existing nginx, containment (non-root, unpublished DB, no host mounts, resource limits, zero outbound). Reasoning: `ARCHITECTURE.md` → "Security architecture."
 
@@ -69,4 +69,6 @@ Ideas from a much larger earlier vision of this product. None is built; each is 
   - **Coupon** — a share off the next reward you buy (a price modifier, so it stacks with the sale).
   - **Mystery reward** — buy a sealed card and scratch it to reveal one of your rewards (the saved scratch-card reveal).
   - **Streak shield** — would cover one missed day; it cuts against "streaks are real" (only a paused day protects one), so it's the owner's call.
+- **A form's first field doesn't take the cursor when it opens** (a bug, on the PC too; found 2026-10-07, not fixed): the fields carry `autoFocus`, but React asks for focus as the field mounts — a moment before `Popover` puts its panel in the top layer, while it's still `display: none` — so the ask is lost. Fixing it also decides whether a phone should raise its keyboard the moment a form opens.
+- **One-tab view — more** (not built): swiping sideways to the next tab; linking a streak's tasks without leaving the view (the pick-whip needs the task's row on screen — `ARCHITECTURE.md` → "One tab at a time").
 - (Add here as they come up — keep each to a line, with a pointer if the reasoning lives elsewhere.)
