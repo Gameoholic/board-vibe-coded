@@ -26,7 +26,7 @@ import FlyingPoints, { type Flyer, type FlyOrigin, type Point } from "./FlyingPo
 import type { FlyerTier } from "./flyerTiers";
 import { PeriodPrompt } from "./PeriodClose";
 import { skippedSince } from "./periodLabels";
-import { PeriodRecapCard } from "./Recap";
+import { type BlockedChoice, PeriodRecapCard } from "./Recap";
 import { BountyReveal } from "./BountyReveal";
 import { BoosterReveal } from "./BoosterReveal";
 import PointsCounter, { type PointsCounterHandle } from "./PointsCounter";
@@ -40,7 +40,7 @@ import type { StreakPayload } from "./StreakForm";
 import WindDownOverlay from "./WindDownOverlay";
 import { finishFx, thawFx } from "./freezeFx";
 import { behaviorOf, doneFromPieces, frostFill, frostShare, isRetired, modifiersOf, onWholeTask, payout, releasedFrom, saleOn, statusChange, taskPointValue, wholeWorth } from "./types";
-import type { BoosterHand, BountyReel, BountyStatus, BountyStopped, FormulaPreview, Group, PeriodRecap, PeriodStatus, PointsFormula, Reward, Section, Settings, StreakView, Task, TaskPriority, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
+import type { BoosterHand, BountyReel, BountyStatus, BountyStopped, FormulaPreview, Group, PeriodRecap, PeriodStatus, PointsFormula, RecapBlocked, Reward, Section, Settings, StreakView, Task, TaskPriority, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
 import { BoardClockProvider } from "./useBoardClock";
 import { useLocalConfig } from "./useLocalConfig";
 import { usePhoneScreen } from "./usePhoneScreen";
@@ -285,6 +285,13 @@ function App() {
       if (hand) setRecap((r) => (r ? { ...r, booster: hand } : r));
       return hand;
     });
+  }
+
+  // From the recap's Blocked page: a task still blocked as the week closed goes to the Backlog, or back to
+  // Blocked on what it was waiting on.
+  function setBlockedInRecap(entry: RecapBlocked, status: BlockedChoice) {
+    const task = tasks.find((t) => t.id === entry.taskId);
+    if (task) setTaskStatus(task, status, status === "blocked" ? { note: entry.note, taskId: entry.waitsOn?.taskId } : {});
   }
 
   // From a pick left over (BoosterReveal): closed, the board reads back its Booster.
@@ -1002,7 +1009,12 @@ function App() {
 
   return (
     <div className="page">
-      <AppNav view={view} onChange={changeView} />
+      {/* A reward's stopwatch left running shows from anywhere, so it isn't forgotten. */}
+      <AppNav
+        view={view}
+        onChange={changeView}
+        marks={shopState.shop.rewards.some((r) => r.timer?.isRunning) ? { shop: "timer running" } : undefined}
+      />
 
       {/* The HUD floats over the whole screen; while a period prompt or recap overlay is up it would
           sit on top of that focus surface (overlapping the score), so hide it until they're dismissed.
@@ -1020,6 +1032,7 @@ function App() {
           <PeriodRecapCard
             key={`${recap.kind}-${recap.periodKey}`}
             recap={recap}
+            onSetBlocked={setBlockedInRecap}
             onRollBounty={(spot) => postBountyRoll(spot).then(inRecap)}
             onRerollBounty={(taskId) => postReroll(taskId).then(inRecap)}
             onPickBooster={pickInRecap}

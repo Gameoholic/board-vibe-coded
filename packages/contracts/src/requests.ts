@@ -374,9 +374,22 @@ export type RecapFrost = z.infer<typeof RecapFrost>;
 export const RecapFrozen = z.object({ taskId: z.string(), name: z.string(), waited: z.number().int().nonnegative() });
 export type RecapFrozen = z.infer<typeof RecapFrozen>;
 
+// A task still blocked as the week closes, for the recap to ask whether it stays that way: why — its note,
+// and the task it waits on (its id, so it can be blocked on it again, and its name) — the task it's a piece
+// of, and the whole days it's been blocked.
+export const RecapBlocked = z.object({
+  taskId: z.string(),
+  name: z.string(),
+  of: z.string().optional(),
+  note: z.string().optional(),
+  waitsOn: z.object({ taskId: z.string(), name: z.string() }).optional(),
+  days: z.number().int().nonnegative(),
+});
+export type RecapBlocked = z.infer<typeof RecapBlocked>;
+
 // Recap returned after a roll: the closed period day by day (one day for a day; each day of a week),
 // its totals, and — for a week — its streaks from start to end, the frost its close banked, the tasks it
-// froze, the next week's Bounty reel, and its Booster hand.
+// froze, the tasks still blocked, the next week's Bounty reel, and its Booster hand.
 export const PeriodRecap = z.object({
   kind: PeriodKindSchema,
   periodKey: z.string(),
@@ -386,6 +399,7 @@ export const PeriodRecap = z.object({
   streaks: z.array(RecapStreak),
   frost: z.array(RecapFrost).default([]),
   frozen: z.array(RecapFrozen).default([]),
+  blocked: z.array(RecapBlocked).default([]),
   // A week close deals the next week's Bounty reel: its Bounties as the close leaves them — the reel to
   // stop, none rolled yet (null when they're off, and for a day). `bountyEmpty`: they're on, but nothing
   // was on ice to roll.

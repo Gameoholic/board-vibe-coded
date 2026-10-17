@@ -44,6 +44,7 @@ import {
   isFullFrost,
   modifiersOf,
   payout,
+  type RecapBlocked,
   type RecapFrost,
   type RecapFrozen,
   streakRefusal,
@@ -1349,6 +1350,7 @@ export class BoardStore {
     let streaksAtEnd: StreakView[] = [];
     let frost: RecapFrost[] = [];
     let frozen: RecapFrozen[] = [];
+    let blocked: RecapBlocked[] = [];
     // A week starts by freezing where every streak stands — counted once the last week is closed and
     // reset, so a tick still up from it isn't counted for both weeks.
     const start = () => {
@@ -1372,12 +1374,13 @@ export class BoardStore {
           this.commit({ type: "TasksReset", taskIds: reset.map((t) => t.id), pointsBanked });
         }
         start();
-        // A week close banks the frost the Freezer gathered, freezes what has waited too long, deals the new
-        // week's Bounty reel from the Freezer and its Booster hand (a first start closes nothing, so it does
-        // none of it).
+        // A week close banks the frost the Freezer gathered, freezes what has waited too long, lists what's
+        // still blocked, deals the new week's Bounty reel from the Freezer and its Booster hand (a first start
+        // closes nothing, so it does none of it).
         if (kind === "week") {
           frost = this.bankFrost(open.key);
           frozen = this.freezeWaiting(now);
+          blocked = this.stillBlocked(now);
           this.startWeekBounties(currentKey, now);
           this.dealBooster(currentKey);
         }
@@ -1408,6 +1411,7 @@ export class BoardStore {
       })),
       frost,
       frozen,
+      blocked,
     };
     const weekClosed = kind === "week" && !!open && open.key !== currentKey;
     const bounty = weekClosed && this.settings.bounty.enabled ? this.bountyStatus(now) : null;
@@ -1465,6 +1469,31 @@ export class BoardStore {
             return { taskId: task.id, name: task.text, waited };
           }),
       );
+  }
+
+  // The tasks still blocked as a week closes, in the board's order (a blocked piece right after its task), for
+  // the recap to ask whether each stays blocked: why, and for how many whole days so far.
+  private stillBlocked(now: Date): RecapBlocked[] {
+    const today = this.openPeriods.day?.key ?? dayKeyFor(now.toISOString(), this.settings);
+    const entry = (task: Task, of?: Task): RecapBlocked[] => {
+      if (statusOf(task) !== "blocked" || behaviorOf(task).isDone(task)) return [];
+      const waitsOn = task.blocker?.taskId ? this.tasks.find((t) => t.id === task.blocker?.taskId) : undefined;
+      const since = dayKeyFor(task.statusSince ?? task.createdAt, this.settings);
+      return [
+        {
+          taskId: task.id,
+          name: task.text,
+          ...(of ? { of: of.text } : {}),
+          ...(task.blocker?.note ? { note: task.blocker.note } : {}),
+          ...(waitsOn ? { waitsOn: { taskId: waitsOn.id, name: waitsOn.text } } : {}),
+          days: Math.max(0, daysBetween(since, today)),
+        },
+      ];
+    };
+    return this.sections
+      .filter((section) => !section.freezerFor)
+      .flatMap((section) => this.listTasks(section.id).filter((t) => !t.parentId))
+      .flatMap((task) => [...entry(task), ...this.piecesOf(task.id).flatMap((piece) => entry(piece, task))]);
   }
 
   // One day of a recap from its tally (or several, for a day that ran on): per tab, in the tab's order,

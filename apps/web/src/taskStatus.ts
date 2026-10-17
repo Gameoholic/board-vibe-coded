@@ -1,7 +1,7 @@
 import type { RowAction } from "./ActionMenu";
 import { BacklogIcon, BlockedIcon, InProgressIcon } from "./Icons";
-import { dayKeyFor, statusOf } from "./types";
-import type { Settings, Task, TaskStatus } from "./types";
+import { statusOf } from "./types";
+import type { Task, TaskStatus } from "./types";
 
 // Status as the owner sees it: each band's words and icon (display strings — the ids live in the
 // contract), in the order the bands stack in a tab, and the small rules a tab reads. One home, so
@@ -17,23 +17,19 @@ export const STATUS_BANDS: { status: TaskStatus; label: string; icon: IconCompon
   { status: "blocked", label: "Blocked", icon: BlockedIcon },
 ];
 
-export const statusLabel = (status: TaskStatus): string => STATUS_BANDS.find((b) => b.status === status)!.label;
+/** A Status's band: its words and icon. */
+export const bandOf = (status: TaskStatus) => STATUS_BANDS.find((b) => b.status === status)!;
+
+export const statusLabel = (status: TaskStatus): string => bandOf(status).label;
 
 /** Whether a sort that splits a list into parts splits this band's. */
-export const bandSplits = (status: TaskStatus): boolean => !!STATUS_BANDS.find((b) => b.status === status)?.splits;
+export const bandSplits = (status: TaskStatus): boolean => !!bandOf(status).splits;
 
 // The Status choices' caption in the actions menu.
 const STATUS_SET = "Status";
 
 // More tasks than this in progress gets a gentle "finish or park one?" — a nudge, never a block.
 export const IN_PROGRESS_NUDGE_ABOVE = 3;
-
-// How long a task has been in hand, counted in the board's days ("in hand 3 d") — so a stalled one stands
-// out. Nothing on the day it started: its band already says it's in progress.
-export function inHandLabel(since: string, now: string, settings: Settings): string | null {
-  const days = Math.round((Date.parse(dayKeyFor(now, settings)) - Date.parse(dayKeyFor(since, settings))) / 86_400_000);
-  return days <= 0 ? null : `in hand ${days} d`;
-}
 
 // The Status choices in a task's actions menu — one set, captioned "Status" — the current one ticked. Blocked asks why (`onBlock` opens
 // that form), so it reads "Blocked…" — and picking it again on a blocked task edits the reason. `leaving` is

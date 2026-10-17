@@ -2751,6 +2751,32 @@ body.whip-dragging {
   cursor: default;
 }
 
+/* A dot on a place's button: something is going on there (the shop: a reward's stopwatch is running — in
+   the running clock's own colour). Ringed in the rail's surface so it reads on the icon. */
+.nav-mark {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--danger-text);
+  box-shadow: 0 0 0 2px var(--surface);
+  animation: nav-mark-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes nav-mark-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-mark {
+    animation: none;
+  }
+}
+
 /* The theme switch sits at the rail's foot: the light/dark toggle, and a slim chevron under it for every theme. */
 .nav-theme {
   margin-top: auto;
@@ -4558,7 +4584,7 @@ main.shop-open > .tab-deck-anchor {
   color: var(--warn-text);
 }
 
-/* A row's band note under its name: how long it's been in hand, or what it's waiting on. */
+/* A row's band note under its name: what a blocked task is waiting on. */
 .task-status-note {
   display: block;
   margin-top: 1px;
@@ -5532,17 +5558,24 @@ main.shop-open > .tab-deck-anchor {
 .recap-wall .recap-head,
 .recap-wall .recap-foot,
 .recap-wall .recap-legend,
-.recap-wall .bounty-page-head,
-.recap-wall .booster-page-head {
+.recap-wall .recap-page-head {
   transition: opacity 0.25s;
 }
 
 .recap-wall.leaving .recap-head,
 .recap-wall.leaving .recap-foot,
 .recap-wall.leaving .recap-legend,
-.recap-wall.leaving .bounty-page-head,
-.recap-wall.leaving .booster-page-head {
+.recap-wall.leaving .recap-page-head {
   opacity: 0;
+}
+
+/* A page's own heading ("Still blocked?", "This week's Bounty") — above a payoff's rays (the reels', the
+   picked card's), which reach up behind it. */
+.recap-page-head {
+  position: relative;
+  z-index: 1;
+  font-size: clamp(1.3rem, 3.5vw, 1.8rem);
+  font-weight: 800;
 }
 
 .recap-wall.leaving .recap-pages {
@@ -5700,6 +5733,128 @@ main.shop-open > .tab-deck-anchor {
   color: #0284c7;
 }
 
+/* The tasks still blocked as the week closed (BlockedPage): grey notes, each with its choice of Blocked or
+   Backlog — sent to the Backlog, one turns the board's yellow with a little hop. */
+.blocked-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+}
+
+.recap-blocked {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.recap-note.recap-blocked-note {
+  min-height: 132px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: #e2e8f0;
+  transition: background-color 0.3s ease;
+}
+
+/* Below the leaving fall's specificity, so a released note still falls with the rest on Done. */
+.recap-blocked-note.released {
+  background: #fef08a;
+  animation: recap-note-hop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes recap-note-hop {
+  40% {
+    translate: 0 -7px;
+    scale: 1.05;
+  }
+}
+
+.recap-blocked-of {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.55);
+  overflow-wrap: anywhere;
+}
+
+.recap-blocked-name {
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.recap-blocked-why {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #475569;
+  overflow-wrap: anywhere;
+}
+
+/* Pinned to the note's foot, over its choice. */
+.recap-blocked-since {
+  margin-top: auto;
+  padding-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #475569;
+}
+
+.recap-blocked-note .calc-pills {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.recap-blocked-note .calc-pill {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border-color: rgba(15, 23, 42, 0.18);
+  background: rgba(255, 255, 255, 0.55);
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.recap-blocked-note .calc-pill:hover {
+  border-color: rgba(15, 23, 42, 0.4);
+  color: var(--text);
+}
+
+.recap-blocked-note .calc-pill.active {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--surface);
+}
+
+@media (max-width: 600px) {
+  .recap-blocked {
+    gap: 10px;
+  }
+
+  .recap-note.recap-blocked-note {
+    min-height: 0;
+    padding: 10px 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recap-blocked-note.released {
+    animation: none;
+  }
+}
+
 /* Bounties are on, but nothing was on ice to roll. */
 .recap-note.recap-no-bounty {
   margin: 0 auto;
@@ -5828,14 +5983,6 @@ main.shop-open > .tab-deck-anchor {
   align-items: center;
   gap: 8px;
   text-align: center;
-}
-
-/* Above the reels' rays, which reach up behind it. */
-.bounty-page-head {
-  position: relative;
-  z-index: 1;
-  font-size: clamp(1.3rem, 3.5vw, 1.8rem);
-  font-weight: 800;
 }
 
 .bounty-page > .recap-drop {
@@ -6178,14 +6325,6 @@ main.shop-open > .tab-deck-anchor {
 
 .booster-page > .recap-drop {
   width: 100%;
-}
-
-/* Above the picked card's rays, which reach up behind it. */
-.booster-page-head {
-  position: relative;
-  z-index: 1;
-  font-size: clamp(1.3rem, 3.5vw, 1.8rem);
-  font-weight: 800;
 }
 
 .booster-deal {

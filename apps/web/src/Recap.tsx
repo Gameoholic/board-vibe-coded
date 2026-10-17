@@ -1,20 +1,22 @@
 import { formatPercent } from "@board/contracts";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useState, type CSSProperties } from "react";
+import { WaitingOn } from "./BlockForm";
 import { BoosterDeal } from "./BoosterDeal";
 import { BountyRolls } from "./BountyRoll";
 import { writeMinutes } from "./duration";
-import { FlameIcon, SnowflakeIcon } from "./Icons";
+import { BlockedIcon, FlameIcon, SnowflakeIcon } from "./Icons";
 import Tooltip from "./Tooltip";
 import { tabInk } from "./palette";
 import { dayLabel, labelFor } from "./periodLabels";
-import type { BoosterHand, BountyStatus, BountyStopped, PeriodRecap, RecapDay, RecapFrost, RecapFrozen, RecapStreak, RecapTab } from "./types";
+import { bandOf } from "./taskStatus";
+import type { BoosterHand, BountyStatus, BountyStopped, PeriodRecap, RecapBlocked, RecapDay, RecapFrost, RecapFrozen, RecapStreak, RecapTab, TaskStatus } from "./types";
 
 // The recap of a just-closed period, like a mobile game's daily log-in: a week opens on its days, each with
 // what you cleared in every tab (in the tab's colour, with the % it earned), what the day earned and lost,
 // and each purchase; then its streaks from the week's start to its end; then the frost its close banked and
-// the tasks it froze; then the next week's Bounty reel to swing, and its Booster hand to pick from. Pages you
-// flip, so nothing scrolls.
+// the tasks it froze; then the tasks still blocked, each to keep blocked or send to the Backlog; then the next
+// week's Bounty reel to swing, and its Booster hand to pick from. Pages you flip, so nothing scrolls.
 // A week's takes over the screen as sticky notes on the board (NoteWall); a day's is a floating card over a
 // soft (never fully dark) scrim, in keeping with the no-heavy-modal rule.
 
@@ -45,10 +47,15 @@ const dropStyle = (i: number): CSSProperties =>
 
 type Page = { key: string; label: string };
 
-// What the recap's last pages do on the board: roll a Bounty on the spot the week's reel stopped on and reroll
-// one (see BountyRolls), and take a card of its Booster hand — the hand with it turned over, or null when the
-// server refused.
+// Where the Blocked page may put a task: where it is, or the Backlog.
+export type BlockedChoice = Extract<TaskStatus, "blocked" | "backlog">;
+const BLOCKED_CHOICES: BlockedChoice[] = ["blocked", "backlog"];
+
+// What the recap's last pages do on the board: move a task still blocked to the Backlog or back to Blocked;
+// roll a Bounty on the spot the week's reel stopped on and reroll one (see BountyRolls); and take a card of
+// its Booster hand — the hand with it turned over, or null when the server refused.
 interface RecapActions {
+  onSetBlocked: (task: RecapBlocked, status: BlockedChoice) => void;
   onRollBounty: (spot: number) => Promise<BountyStopped | null>;
   onRerollBounty: (taskId: string) => Promise<BountyStatus | null>;
   onPickBooster: (card: number) => Promise<BoosterHand | null>;
@@ -101,7 +108,7 @@ function NoteWall({ recap, onClose, ...actions }: PeriodRecapCardProps) {
 // The recap itself, the same in the card and on the wall: its date, the page you're on, and the way through.
 // The Bounty's page holds the way on back until its reels have landed, and the Booster's until its pick has,
 // so neither is passed by.
-function RecapBody({ recap, onRollBounty, onRerollBounty, onPickBooster, onDone }: RecapActions & { recap: PeriodRecap; onDone: () => void }) {
+function RecapBody({ recap, onSetBlocked, onRollBounty, onRerollBounty, onPickBooster, onDone }: RecapActions & { recap: PeriodRecap; onDone: () => void }) {
   // How many Bounties the week has as the page is shown: those rolled, and the stops its reel has left.
   const bounties = (recap.bounty?.bounties.length ?? 0) + (recap.bounty?.reel?.rolls ?? 0);
   const pages: Page[] =
@@ -111,6 +118,7 @@ function RecapBody({ recap, onRollBounty, onRerollBounty, onPickBooster, onDone 
           ...(recap.streaks.length > 0 ? [{ key: "streaks", label: "Streaks" }] : []),
           ...(recap.frost.length > 0 ? [{ key: "frost", label: "Frost" }] : []),
           ...(recap.frozen.length > 0 ? [{ key: "frozen", label: "Frozen" }] : []),
+          ...(recap.blocked.length > 0 ? [{ key: "blocked", label: "Blocked" }] : []),
           ...(bounties > 0 || recap.bountyEmpty ? [{ key: "bounty", label: bounties > 1 ? "Bounties" : "Bounty" }] : []),
           ...(recap.booster ? [{ key: "booster", label: recap.booster.picks > 1 ? "Boosters" : "Booster" }] : []),
         ]
@@ -125,6 +133,17 @@ function RecapBody({ recap, onRollBounty, onRerollBounty, onPickBooster, onDone 
   const last = page === pages.length - 1;
   const [bountyLanded, setBountyLanded] = useState(!recap.bounty?.reel);
   const [boosterLanded, setBoosterLanded] = useState(false);
+  // The blocked tasks sent to the Backlog — held here, so flipping away and back still shows them.
+  const [released, setReleased] = useState<ReadonlySet<string>>(() => new Set());
+  const setBlocked = (task: RecapBlocked, status: BlockedChoice) => {
+    setReleased((prev) => {
+      const next = new Set(prev);
+      if (status === "backlog") next.add(task.taskId);
+      else next.delete(task.taskId);
+      return next;
+    });
+    onSetBlocked(task, status);
+  };
   const waiting = (current.key === "bounty" && !bountyLanded) || (current.key === "booster" && !boosterLanded);
 
   return (
@@ -151,6 +170,7 @@ function RecapBody({ recap, onRollBounty, onRerollBounty, onPickBooster, onDone 
             {current.key === "streaks" && <StreaksPage streaks={recap.streaks} />}
             {current.key === "frost" && <FrostPage frost={recap.frost} />}
             {current.key === "frozen" && <FrozenPage frozen={recap.frozen} />}
+            {current.key === "blocked" && <BlockedPage blocked={recap.blocked} released={released} onSet={setBlocked} />}
             {current.key === "bounty" &&
               (recap.bounty && bounties > 0 ? (
                 <BountiesPage status={recap.bounty} onRoll={onRollBounty} onReroll={onRerollBounty} onLandedChange={setBountyLanded} />
@@ -407,6 +427,67 @@ function FrozenPage({ frozen }: { frozen: RecapFrozen[] }) {
   );
 }
 
+// The tasks still blocked as the week closed, each a grey note with what it's waiting on and for how long, and
+// whether it stays Blocked or goes to the Backlog — moved the moment it's picked, and back as often as you like.
+// One sent to the Backlog turns the board's yellow.
+function BlockedPage({
+  blocked,
+  released,
+  onSet,
+}: {
+  blocked: RecapBlocked[];
+  released: ReadonlySet<string>;
+  onSet: (task: RecapBlocked, status: BlockedChoice) => void;
+}) {
+  return (
+    <div className="blocked-page">
+      <div className="recap-page-head">Still blocked?</div>
+      <ol className="recap-blocked">
+        {blocked.map((b, i) => {
+          const where: BlockedChoice = released.has(b.taskId) ? "backlog" : "blocked";
+          return (
+            <motion.li
+              key={b.taskId}
+              className={`recap-blocked-note recap-note recap-drop${where === "backlog" ? " released" : ""}`}
+              style={dropStyle(i)}
+              {...slap(i)}
+            >
+              {b.of && <span className="recap-blocked-of">{b.of}</span>}
+              <span className="recap-blocked-name">{b.name}</span>
+              {(b.note || b.waitsOn) && (
+                <span className="recap-blocked-why">
+                  <WaitingOn note={b.note} task={b.waitsOn?.name} />
+                </span>
+              )}
+              <span className="recap-blocked-since">
+                <BlockedIcon size={13} />
+                Blocked {b.days === 0 ? "today" : `${b.days} ${b.days === 1 ? "day" : "days"}`}
+              </span>
+              <div className="calc-pills" role="group" aria-label={b.name}>
+                {BLOCKED_CHOICES.map((status) => {
+                  const band = bandOf(status);
+                  return (
+                    <button
+                      key={status}
+                      type="button"
+                      className={`calc-pill${status === where ? " active" : ""}`}
+                      aria-pressed={status === where}
+                      onClick={() => status !== where && onSet(b, status)}
+                    >
+                      <band.icon size={13} />
+                      {band.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 // Bounties are on, but nothing was on ice to roll.
 function NoBountyPage() {
   return (
@@ -421,7 +502,7 @@ function NoBountyPage() {
 function BoosterPage({ hand, onPick, onLanded }: { hand: BoosterHand; onPick: (card: number) => Promise<BoosterHand | null>; onLanded: () => void }) {
   return (
     <div className="booster-page">
-      <div className="booster-page-head">{hand.picks > 1 ? "This week's Boosters" : "This week's Booster"}</div>
+      <div className="recap-page-head">{hand.picks > 1 ? "This week's Boosters" : "This week's Booster"}</div>
       <div className="recap-drop" style={dropStyle(0)}>
         <BoosterDeal hand={hand} onPick={onPick} onLanded={onLanded} />
       </div>
@@ -444,7 +525,7 @@ function BountiesPage({
   const several = status.bounties.length + (status.reel?.rolls ?? 0) > 1;
   return (
     <div className="bounty-page">
-      <div className="bounty-page-head">{several ? "This week's Bounties" : "This week's Bounty"}</div>
+      <div className="recap-page-head">{several ? "This week's Bounties" : "This week's Bounty"}</div>
       <BountyRolls status={status} onRoll={onRoll} onReroll={onReroll} onLandedChange={onLandedChange} slotClassName="recap-drop" slotStyle={dropStyle} />
     </div>
   );

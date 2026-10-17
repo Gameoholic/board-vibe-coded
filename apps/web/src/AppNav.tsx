@@ -22,27 +22,33 @@ const ENTRIES: NavEntry[] = [
 interface AppNavProps {
   view: AppView;
   onChange: (view: AppView) => void;
+  // Places with something going on that's worth seeing from anywhere, and what it is ("timer running") —
+  // each gets a dot on its button, and the words after its name.
+  marks?: Partial<Record<AppView, string>>;
 }
 
 // A slim fixed rail, pinned to the left edge. Icon-only with a tooltip, like the canvas toolbar's
 // bare-button pattern — one button per place, the active one highlighted.
-function AppNav({ view, onChange }: AppNavProps) {
+function AppNav({ view, onChange, marks }: AppNavProps) {
   return (
     <nav className="app-nav" aria-label="Views">
       {ENTRIES.map((entry) => {
         const active = entry.view === view;
         const disabled = entry.view === null;
+        const mark = entry.view ? marks?.[entry.view] : undefined;
+        const label = mark ? `${entry.label} · ${mark}` : entry.label;
         return (
-          <Tooltip key={entry.label} label={entry.label} position="right">
+          <Tooltip key={entry.label} label={label} position="right">
             <button
               type="button"
               className={`nav-btn${active ? " active" : ""}${disabled ? " disabled" : ""}`}
-              aria-label={entry.label}
+              aria-label={label}
               aria-current={active ? "page" : undefined}
               disabled={disabled}
               onClick={() => entry.view && onChange(entry.view)}
             >
               {entry.icon}
+              {mark && <span className="nav-mark" aria-hidden="true" />}
             </button>
           </Tooltip>
         );

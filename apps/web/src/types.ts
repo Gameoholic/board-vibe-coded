@@ -8,6 +8,7 @@ export type {
   Group,
   PeriodKind,
   PeriodRecap,
+  RecapBlocked,
   RecapDay,
   RecapPurchase,
   RecapStreak,

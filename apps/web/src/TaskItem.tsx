@@ -3,7 +3,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } f
 import type { FlyOrigin } from "./FlyingPoints";
 import type { RowAction } from "./ActionMenu";
 import AgeChip from "./AgeChip";
-import BlockForm, { type BlockReason } from "./BlockForm";
+import BlockForm, { type BlockReason, WaitingOn } from "./BlockForm";
 import { BreakDownIcon, CopyIcon, EyeIcon, HourglassIcon, LockIcon, OutdentIcon, RerollIcon, ScissorsIcon, SnowflakeIcon, ThawIcon } from "./Icons";
 import ItemRow, { RowRemove, type RowContext } from "./ItemRow";
 import { ModifierLine, ModifierTag } from "./ModifierBadges";
@@ -20,7 +20,7 @@ import ScheduleEditor, { rowsFromSchedule, scheduleFromRows, type Cadence, type 
 import StatusPill from "./StatusPill";
 import TaskTimer from "./TaskTimer";
 import { priorityActions, priorityInk } from "./taskPriority";
-import { inHandLabel, pieceStatusActions, statusActions } from "./taskStatus";
+import { pieceStatusActions, statusActions } from "./taskStatus";
 import Tooltip from "./Tooltip";
 import { boxScheduleLabel, isBoxLocked, isRetired, onWholeTask, statusOf, wholeWorth } from "./types";
 import type { AppliedModifier, BoxSchedule, Task, TaskPriority, TaskSchedule, TaskStatus, TierDef } from "./types";
@@ -436,19 +436,14 @@ function TaskItem({ task, color, scheduleCadence, showEstimate, showTimer, row, 
   const rowMods = `${showTimer ? " has-footer" : ""}${task.pruned ? " pruned" : ""}${pieceItems.length > 0 || breakingDown ? " has-pieces" : ""}${retiring === "finale" ? " finishing" : ""}${onIce ? " on-ice" : ""}${auras.map((a) => ` aura-${a}`).join("")}`;
   // Shown only while the tab's "Pruned tasks" view lists it: when it comes back.
   const prunedNote = task.pruned && prune ? <span className="task-pruned-note">back {prune.until}</span> : null;
-  // The band's word on this row: how long an in-progress task has been in hand (so a stalled one stands
-  // out), or what a blocked one is waiting on — if it was given a reason (the band already says Blocked).
+  // The band's word on this row: what a blocked one is waiting on — if it was given a reason (the band
+  // already says Blocked). How long a task has been in hand is the Age chip's to say.
   const waitsOnName = task.blocker?.taskId
     ? rowStatus?.allTasks.find((t) => t.id === task.blocker?.taskId)?.text
     : undefined;
-  const inHand = current === "in-progress" && task.statusSince ? inHandLabel(task.statusSince, now, settings) : null;
-  const statusNote = !rowStatus ? null : inHand ? (
-    <span className="task-status-note">{inHand}</span>
-  ) : current === "blocked" && (task.blocker?.note || waitsOnName) ? (
+  const statusNote = !rowStatus ? null : current === "blocked" && (task.blocker?.note || waitsOnName) ? (
     <span className="task-status-note">
-      Waiting on {task.blocker?.note}
-      {task.blocker?.note && waitsOnName && " · "}
-      {waitsOnName && <span className="task-status-waits-on">{waitsOnName}</span>}
+      <WaitingOn note={task.blocker?.note} task={waitsOnName} />
     </span>
   ) : null;
   // Hover-revealed; a touch screen reaches the same choices through the long-press menu.

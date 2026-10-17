@@ -72,7 +72,7 @@ A new tab kind or canvas declares its options and renders its cells. It never re
 | The header over one part of a split list | `ListPartHead` |
 | The count under a tab's title | `TaskCount` |
 | A broken-down task's pieces | `Pieces.tsx` (`PieceList`, `PieceStrip`, `PiecesSummary`) |
-| Why a task is blocked | `BlockForm` |
+| Why a task is blocked · what it's waiting on, in words ("Waiting on …" — the row and the week recap) | `BlockForm` · `WaitingOn` (`BlockForm.tsx`) |
 | "2 owned · 1 free" chips | `HeldChips` (`RewardItem.tsx`) |
 
 ## One home each — words, looks and magnitudes

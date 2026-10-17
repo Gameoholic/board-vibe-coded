@@ -29,10 +29,10 @@ export function formatElapsed(ms: number): string {
   return hours > 0 ? `${hours}:${tail}` : tail;
 }
 
-/** The whole minutes a stopwatch's reading counts as: the nearest — and never none once there's time on it,
- *  so a few seconds can still be paid for. */
+/** The whole minutes a stopwatch's reading counts as: always rounded down (the owner's call), so a minute
+ *  only counts once it's over — and under a minute there's nothing yet to pay for. */
 export function minutesOn(ms: number): number {
-  return ms > 0 ? Math.max(1, Math.round(ms / 60_000)) : 0;
+  return Math.max(0, Math.floor(ms / 60_000));
 }
 
 /**

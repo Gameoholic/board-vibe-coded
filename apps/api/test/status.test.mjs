@@ -111,6 +111,34 @@ test("a task can't wait on itself, on a missing task, or on one that's already d
   assert.equal(store.getTask(a.id).blocker, undefined);
 });
 
+test("a week's recap lists what's still blocked, in the board's order: why, and for how many days", (t) => {
+  t.after(() => setDebugNow(null));
+  const { store, add } = board(); // Sunday, 2026-09-27
+  store.rollPeriod("day");
+  const shelf = add("Build the hallway shelf");
+  const [brackets, screws] = store.breakDown(shelf.id, ["Buy brackets", "Buy screws"]).slice(1);
+  const parts = add("Order the brake pads");
+  const bike = add("Fix bike brakes");
+  const passport = add("Renew the passport");
+  const freed = add("Call the bank");
+  setDebugNow(noonOn("2026-09-29"));
+  store.setStatus(bike.id, "blocked", { note: "a free afternoon", taskId: parts.id });
+  store.setStatus(passport.id, "blocked");
+  store.setStatus(freed.id, "blocked", { note: "their reply" });
+  setDebugNow(noonOn("2026-10-02"));
+  store.setStatus(screws.id, "blocked", { note: "the right size" });
+  store.setStatus(freed.id, "backlog");
+
+  setDebugNow(noonOn("2026-10-04")); // the next Sunday: ending Saturday ends the week
+  const { week } = store.rollPeriod("day");
+  assert.deepEqual(week.blocked, [
+    { taskId: screws.id, name: "Buy screws", of: "Build the hallway shelf", note: "the right size", days: 2 },
+    { taskId: bike.id, name: "Fix bike brakes", note: "a free afternoon", waitsOn: { taskId: parts.id, name: "Order the brake pads" }, days: 5 },
+    { taskId: passport.id, name: "Renew the passport", days: 5 },
+  ]);
+  void brackets;
+});
+
 const idsInOrder = (store, sectionId) =>
   store
     .listTasks(sectionId)

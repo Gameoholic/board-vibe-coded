@@ -14,6 +14,19 @@ export interface BlockReason {
   taskId?: string;
 }
 
+// What a blocked task is waiting on, in the same words wherever it's said (its row, the week recap): its
+// note, then the name of the task it waits on. Nothing when it was given no reason.
+export function WaitingOn({ note, task }: { note?: string; task?: string }) {
+  if (!note && !task) return null;
+  return (
+    <>
+      Waiting on {note}
+      {note && task && " · "}
+      {task && <span className="task-status-waits-on">{task}</span>}
+    </>
+  );
+}
+
 interface BlockFormProps {
   task: Task; // the task being blocked
   allTasks: Task[];
