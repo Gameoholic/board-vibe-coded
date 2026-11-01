@@ -2,7 +2,7 @@ import { ChevronDownIcon } from "./Icons";
 import type { TaskStatus } from "./types";
 
 // One band of a task tab's Status view (In progress / Backlog / Blocked, plus the Completed look-back):
-// its header with a count, an optional line under it, and its list. Blocked folds to its header. A band
+// its header with a count, and its list. Blocked folds to its header. A band
 // is also somewhere a row can be dragged to from another band (data-band, hit-tested by the tab).
 
 interface StatusBandProps {
@@ -12,11 +12,10 @@ interface StatusBandProps {
   label: string;
   count: number;
   fold?: { open: boolean; onToggle: () => void };
-  hint?: string;
   children: React.ReactNode;
 }
 
-export default function StatusBand({ tabId, band, label, count, fold, hint, children }: StatusBandProps) {
+export default function StatusBand({ tabId, band, label, count, fold, children }: StatusBandProps) {
   const heading = (
     <>
       <span>{label}</span>
@@ -39,7 +38,6 @@ export default function StatusBand({ tabId, band, label, count, fold, hint, chil
       ) : (
         <div className="status-band-head">{heading}</div>
       )}
-      {hint && <p className="status-band-hint">{hint}</p>}
       {(!fold || fold.open) && children}
     </section>
   );

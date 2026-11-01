@@ -4574,16 +4574,6 @@ main.shop-open > .tab-deck-anchor {
   transform: none;
 }
 
-/* The gentle "finish or park one?" once too much is in progress — a nudge, never a block. */
-.status-band-hint {
-  grid-column: 1 / -1;
-  margin: 0;
-  padding: 0 4px 4px;
-  font-size: 0.74rem;
-  font-weight: 600;
-  color: var(--warn-text);
-}
-
 /* A row's band note under its name: what a blocked task is waiting on. */
 .task-status-note {
   display: block;

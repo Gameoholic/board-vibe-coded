@@ -28,9 +28,6 @@ export const bandSplits = (status: TaskStatus): boolean => !!bandOf(status).spli
 // The Status choices' caption in the actions menu.
 const STATUS_SET = "Status";
 
-// More tasks than this in progress gets a gentle "finish or park one?" — a nudge, never a block.
-export const IN_PROGRESS_NUDGE_ABOVE = 3;
-
 // The Status choices in a task's actions menu — one set, captioned "Status" — the current one ticked. Blocked asks why (`onBlock` opens
 // that form), so it reads "Blocked…" — and picking it again on a blocked task edits the reason. `leaving` is
 // what moving it out of In progress costs (a thaw bonus taken back), said on the choices that do.

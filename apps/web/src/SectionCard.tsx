@@ -30,7 +30,7 @@ import type { TabPrefs } from "./useLocalConfig";
 import { behaviorOfType, canBoost, canBreakDown, canPrioritise, canPrune, DEFAULT_PRIORITY, freezeRefusal, freezerOf, frostShare, isRetired, modifiersOf, payout, statusOf, wholeWorth } from "./types";
 import { runBetween, withUnlistedKept } from "./listOps";
 import { pruneUntil, streaksBrokenByPruning } from "./pruning";
-import { bandSplits, IN_PROGRESS_NUDGE_ABOVE, STATUS_BANDS, statusLabel } from "./taskStatus";
+import { bandSplits, STATUS_BANDS, statusLabel } from "./taskStatus";
 import type { AppliedModifier, Group, Section, StreakView, Task, TaskPriority, TaskSchedule, TaskStatus, TaskType, TierDef } from "./types";
 
 // A board tab: the shared tab base (CanvasCard — move/resize, header, sort/display controls, add
@@ -485,15 +485,13 @@ function SectionCard({
         { inList: inBand(band), emptyLabel, dropOutside: band === "done" ? undefined : dropFrom(band), split: band !== "done" && bandSplits(band) },
       );
     const count = (band: Band) => listedTasks.filter((t) => bandOf(t) === band).length;
-    const inProgress = count("in-progress");
     return (
       <div className="status-bands" style={{ "--tab-color": ink } as React.CSSProperties}>
         <StatusBand
           tabId={section.id}
           band="in-progress"
           label={statusLabel("in-progress")}
-          count={inProgress}
-          hint={inProgress > IN_PROGRESS_NUDGE_ABOVE ? `${inProgress} in progress. Finish or park one?` : undefined}
+          count={count("in-progress")}
         >
           {bandList("in-progress")}
         </StatusBand>
