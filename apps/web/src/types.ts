@@ -74,7 +74,7 @@ export { modifiersOf, onWholeTask, payout } from "@board/contracts";
 export { isBought, listPrice, priceModifiersOf, priceOf, saleOn } from "@board/contracts";
 // Which habits a Booster hand may deal.
 export { canBoost } from "@board/contracts";
-export type { GameItemId, InventoryItem, PriceContext, RewardKind, SaleSettings, SaleWeek } from "@board/contracts";
+export type { GameItemId, InventoryItem, PriceContext, RewardKind, SaleByHand, SaleSettings, SaleWeek } from "@board/contracts";
 export type { AppliedModifier, ModifierContext, ModifierId, RecapFrost, RecapFrozen, FreezerSettings } from "@board/contracts";
 // The Freezer: the wait clock, frost, and who may freeze — the rules the server folds.
 export { daysSince, freezeRefusal, freezerOf, frostFill, frostShare, isFullFrost, waitDays, waitedMs, willFreezeAtWeekEnd } from "@board/contracts";

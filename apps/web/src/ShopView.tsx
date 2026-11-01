@@ -31,10 +31,10 @@ interface ShopViewProps {
 }
 
 function ShopView({ points, shop, local, onBuy }: ShopViewProps) {
-  const { sections, rewards, groups, inventory, saleStarted } = shop.shop;
+  const { sections, rewards, groups, inventory, saleByHand } = shop.shop;
   const closed = points < 0; // spec: a negative balance closes the shop
   const { now, settings, openDay } = useBoardClock();
-  const sale = saleOn(now, settings, { openDay, startedEarly: saleStarted }) && rewards.some((r) => r.onSale) ? settings.sale : null;
+  const sale = saleOn(now, settings, { openDay, byHand: saleByHand }) &&rewards.some((r) => r.onSale) ? settings.sale : null;
   const addTab = (name: string) => shop.addSection(name, PALETTE[sections.length % PALETTE.length]);
 
   return (
@@ -95,7 +95,7 @@ function ShopView({ points, shop, local, onBuy }: ShopViewProps) {
             points={points}
             closed={closed}
             inventory={inventory}
-            saleStarted={saleStarted}
+            saleByHand={saleByHand}
             frame={frame}
             prefs={local.config.tabPrefs[section.id]}
             onPrefsChange={(patch) => local.setTabPref(section.id, patch)}

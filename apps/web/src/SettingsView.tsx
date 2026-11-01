@@ -120,9 +120,10 @@ interface SettingsViewProps {
   onSetDebugClock: (at: string | null) => void;
   // This device's tab placements — a backup's preview draws its board the way this board is laid out.
   layouts: Record<string, CardLayout>;
-  // Whether the weekend sale is on now, and starting it early (it then runs until the week ends).
+  // Whether the weekend sale is on now, and starting or ending it early (for the rest of the week).
   saleRunning: boolean;
   onStartSale: () => void;
+  onEndSale: () => void;
 }
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -230,6 +231,7 @@ function SettingsView({
   layouts,
   saleRunning,
   onStartSale,
+  onEndSale,
 }: SettingsViewProps) {
   const [confirming, setConfirming] = useState(false);
   const resetRef = useRef<HTMLDivElement>(null);
@@ -559,26 +561,25 @@ function SettingsView({
               minutes={settings.sale.startMinutes}
               onChange={(startDay, startMinutes) => patchSale({ startDay, startMinutes })}
             />
-            {saleRunning ? (
-              <p className="settings-note">On now, until the week ends.</p>
-            ) : (
-              <div className="popover-anchor">
-                <button type="button" className="ghost-btn" onClick={() => setConfirmingSale(true)}>
-                  Start the sale now
-                </button>
-                <ConfirmPopover
-                  open={confirmingSale}
-                  message="Start the weekend sale now? It runs until the week ends."
-                  confirmLabel="Start"
-                  danger={false}
-                  onConfirm={() => {
-                    setConfirmingSale(false);
-                    onStartSale();
-                  }}
-                  onCancel={() => setConfirmingSale(false)}
-                />
-              </div>
-            )}
+            {saleRunning && <p className="settings-note">On now, until the week ends.</p>}
+            <div className="popover-anchor">
+              <button type="button" className="ghost-btn" onClick={() => setConfirmingSale(true)}>
+                {saleRunning ? "End the sale now" : "Start the sale now"}
+              </button>
+              <ConfirmPopover
+                open={confirmingSale}
+                message={
+                  saleRunning ? "End the weekend sale now? It's back next week." : "Start the weekend sale now? It runs until the week ends."
+                }
+                confirmLabel={saleRunning ? "End" : "Start"}
+                danger={false}
+                onConfirm={() => {
+                  setConfirmingSale(false);
+                  (saleRunning ? onEndSale : onStartSale)();
+                }}
+                onCancel={() => setConfirmingSale(false)}
+              />
+            </div>
           </>
         )}
       </section>

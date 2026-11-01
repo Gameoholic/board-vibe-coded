@@ -123,10 +123,12 @@ test("the weekend sale runs from Thursday 17:00 of the open week until the week 
   assert.equal(saleOn(THU_1700, DEFAULT_SETTINGS, { openDay: "2026-09-30" }), false, "Wednesday hasn't been ended");
   assert.equal(saleOn(SUN_0300, DEFAULT_SETTINGS, { openDay: "2026-10-03" }), true, "Saturday hasn't been ended");
   assert.equal(saleOn(SUN_0300, DEFAULT_SETTINGS, { openDay: "2026-10-04" }), false, "a new week");
-  // Started early, it's on whenever; switched off, never.
-  assert.equal(saleOn(THU_1659, DEFAULT_SETTINGS, { startedEarly: true }), true);
+  // Started by hand, it's on whenever; ended by hand, off whenever; switched off, never.
+  assert.equal(saleOn(THU_1659, DEFAULT_SETTINGS, { byHand: "started" }), true);
+  assert.equal(saleOn(SAT_2359, DEFAULT_SETTINGS, { byHand: "ended" }), false);
+  assert.equal(saleOn(THU_1700, DEFAULT_SETTINGS, { byHand: null }), true);
   assert.equal(saleOn(THU_1700, withSale({ enabled: false })), false);
-  assert.equal(saleOn(THU_1700, withSale({ enabled: false }), { startedEarly: true }), false);
+  assert.equal(saleOn(THU_1700, withSale({ enabled: false }), { byHand: "started" }), false);
 });
 
 test("a price takes the sale as a factor, composed by the same payout and rounded once", () => {

@@ -21,7 +21,7 @@ import { groupsApi, withMembership, withOrder, withoutGroup } from "./listOps";
 export type RewardInput = Pick<Reward, "emoji" | "name" | "cost" | "note" | "onSale" | "timed">;
 export type NewReward = RewardInput & Pick<Reward, "kind" | "item">;
 
-const EMPTY: Shop = { sections: [], rewards: [], groups: [], spent: 0, inventory: [], saleStarted: false };
+const EMPTY: Shop = { sections: [], rewards: [], groups: [], spent: 0, inventory: [], saleByHand: null };
 // The retired device-local preview's storage key. The owner chose to start fresh when the shop moved
 // to the server, so any leftover is simply cleared.
 // ponytail: drop this once every device has loaded the app since the move.
@@ -179,20 +179,26 @@ export function useShop() {
     [refresh, afterTimerWrites],
   );
 
-  // Start the weekend sale early, for the rest of the week. The server says no once it's on, so its reply (or
-  // a fresh read) is the truth.
-  const startSale = useCallback(() => {
-    fetch("/api/shop/sale/start", { method: "POST" })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`sale refused (${res.status})`);
-        setShop(ShopSchema.parse(await res.json()));
-      })
-      .catch(refresh);
-  }, [refresh]);
+  // Start or end the weekend sale early, for the rest of the week. The server says no once it's that way
+  // already, so its reply (or a fresh read) is the truth.
+  const setSaleByHand = useCallback(
+    (action: "start" | "end") => {
+      fetch(`/api/shop/sale/${action}`, { method: "POST" })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`sale ${action} refused (${res.status})`);
+          setShop(ShopSchema.parse(await res.json()));
+        })
+        .catch(refresh);
+    },
+    [refresh],
+  );
+  const startSale = useCallback(() => setSaleByHand("start"), [setSaleByHand]);
+  const endSale = useCallback(() => setSaleByHand("end"), [setSaleByHand]);
 
   return {
     shop,
     startSale,
+    endSale,
     addSection,
     editSection,
     removeSection,

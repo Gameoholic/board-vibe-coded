@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Points } from "./points.js";
-import { TaskSchedule } from "./period.js";
+import { SaleByHand, TaskSchedule } from "./period.js";
 import { EffortId, PointsSource } from "./pointsFormula.js";
 
 // Trust-boundary caps: generous for a personal board, but bounded so a malformed or hostile body
@@ -392,14 +392,14 @@ export type InventoryItem = z.infer<typeof InventoryItem>;
 // The shop read model in one payload. `spent` is the sum of every purchase's frozen pointsSpent —
 // the client shows the owner's points as the board's live total minus it. `groups` are the shop
 // sections' groups (the board's are served by /api/groups). `inventory` is every item and how
-// many the owner has; `saleStarted` whether the weekend sale was started early this week.
+// many the owner has; `saleByHand` whether the weekend sale was started or ended by hand this week.
 export const Shop = z.object({
   sections: z.array(ShopSection),
   rewards: z.array(Reward),
   groups: z.array(Group),
   spent: Points,
   inventory: z.array(InventoryItem).default([]),
-  saleStarted: z.boolean().default(false),
+  saleByHand: SaleByHand.nullable().default(null),
 });
 export type Shop = z.infer<typeof Shop>;
 

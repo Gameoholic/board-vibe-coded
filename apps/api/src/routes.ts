@@ -263,9 +263,12 @@ export function buildRouter(store: BoardStore, backups: Backups): Router {
     res.status(204).end();
   });
 
-  // Start the weekend sale early, for the rest of the week.
+  // Start or end the weekend sale early, for the rest of the week.
   router.post("/shop/sale/start", (req, res) => {
     res.json(store.startSale(idemKey(req, "sale-start")));
+  });
+  router.post("/shop/sale/end", (req, res) => {
+    res.json(store.endSale(idemKey(req, "sale-end")));
   });
 
   // Buy at the price the owner was shown (409 when it has changed since — see purchaseReward).

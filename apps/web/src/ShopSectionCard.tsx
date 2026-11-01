@@ -9,7 +9,7 @@ import { tabInk } from "./palette";
 import { DisplayMenu, SortMenu, sortItems, tabView } from "./TabControls";
 import { ADD_BUTTON_KEY, GROUPING_KEY, canAfford, shopTabOffer } from "./tabViews";
 import { isBought, listPrice, payout, priceModifiersOf } from "./types";
-import type { AppliedModifier, Group, InventoryItem, Reward, ShopSection, Timer } from "./types";
+import type { AppliedModifier, Group, InventoryItem, Reward, SaleByHand, ShopSection, Timer } from "./types";
 import { useBoardClock } from "./useBoardClock";
 import type { TabPrefs } from "./useLocalConfig";
 import type { NewReward, RewardInput } from "./useShop";
@@ -33,7 +33,7 @@ interface ShopSectionCardProps {
   points: number; // the owner's spendable points (thousandths) — gates the buy buttons
   closed: boolean; // spec: a negative balance closes the shop
   inventory: InventoryItem[]; // how many of each item the owner has
-  saleStarted: boolean; // the weekend sale was started early this week
+  saleByHand: SaleByHand | null; // the weekend sale was started or ended by hand this week
   frame: CardFrame;
   prefs: TabPrefs | undefined;
   onPrefsChange: (patch: Partial<TabPrefs>) => void;
@@ -59,7 +59,7 @@ function ShopSectionCard({
   points,
   closed,
   inventory,
-  saleStarted,
+  saleByHand,
   frame,
   prefs,
   onPrefsChange,
@@ -89,11 +89,11 @@ function ShopSectionCard({
   const priced = useMemo(() => {
     const byId = new Map<string, Priced>();
     for (const r of rewards) {
-      const modifiers = priceModifiersOf(r, { settings, now, openDay, startedEarly: saleStarted });
+      const modifiers = priceModifiersOf(r, { settings, now, openDay, byHand: saleByHand });
       byId.set(r.id, { price: payout(listPrice(r), modifiers), modifiers });
     }
     return byId;
-  }, [rewards, settings, now, openDay, saleStarted]);
+  }, [rewards, settings, now, openDay, saleByHand]);
   const priceOf = (r: Reward) => priced.get(r.id)?.price ?? r.cost;
 
   // A bought one-time reward has left its shelf (the server keeps it at the end of the tab's order) —

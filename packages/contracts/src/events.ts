@@ -271,6 +271,8 @@ export const BoardEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("BoosterDealt"), periodKey: z.string(), taskIds: z.array(z.string()), replaces: z.string().optional() }),
   // The weekend sale started early, by hand, for the week `periodKey` — it runs until that week is ended.
   z.object({ type: z.literal("SaleStarted"), periodKey: z.string() }),
+  // The weekend sale ended early, by hand, for the week `periodKey` — off until that week is ended.
+  z.object({ type: z.literal("SaleEnded"), periodKey: z.string() }),
   // Booster rerolls bought in the shop, banked until used, whatever the week (cf. BountyRerollsGranted).
   z.object({ type: z.literal("BoosterRerollsGranted"), count: z.number().int().nonnegative() }),
   // One card of that hand picked: the task it held is a Booster until the week closes, adding `amount` (the

@@ -69,6 +69,7 @@ import {
   priceModifiersOf,
   type PurchaseRewardBody,
   priorityOf,
+  type SaleByHand,
   saleOn,
   rerollSource,
   PIECES_MAX,
@@ -239,8 +240,8 @@ export class BoardStore {
   private boosterHands = new Map<string, BoosterHandState>();
   // Booster rerolls bought in the shop and not yet used.
   private bankedBoosterRerolls = 0;
-  // The weeks whose weekend sale was started early, by hand (it runs until that week is ended).
-  private saleStartedIn = new Set<string>();
+  // The weeks whose weekend sale was started or ended by hand (it holds until that week is ended).
+  private saleByHandIn = new Map<string, SaleByHand>();
   // What each open period has seen so far, for its recap, day by day: per task, the net points its ticks
   // gained (at the boost each was paid at), and each purchase. Started afresh with each period.
   private tallies: Record<PeriodKind, PeriodTally> = { day: newTally(), week: newTally() };
@@ -310,19 +311,19 @@ export class BoardStore {
       groups: this.groups.filter((g) => shopIds.has(g.sectionId)).map((g) => ({ ...g })),
       spent: this.spent,
       inventory: (Object.keys(this.gameItems) as GameItemId[]).map((item) => ({ item, ...this.gameItems[item].held() })),
-      saleStarted: this.saleStartedEarly(),
+      saleByHand: this.saleByHand() ?? null,
     };
   }
 
-  // Whether the open week's weekend sale was started early, by hand.
-  private saleStartedEarly(): boolean {
+  // Whether the open week's weekend sale was started or ended by hand.
+  private saleByHand(): SaleByHand | undefined {
     const week = this.openPeriods.week?.key;
-    return !!week && this.saleStartedIn.has(week);
+    return week ? this.saleByHandIn.get(week) : undefined;
   }
 
   // What a reward is priced at now: the server's clock, and the open week as the sale reads it.
   private priceContext(): PriceContext {
-    return { settings: this.settings, now: clockNow().toISOString(), openDay: this.openPeriods.day?.key, startedEarly: this.saleStartedEarly() };
+    return { settings: this.settings, now: clockNow().toISOString(), openDay: this.openPeriods.day?.key, byHand: this.saleByHand() };
   }
 
   // The items an Item reward (kind "game") gives, one entry each: how many the owner has (bought and kept from week
@@ -1205,15 +1206,24 @@ export class BoardStore {
     return this.getShop();
   }
 
-  // Start the weekend sale early — on holiday, say — for the rest of the open week. Only while a week is
-  // open, the sale is enabled, and it isn't on already.
+  // Start the weekend sale early — on holiday, say — or end it early, back from one, for the rest of the open
+  // week. Only while a week is open, the sale is enabled, and it isn't that way already.
   startSale(idempotencyKey?: string | null): Shop {
+    return this.setSaleByHand("started", idempotencyKey);
+  }
+
+  endSale(idempotencyKey?: string | null): Shop {
+    return this.setSaleByHand("ended", idempotencyKey);
+  }
+
+  private setSaleByHand(byHand: SaleByHand, idempotencyKey?: string | null): Shop {
     const week = this.openPeriods.week?.key;
     if (!week) throw badRequest("no week has started");
     if (!this.settings.sale.enabled) throw badRequest("the weekend sale is off");
-    const { now, openDay, startedEarly } = this.priceContext();
-    if (saleOn(now, this.settings, { openDay, startedEarly })) throw badRequest("the sale is already on");
-    this.commit({ type: "SaleStarted", periodKey: week }, idempotencyKey);
+    const { now, ...saleWeek } = this.priceContext();
+    const starting = byHand === "started";
+    if (saleOn(now, this.settings, saleWeek) === starting) throw badRequest(starting ? "the sale is already on" : "the sale isn't on");
+    this.commit({ type: starting ? "SaleStarted" : "SaleEnded", periodKey: week }, idempotencyKey);
     return this.getShop();
   }
 
@@ -1866,7 +1876,7 @@ export class BoardStore {
     this.bankedRerolls = 0;
     this.boosterHands.clear();
     this.bankedBoosterRerolls = 0;
-    this.saleStartedIn.clear();
+    this.saleByHandIn.clear();
     this.tallies = { day: newTally(), week: newTally() };
     this.weekStartStreaks = null;
     this.frostFrom.clear();
@@ -2203,7 +2213,10 @@ export class BoardStore {
         this.bankedBoosterRerolls += event.count;
         return;
       case "SaleStarted":
-        this.saleStartedIn.add(event.periodKey);
+        this.saleByHandIn.set(event.periodKey, "started");
+        return;
+      case "SaleEnded":
+        this.saleByHandIn.set(event.periodKey, "ended");
         return;
       case "BoosterDealt": {
         // A reroll's deal keeps the week's other Boosters beside the new hand, and spends a bought reroll.
@@ -2361,7 +2374,7 @@ export class BoardStore {
         return;
       case "PeriodStarted":
         this.openPeriods[event.kind] = { key: event.periodKey, startedAt: occurredAt };
-        // A week starting starts its Bounties, their reel, free rerolls, Booster hand and early sale afresh — the debug
+        // A week starting starts its Bounties, their reel, free rerolls, Booster hand and sale afresh — the debug
         // clock can reopen a week, and whatever an earlier run of it held ended when that run closed.
         if (event.kind === "week") {
           this.bounties.delete(event.periodKey);
@@ -2369,7 +2382,7 @@ export class BoardStore {
           this.bountiedIn.delete(event.periodKey);
           this.freeRerolls.delete(event.periodKey);
           this.boosterHands.delete(event.periodKey);
-          this.saleStartedIn.delete(event.periodKey);
+          this.saleByHandIn.delete(event.periodKey);
         }
         return;
       case "PeriodClosed":

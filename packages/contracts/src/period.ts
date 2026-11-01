@@ -275,21 +275,26 @@ export function isBoxLocked(entry: BoxSchedule, now: string, settings: Settings,
   return posNow < posBox;
 }
 
+// The weekend sale started or ended by hand, for the rest of the open week, whatever its schedule says.
+export const SaleByHand = z.enum(["started", "ended"]);
+export type SaleByHand = z.infer<typeof SaleByHand>;
+
 /** The open week, as the weekend sale reads it: its open day (a day not yet ended is still today), and
- *  whether the sale was started early by hand. */
+ *  whether the sale was started or ended by hand. */
 export interface SaleWeek {
   openDay?: string;
-  startedEarly?: boolean;
+  byHand?: SaleByHand | null;
 }
 
 /**
  * Whether the weekend sale is on at `now`: it's enabled, and the open week has reached its start — the same
  * gate as a weekly box's (isBoxLocked), so it follows the board's days: a day not yet ended is still today,
- * and the sale runs until the week is ended, whatever the clock says — or it was started early this week.
+ * and the sale runs until the week is ended, whatever the clock says — unless it was started or ended by
+ * hand this week.
  */
 export function saleOn(now: string, settings: Settings, week: SaleWeek = {}): boolean {
   if (!settings.sale.enabled) return false;
-  if (week.startedEarly) return true;
+  if (week.byHand) return week.byHand === "started";
   return !isBoxLocked({ dayOfWeek: settings.sale.startDay, minutes: settings.sale.startMinutes }, now, settings, week.openDay);
 }
 

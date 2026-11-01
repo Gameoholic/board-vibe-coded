@@ -147,7 +147,7 @@ test("the sale can be started early, and runs until the week is ended", (t) => {
   endDayAt(WEDNESDAY);
   store.purchaseReward(video.id);
   assert.equal(purchases().at(-1).pointsSpent, 2000);
-  assert.equal(store.startSale().saleStarted, true);
+  assert.equal(store.startSale().saleByHand, "started");
   store.purchaseReward(video.id);
   assert.equal(purchases().at(-1).pointsSpent, 1000);
   assert.throws(() => store.startSale(), refused(400), "it's on already");
@@ -157,9 +157,40 @@ test("the sale can be started early, and runs until the week is ended", (t) => {
   endDayAt(FRIDAY);
   endDayAt(SATURDAY);
   endDayAt(SUNDAY_EARLY); // the week ends, and its sale with it
-  assert.equal(store.getShop().saleStarted, false);
+  assert.equal(store.getShop().saleByHand, null);
   store.purchaseReward(video.id);
   assert.equal(purchases().at(-1).pointsSpent, 2000);
+});
+
+test("the sale can be ended early, and is back on schedule the next week", (t) => {
+  t.after(() => setDebugNow(null));
+  const { store, reward, purchases, rebuild, endDayAt } = board(WEDNESDAY);
+  const video = reward("Watch a video", 2000);
+  endDayAt(WEDNESDAY);
+  assert.throws(() => store.endSale(), refused(400), "it isn't on");
+  endDayAt(THURSDAY_AFTERNOON);
+  endDayAt(FRIDAY); // Friday is open: the sale is on by its schedule
+  store.purchaseReward(video.id);
+  assert.equal(purchases().at(-1).pointsSpent, 1000);
+
+  assert.equal(store.endSale().saleByHand, "ended");
+  store.purchaseReward(video.id);
+  assert.equal(purchases().at(-1).pointsSpent, 2000);
+  assert.throws(() => store.endSale(), refused(400), "it's off already");
+  assert.deepEqual(rebuild().getShop(), store.getShop());
+  // Ended, it can be started again, and ended again — the latest says.
+  assert.equal(store.startSale().saleByHand, "started");
+  assert.equal(store.endSale().saleByHand, "ended");
+  endDayAt(SATURDAY);
+  store.purchaseReward(video.id);
+  assert.equal(purchases().at(-1).pointsSpent, 2000, "still off the next day");
+  assert.deepEqual(rebuild().getShop(), store.getShop());
+
+  endDayAt(SUNDAY_EARLY); // the week ends, and what was done by hand with it
+  assert.equal(store.getShop().saleByHand, null);
+  for (const day of ["05", "06", "07", "08", "09"]) endDayAt(`2026-10-${day}T09:00:00.000Z`); // to the next Friday
+  store.purchaseReward(video.id);
+  assert.equal(purchases().at(-1).pointsSpent, 1000, "on again by its schedule");
 });
 
 test("a purchase at a price the owner wasn't shown is refused, and nothing is bought", (t) => {

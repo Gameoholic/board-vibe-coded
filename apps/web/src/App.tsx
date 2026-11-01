@@ -1113,8 +1113,9 @@ function App() {
               realNow={realNow}
               onSetDebugClock={setDebugClock}
               layouts={config.layouts}
-              saleRunning={saleOn(debugNow ?? realNow, settings, { openDay: status?.day.openKey ?? undefined, startedEarly: shopState.shop.saleStarted })}
+              saleRunning={saleOn(debugNow ?? realNow, settings, { openDay: status?.day.openKey ?? undefined, byHand: shopState.shop.saleByHand })}
               onStartSale={shopState.startSale}
+              onEndSale={shopState.endSale}
             />
           ) : (
             <BoardClockProvider
