@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
 import { BoardEvent, type StoredEvent } from "@board/contracts";
 
 // The one persisted table: an append-only event log. Current state is never stored — it's folded
@@ -38,10 +37,6 @@ interface EventRow {
   idempotency_key: string | null;
 }
 
-function defaultDbPath(): string {
-  return fileURLToPath(new URL("../data/board.db", import.meta.url));
-}
-
 function rowToStored(row: EventRow): StoredEvent {
   return {
     seq: row.seq,
@@ -55,7 +50,8 @@ function rowToStored(row: EventRow): StoredEvent {
 
 const SELECT_ALL = "SELECT * FROM events ORDER BY seq ASC";
 
-export function openEventStore(path: string = process.env.BOARD_DB ?? defaultDbPath()): EventStore {
+// One per account (accounts.ts says where), or ":memory:" in tests.
+export function openEventStore(path: string): EventStore {
   const file = path === ":memory:" ? path : resolve(path);
   if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
 

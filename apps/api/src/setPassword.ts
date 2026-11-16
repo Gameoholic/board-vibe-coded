@@ -1,8 +1,10 @@
-import { setPassword } from "./auth.js";
+import { dataDir, findAccount, readAccounts, setAccountPassword } from "./accounts.js";
+import { FIRST_ACCOUNT_NAME, migrateToAccounts } from "./migrateAccounts.js";
 
-// Reads the new password from stdin without echoing it to the terminal, so it never lands in shell
-// history or a process list (unlike `pnpm set-password mypassword` would).
-function promptHidden(query: string): Promise<string> {
+// Reads a line from the keyboard one key at a time. The password isn't echoed, so it never lands in
+// shell history or a process list (unlike `pnpm set-password mypassword` would). The name is read the
+// same way, echoed, so one reader owns the keyboard throughout.
+function prompt(query: string, hidden: boolean): Promise<string> {
   return new Promise((resolve, reject) => {
     process.stdout.write(query);
     const stdin = process.stdin;
@@ -14,6 +16,8 @@ function promptHidden(query: string): Promise<string> {
     let value = "";
     const onData = (chunk: string) => {
       for (const char of chunk) {
+        // The other half of a "\r\n" the last prompt ended on — not an empty answer to this one.
+        if (char === "\n" && !value) continue;
         if (char === "\n" || char === "\r" || char === "\u0004") {
           cleanup();
           process.stdout.write("\n");
@@ -26,9 +30,11 @@ function promptHidden(query: string): Promise<string> {
           return;
         }
         if (char === "\u007f" || char === "\b") {
+          if (!hidden && value) process.stdout.write("\b \b");
           value = value.slice(0, -1);
           continue;
         }
+        if (!hidden) process.stdout.write(char);
         value += char;
       }
     };
@@ -42,20 +48,41 @@ function promptHidden(query: string): Promise<string> {
 }
 
 async function main() {
-  const first = await promptHidden("New board password: ");
+  // Before reading the accounts: on an install not yet booted since the update, this makes them.
+  const dir = dataDir();
+  migrateToAccounts(dir, FIRST_ACCOUNT_NAME);
+  const accounts = readAccounts(dir) ?? [];
+
+  const name = (await prompt(accounts.length ? "Account name: " : "Name for the first account: ", false)).trim();
+  if (!name) {
+    console.error("A name is needed — nothing was changed.");
+    process.exitCode = 1;
+    return;
+  }
+  if (accounts.length && !findAccount(accounts, name)) {
+    console.error("No account has that name — nothing was changed.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const first = await prompt("New password: ", true);
   if (first.length < 8) {
     console.error("Password must be at least 8 characters.");
     process.exitCode = 1;
     return;
   }
-  const second = await promptHidden("Confirm password: ");
+  const second = await prompt("Confirm password: ", true);
   if (first !== second) {
     console.error("Passwords didn't match — nothing was changed.");
     process.exitCode = 1;
     return;
   }
-  setPassword(first);
-  console.log("Password set. Any existing logged-in sessions are now signed out.");
+  const result = setAccountPassword(dir, name, first);
+  console.log(
+    result === "created"
+      ? `Account "${name}" made — log in with it.`
+      : `Password set. Every device logged in to "${name}" is now logged out.`,
+  );
 }
 
 main().catch((err) => {

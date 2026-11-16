@@ -8,7 +8,7 @@
 
 ## What this is (and why)
 
-A personal productivity board replacing a physical whiteboard the owner ran for six months: daily/weekly checklists, a tiered "registry" of habits (workouts, instrument practice, language study, a NASA project, trip planning), each task worth points. Single user, self-hosted, built incrementally. Used **primarily on PC, but also as a mobile app** — so the shared truth lives on the backend, reachable from any device.
+A personal productivity board replacing a physical whiteboard the owner ran for six months: daily/weekly checklists, a tiered "registry" of habits (workouts, instrument practice, language study, a NASA project, trip planning), each task worth points. Self-hosted, built incrementally; one install can hold several people's accounts, each with a board of its own that nobody else can see or even learn exists (see "Accounts"). Used **primarily on PC, but also as a mobile app** — so the shared truth lives on the backend, reachable from any device.
 
 **Everything is in service of one goal: making the owner more productive and more consistent.** A feature that doesn't do that doesn't belong.
 
@@ -35,6 +35,10 @@ A personal productivity board replacing a physical whiteboard the owner ran for 
 ## Current product shape
 
 What exists today, from the user's point of view. (Implementation details for all of this live in `ARCHITECTURE.md`.)
+
+### Accounts
+
+You log in with your name and password (capital letters in the name don't matter). Every account is completely private: its own board, shop, settings, backups and debug time, with nothing in the app that says anyone else has an account — a wrong name and a wrong password get the same "Wrong name or password." Not even the person who runs the install can open someone else's board. A device stays logged in: every visit renews it, so it only asks again after more than a year unused. A password is set from the server's terminal (`pnpm set-password`), which logs out only that account's devices. The owner's board from before accounts became the account `daniel`, with the same password, without logging any device out. Making more accounts (one-time invite links from Settings) is the next step (`ACCOUNTS.md`).
 
 ### Navigation & places
 

@@ -487,7 +487,6 @@ export type DebugClockState = z.infer<typeof DebugClockState>;
 
 export { LABEL_MAX };
 
-// Auth: the one shared password, set from the terminal (`pnpm set-password`) — there is no concept
-// of separate users. Bounded generously; the real limit is the hash function, not this.
-export const LoginBody = z.object({ password: z.string().min(1).max(200) });
+// Auth: an account's name and password. Bounded generously; the real limit is the hash function, not this.
+export const LoginBody = z.object({ name: z.string().min(1).max(100), password: z.string().min(1).max(200) });
 export type LoginBody = z.infer<typeof LoginBody>;

@@ -105,7 +105,7 @@ import {
   type Timer,
   wholeWorth,
 } from "@board/contracts";
-import { now as clockNow } from "./clock.js";
+import { type Clock, sharedClock } from "./clock.js";
 import type { AppendResult, EventStore } from "./db.js";
 import { badRequest, conflict, notFound } from "./errors.js";
 
@@ -253,10 +253,11 @@ export class BoardStore {
   private frostFrom = new Map<string, string>();
 
   // `random` is the Bounty reel's and the Booster deal's randomness (recorded; a rebuild never calls it) —
-  // injectable so tests can deal deterministically.
+  // injectable so tests can deal deterministically. `clock` is this board's "now" (its own debug time).
   constructor(
     private readonly store: EventStore,
     private readonly random: () => number = Math.random,
+    readonly clock: Clock = sharedClock,
   ) {
     for (const stored of this.store.readAll()) this.apply(stored);
   }
@@ -290,7 +291,7 @@ export class BoardStore {
   }
 
   // `now` is when to count them at — a backup's are counted as of when it was taken.
-  listStreaks(sectionId?: string, now: Date = clockNow()): StreakView[] {
+  listStreaks(sectionId?: string, now: Date = this.clock.now()): StreakView[] {
     const rows = sectionId ? this.streaks.filter((s) => s.sectionId === sectionId) : this.streaks;
     return rows.map((s) => this.readStreak(s, now)).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   }
@@ -323,7 +324,7 @@ export class BoardStore {
 
   // What a reward is priced at now: the server's clock, and the open week as the sale reads it.
   private priceContext(): PriceContext {
-    return { settings: this.settings, now: clockNow().toISOString(), openDay: this.openPeriods.day?.key, byHand: this.saleByHand() };
+    return { settings: this.settings, now: this.clock.now().toISOString(), openDay: this.openPeriods.day?.key, byHand: this.saleByHand() };
   }
 
   // The items an Item reward (kind "game") gives, one entry each: how many the owner has (bought and kept from week
@@ -362,7 +363,7 @@ export class BoardStore {
   }
 
   // The count/active are derived here — never stored — so a rebuild and live state can't disagree.
-  private readStreak(streak: Streak, now: Date = clockNow()): StreakView {
+  private readStreak(streak: Streak, now: Date = this.clock.now()): StreakView {
     // Position in its section, server-derived from the section's item order (never evented), like
     // readTask/readReward.
     const order = this.orderIndex(streak.sectionId, streak.id);
@@ -1335,7 +1336,7 @@ export class BoardStore {
   // Whether each kind of period is waiting on the owner — the client polls this on load to prompt.
   // Periods are NOT auto-started: a fresh/reset board has no open period, which is itself "due" (you
   // consciously start your first day/week). After that, due once `now` moves past the open period.
-  periodStatus(now: Date = clockNow()): PeriodStatus {
+  periodStatus(now: Date = this.clock.now()): PeriodStatus {
     const one = (kind: PeriodKind) => {
       const openKey = this.openPeriods[kind]?.key ?? null;
       const currentKey = periodKeyFor(now.toISOString(), kind, this.settings);
@@ -1349,7 +1350,7 @@ export class BoardStore {
   // in. If none is open (fresh/reset board), just start the current one — there's nothing to close, so
   // the recap is empty and the UI skips it. Missed intermediate periods get no snapshot and so fall
   // back to raw history — correctly empty for a period you never opened.
-  rollPeriod(kind: PeriodKind, now: Date = clockNow()): { recap: PeriodRecap; streaks: StreakView[]; week?: PeriodRecap } {
+  rollPeriod(kind: PeriodKind, now: Date = this.clock.now()): { recap: PeriodRecap; streaks: StreakView[]; week?: PeriodRecap } {
     const open = this.openPeriods[kind];
     const currentKey = periodKeyFor(now.toISOString(), kind, this.settings);
     const closedKey = open?.key ?? currentKey;
@@ -1611,7 +1612,7 @@ export class BoardStore {
   // Winning a Bounty deals a reel for another when Settings say so (rollOnWin) — up to the most that may be
   // on at once, counting any still to roll — as a follow-up of the command that won it. Only a win: `before`
   // is how many were still to win before it, so an untick-and-retick can't farm new ones.
-  private rollAfterWin(before: number, now: Date = clockNow()): void {
+  private rollAfterWin(before: number, now: Date = this.clock.now()): void {
     const week = this.openPeriods.week?.key;
     const { enabled, rollOnWin, max } = this.settings.bounty;
     if (!week || !enabled || !rollOnWin) return;
@@ -1663,7 +1664,7 @@ export class BoardStore {
 
   // Stop the open week's reel on `spot`: the task the deal put there is a Bounty until the week closes, at
   // the setting's multiplier now. Only while the reel has stops left, and only a spot that's on it.
-  rollBounty(spot: number, idempotencyKey?: string | null, now: Date = clockNow()): BountyStopped {
+  rollBounty(spot: number, idempotencyKey?: string | null, now: Date = this.clock.now()): BountyStopped {
     const week = this.openPeriods.week?.key;
     const reel = this.openReel();
     if (!week || !reel) throw badRequest("there's no Bounty to roll");
@@ -1705,7 +1706,7 @@ export class BoardStore {
 
   // A Bounty as a landed reel shows it, with other candidates' names to draw around it (the most avoided
   // first — display only, nothing random).
-  private bountyView(task: Task, now: Date = clockNow()): RolledBounty {
+  private bountyView(task: Task, now: Date = this.clock.now()): RolledBounty {
     const reel = this.bountyCandidates()
       .filter((t) => t.id !== task.id)
       .sort((a, b) => bountyWeight(b, now.toISOString()) - bountyWeight(a, now.toISOString()))
@@ -1715,7 +1716,7 @@ export class BoardStore {
   }
 
   // The open week's Bounties still to win, the rerolls left, and its reel while a Bounty is still to roll.
-  bountyStatus(now: Date = clockNow()): BountyStatus {
+  bountyStatus(now: Date = this.clock.now()): BountyStatus {
     const { free, banked } = this.rerollsLeft();
     const reel = this.openReel();
     return {
@@ -1729,7 +1730,7 @@ export class BoardStore {
   // once — while rerolls are left (the week's free ones first, then bought ones), only before it's won
   // (otherwise a finished Bounty could be traded for another), and only once the week's own reel is all
   // stopped. Returns the week's Bounties with the new reel.
-  rerollBounty(taskId: string, idempotencyKey?: string | null, now: Date = clockNow()): BountyStatus {
+  rerollBounty(taskId: string, idempotencyKey?: string | null, now: Date = this.clock.now()): BountyStatus {
     const week = this.openPeriods.week?.key;
     const bounty = week && this.settings.bounty.enabled ? this.bounties.get(week)?.find((b) => b.taskId === taskId) : undefined;
     if (!week || !bounty) throw badRequest("that task isn't a Bounty this week");
@@ -1895,7 +1896,7 @@ export class BoardStore {
   private commit(event: BoardEvent, idempotencyKey?: string | null): AppendResult {
     // Stamp with the (possibly debug-pinned) clock so a completion made under a faked time buckets
     // into that day/week — keeping the simulation coherent end to end.
-    const result = this.store.append(event, clockNow().toISOString(), idempotencyKey);
+    const result = this.store.append(event, this.clock.now().toISOString(), idempotencyKey);
     if (result.created) this.apply(result.stored);
     return result;
   }
