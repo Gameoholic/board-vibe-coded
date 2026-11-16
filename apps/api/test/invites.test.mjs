@@ -93,6 +93,30 @@ test("a link still works until it's 7 days old", async (t) => {
   assert.equal(Date.parse(fresh.expiresAt) - Date.parse(fresh.createdAt), 7 * DAY_MS);
 });
 
+test("a new account's board starts in its browser's timezone, with weeks from Monday — the owner's is untouched", async (t) => {
+  const { call, owner, invite } = await install(t);
+  const before = (await call("/api/settings", { cookie: owner })).json;
+  const joinFrom = async (name, timeZone) => {
+    const { code } = await invite();
+    const body = { code, name, password: FRIEND_PASSWORD, ...(timeZone ? { timeZone } : {}) };
+    const joined = await call("/api/auth/join", { method: "POST", body });
+    assert.equal(joined.status, 204);
+    return (await call("/api/settings", { cookie: joined.cookie })).json;
+  };
+
+  const tokyo = await joinFrom("Maya", "Asia/Tokyo");
+  assert.equal(tokyo.timeZone, "Asia/Tokyo");
+  assert.equal(tokyo.weekStartDay, 1);
+
+  // A zone the runtime doesn't know, or none sent, leaves the default zone; weeks still start on Monday.
+  const bogus = await joinFrom("Kai", "Mars/Olympus");
+  assert.equal(bogus.timeZone, before.timeZone);
+  assert.equal(bogus.weekStartDay, 1);
+  assert.equal((await joinFrom("Noa")).weekStartDay, 1);
+
+  assert.deepEqual((await call("/api/settings", { cookie: owner })).json, before);
+});
+
 test("the new account gets a fresh board of its own, and neither reads the other's", async (t) => {
   const { root, call, owner, invite, join } = await install(t);
   const placeholder = (await call("/api/tasks", { cookie: owner })).json.map((task) => task.text);

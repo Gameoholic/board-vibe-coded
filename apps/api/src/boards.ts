@@ -11,6 +11,20 @@ import { initializeBoard } from "./seed.js";
 // log), backups (beside it) and debug clock — nothing shared between two accounts but the process.
 // A request reaches a board only through the account its session cookie names (authRoutes.ts).
 
+// A new account's weeks start on Monday (1; 0 is Sunday). The install's first account keeps whatever its
+// board already had.
+const NEW_BOARD_WEEK_START = 1;
+
+/** Whether the runtime knows this IANA timezone — an unknown one would break every day and week boundary. */
+function isTimeZone(zone: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 interface Board {
   store: BoardStore;
   router: Router;
@@ -30,6 +44,15 @@ export class Boards {
       this.open.set(account.id, board);
     }
     return board;
+  }
+
+  /**
+   * A just-made account's board, set to where its owner is: their browser's timezone (when it's a real one)
+   * and weeks that start on Monday. Everything else is the placeholder board's defaults.
+   */
+  start(account: Account, timeZone: string | undefined): void {
+    const { store } = this.get(account);
+    store.patchSettings({ weekStartDay: NEW_BOARD_WEEK_START, ...(timeZone && isTimeZone(timeZone) ? { timeZone } : {}) });
   }
 
   /** Let go of every board's file (for tests; the server holds them for its whole life). */

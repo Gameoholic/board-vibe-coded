@@ -501,11 +501,13 @@ const InviteCode = z.string().min(1).max(100);
 export const InviteCodeBody = z.object({ code: InviteCode });
 export type InviteCodeBody = z.infer<typeof InviteCodeBody>;
 
-// Making an account from an invite link: the name and password its holder picks.
+// Making an account from an invite link: the name and password its holder picks, and the timezone their
+// browser is in, which their new board's days and weeks start from.
 export const JoinBody = z.object({
   code: InviteCode,
   name: z.string().trim().min(1).max(100),
   password: z.string().min(PASSWORD_MIN).max(200),
+  timeZone: z.string().trim().min(1).max(100).optional(),
 });
 export type JoinBody = z.infer<typeof JoinBody>;
 

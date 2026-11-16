@@ -36,7 +36,7 @@ export default function JoinCard({ code, onJoined, onLeave }: JoinCardProps) {
       const res = await fetch("/api/auth/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, name, password }),
+        body: JSON.stringify({ code, name, password, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
       });
       if (res.ok) onJoined();
       else if (res.status === 404) setLink("dead");

@@ -83,7 +83,7 @@ export function buildAuthRouter(dir: string, boards: Boards): Router {
   });
 
   router.post("/join", (req, res) => {
-    const { code, name, password } = JoinBody.parse(req.body);
+    const { code, name, password, timeZone } = JoinBody.parse(req.body);
     const result = joinWithInvite(dir, code, name, password);
     if (result === "dead") {
       res.status(404).json(DEAD_INVITE);
@@ -94,7 +94,7 @@ export function buildAuthRouter(dir: string, boards: Boards): Router {
       return;
     }
     // Opened now, like every board on boot, so its backups keep their pace from the start.
-    boards.get(result.account);
+    boards.start(result.account, timeZone);
     setSessionCookie(req, res, result.account);
     res.status(204).end();
   });
