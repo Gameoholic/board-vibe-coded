@@ -19,6 +19,8 @@ A personal productivity board replacing a physical whiteboard — daily/weekly c
 | **[docs/COMPONENTS.md](docs/COMPONENTS.md)** | What already exists to build the UI with — **loaded every session** (imported at the foot of this file) | One line per shared component, hook and "one home" file: what to reach for, and what never to hand-roll instead | How a piece works inside, product rationale, the reuse rules themselves |
 | **[docs/PRODUCT.md](docs/PRODUCT.md)** | Why it exists, who it's for, how it must feel | Owner goals & pain points, product principles, current features from the user's view, design language, deliberate scope decisions | How things are implemented, code style, unbuilt ideas |
 | **[docs/BACKLOG.md](docs/BACKLOG.md)** | What's not built yet | Deferred features (with a pointer to the reasoning), known next steps, loose ideas | Anything already built; and nothing here is approved to build — except its "Next up" build order |
+| **[docs/ACCOUNTS.md](docs/ACCOUNTS.md)** | The plan for real accounts — several people, each their own board, one install (built; the attempt limit left) | Why, settled decisions, the build order, open calls | How it works once built (→ ARCHITECTURE / PRODUCT) |
+| **[docs/EXTENSION.md](docs/EXTENSION.md)** | The plan for the Firefox extension that puts the shop between the owner and YouTube (parked until accounts are done) | Why, settled decisions, the build order, open calls | How it works once built (→ ARCHITECTURE / PRODUCT) |
 | **[docs/period-close-implementation.md](docs/period-close-implementation.md)** | History: the plan the day/week close was built from (its "nothing is built" status is from then) | Nothing — it's a record | Anything; where it disagrees with ARCHITECTURE or PRODUCT, those win |
 
 Every file in `docs/` has a row here; a new doc gets one.
@@ -31,13 +33,15 @@ Every file in `docs/` has a row here; a new doc gets one.
 
 **Nothing the browser draws by itself belongs on the board** (the owner's standing rule, flagged because Claude keeps breaking it): no `title="…"` — that's Chrome's grey hover box; a hint is a `Tooltip`. No bare `<form>` — that's Chrome's "Please fill out this field." bubble; a form is a `Form`. No `alert()` / `confirm()`. The list of never-and-always is at the top of `docs/COMPONENTS.md`.
 
+**Never make the owner approve a permission prompt for routine work** (the owner's standing rule, 2026-11-16: "I don't want to have to grant you permissions to run all the time"). Read files with Read, search with Grep / Glob, change them with Edit / Write (`replace_all` for a rename across a file); those never ask. Never edit through the shell (`sed -i`, redirects, a script that writes files), never chain commands (`&&`, `;`, `cd …` first), and keep Bash for running things (tests, the build, a server), one command per call with absolute paths. Shell edits and chained commands ask the owner even in auto mode. A session started from this one gets this rule in its brief.
+
 **The board is used on a phone too.** It has a phone layout and a one-tab view (`docs/PRODUCT.md` → "On a phone"). Nothing may be reachable by hover alone or make the page wider than the screen, and a change that shows on the board is checked at a phone's size, by touch, as well as on a desktop — `docs/ARCHITECTURE.md` → "Phones and touch".
 
 **Reuse before you build** (the same rule, wider): every shared component, hook and "one home" file is listed in `docs/COMPONENTS.md`, imported below so it's always in context. Find what you need there first; extend it if it falls short; never build a second thing that does the same job. Adding a shared piece means adding its line there in the same change.
 
 **Anything that boosts or changes what a task pays is a modifier** (the owner's standing rule for every future gamified mechanic, MMO-style): one registry entry that stacks with the rest, never its own one-off payout, colour or badge. Rules in `docs/CONVENTIONS.md` → "Modifiers"; the Bounty, frost, Subzero and the Booster are its first four entries, and the weekend sale the first on a reward's price.
 
-**Active work:** the owner-approved Tasks rethink — the build order is `docs/BACKLOG.md` → "Next up"; the one-feature-at-a-time build/verify/report cycle is `docs/CONVENTIONS.md` → "How we work together"; how to verify safely is `docs/ARCHITECTURE.md` → "Verifying in an isolated instance".
+**Active work:** real accounts (`docs/ACCOUNTS.md`: built and on `main`; a limit on login attempts is the step left). The extension in `docs/EXTENSION.md` is parked behind it. The Tasks rethink in `docs/BACKLOG.md` → "Next up" is built. The one-feature-at-a-time build/verify/report cycle is `docs/CONVENTIONS.md` → "How we work together"; how to verify safely is `docs/ARCHITECTURE.md` → "Verifying in an isolated instance".
 
 ## History note
 
