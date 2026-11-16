@@ -1,83 +1,52 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { type Account, findAccount, hashPassword, verifyPasswordHash } from "./accounts.js";
 
-// Single shared secret, not a user table — there is only ever one person who opens this board (see
-// CONVENTIONS.md: no concept of users). The session cookie is a stateless HMAC over a fixed string
-// rather than an opaque token in a session store, so "log out everywhere" falls out for free: setting
-// a new password rotates `sessionSecret`, which instantly invalidates every previously issued cookie.
-
-interface AuthConfig {
-  passwordHash: string;
-  sessionSecret: string;
-}
+// Logging in, and the session cookie that says whose board a device is on.
+//
+// The cookie is stateless: `<account id>.<HMAC-SHA256(that account's sessionSecret, "board-session:<id>")>`.
+// No session store to clean up, and a password change rotates that one account's secret, which logs out
+// exactly its devices and nobody else's.
 
 const SESSION_MESSAGE = "board-session";
-const SCRYPT_KEYLEN = 64;
 
-function defaultAuthPath(): string {
-  return fileURLToPath(new URL("../data/auth.json", import.meta.url));
+function sign(secret: string, message: string): string {
+  return createHmac("sha256", secret).update(message).digest("hex");
 }
 
-function authPath(): string {
-  return resolve(process.env.BOARD_AUTH_FILE ?? defaultAuthPath());
+function sameHex(a: string, b: string): boolean {
+  const x = Buffer.from(a, "hex");
+  const y = Buffer.from(b, "hex");
+  return x.length === y.length && x.length > 0 && timingSafeEqual(x, y);
 }
 
-function loadConfig(): AuthConfig | null {
-  const path = authPath();
-  if (!existsSync(path)) return null;
-  return JSON.parse(readFileSync(path, "utf8")) as AuthConfig;
+const macOf = (account: Account) => sign(account.sessionSecret, `${SESSION_MESSAGE}:${account.id}`);
+
+/** The session cookie's value for an account. */
+export function sessionFor(account: Account): string {
+  return `${account.id}.${macOf(account)}`;
 }
 
-function hashPassword(password: string): string {
-  const salt = randomBytes(16);
-  const hash = scryptSync(password, salt, SCRYPT_KEYLEN);
-  return `${salt.toString("hex")}:${hash.toString("hex")}`;
-}
-
-function verifyPasswordHash(password: string, stored: string): boolean {
-  const [saltHex, hashHex] = stored.split(":");
-  if (!saltHex || !hashHex) return false;
-  const expected = Buffer.from(hashHex, "hex");
-  const actual = scryptSync(password, Buffer.from(saltHex, "hex"), expected.length);
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
-
-function sessionTokenFor(sessionSecret: string): string {
-  return createHmac("sha256", sessionSecret).update(SESSION_MESSAGE).digest("hex");
-}
-
-/** Writes a fresh password hash and a fresh session secret — invalidates every existing session. */
-export function setPassword(password: string): void {
-  const path = authPath();
-  mkdirSync(dirname(path), { recursive: true });
-  const config: AuthConfig = { passwordHash: hashPassword(password), sessionSecret: randomBytes(32).toString("hex") };
-  writeFileSync(path, JSON.stringify(config), { mode: 0o600 });
-}
-
-export function isPasswordConfigured(): boolean {
-  return loadConfig() !== null;
-}
-
-/** Checks a submitted password and, on success, returns the session token to set as a cookie. */
-export function verifyPassword(password: string): string | null {
-  const config = loadConfig();
-  if (!config) return null;
-  if (!verifyPasswordHash(password, config.passwordHash)) return null;
-  return sessionTokenFor(config.sessionSecret);
-}
-
-export function isValidSessionToken(token: string | undefined): boolean {
-  if (!token) return false;
-  const config = loadConfig();
-  if (!config) return false;
-  const expected = Buffer.from(sessionTokenFor(config.sessionSecret), "hex");
-  let actual: Buffer;
-  try {
-    actual = Buffer.from(token, "hex");
-  } catch {
-    return false;
+/** The account a session cookie belongs to, or null when it belongs to none. */
+export function accountOfSession(accounts: Account[], token: string | undefined): Account | null {
+  if (!token) return null;
+  const dot = token.indexOf(".");
+  if (dot === -1) {
+    // A cookie from before accounts: the bare HMAC of the old fixed message, under the secret the moved-in
+    // board kept. Accepted so no device is logged out by the update; the caller swaps it for a new one.
+    const legacy = accounts.find((a) => a.legacySession);
+    return legacy && sameHex(token, sign(legacy.sessionSecret, SESSION_MESSAGE)) ? legacy : null;
   }
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
+  const account = accounts.find((a) => a.id === token.slice(0, dot));
+  return account && sameHex(token.slice(dot + 1), macOf(account)) ? account : null;
+}
+
+// Checked against when no account has the name, so a wrong name costs the same scrypt as a wrong password
+// and the answer's timing can't tell whether a name exists.
+const NOBODY = hashPassword(randomBytes(16).toString("hex"));
+
+/** The account a name and password log in to, or null — the same null, in the same time, for either mistake. */
+export function logIn(accounts: Account[], name: string, password: string): Account | null {
+  const account = findAccount(accounts, name);
+  const ok = verifyPasswordHash(password, account?.passwordHash ?? NOBODY);
+  return account && ok ? account : null;
 }

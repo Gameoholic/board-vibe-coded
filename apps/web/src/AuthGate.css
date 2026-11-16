@@ -35,7 +35,7 @@
   border-radius: 4px;
 }
 
-.auth-gate-card input[type="password"] {
+.auth-gate-card input {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;

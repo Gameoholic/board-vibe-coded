@@ -3,28 +3,38 @@
 // projection reads it wherever it needs "now" (period-roll status, streak lit/grace states) and
 // stamps new events with it, so a faked time flows through the whole board coherently.
 //
-// It's a deliberate backdoor: single-user, self-hosted, never exposed publicly. Not persisted — it
-// lives in memory, so a server restart returns to real time (and clearing it does the same).
+// One per board: each account's board is handed its own (see boards.ts), so one person pinning a time
+// never stamps it onto another person's events. Not persisted — it lives in memory, so a server restart
+// returns to real time (and clearing it does the same).
+export class Clock {
+  private fixed: Date | null = null;
 
-let fixed: Date | null = null;
-
-/** The current instant — the pinned debug time if one is set, otherwise the real clock. */
-export function now(): Date {
-  return fixed ? new Date(fixed) : new Date();
-}
-
-/** Pin the clock to an ISO instant, or pass null to return to real time. */
-export function setDebugNow(iso: string | null): void {
-  if (iso === null) {
-    fixed = null;
-    return;
+  /** The current instant — the pinned debug time if one is set, otherwise the real clock. */
+  now(): Date {
+    return this.fixed ? new Date(this.fixed) : new Date();
   }
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) throw new Error("invalid debug time");
-  fixed = d;
+
+  /** Pin the clock to an ISO instant, or pass null to return to real time. */
+  set(iso: string | null): void {
+    if (iso === null) {
+      this.fixed = null;
+      return;
+    }
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) throw new Error("invalid debug time");
+    this.fixed = d;
+  }
+
+  /** The pinned instant as ISO, or null when running on the real clock. */
+  pinned(): string | null {
+    return this.fixed ? this.fixed.toISOString() : null;
+  }
 }
 
-/** The pinned instant as ISO, or null when running on the real clock. */
-export function getDebugNow(): string | null {
-  return fixed ? fixed.toISOString() : null;
+// The clock a board gets when it isn't handed one of its own: the tests' boards and a backup's preview.
+// The server never runs a board on it.
+export const sharedClock = new Clock();
+
+export function setDebugNow(iso: string | null): void {
+  sharedClock.set(iso);
 }

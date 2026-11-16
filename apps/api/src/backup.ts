@@ -30,7 +30,8 @@ export function startBackups(events: EventStore, settings: () => BackupSettings)
     }
   };
   check();
-  setInterval(check, CHECK_MS);
+  // Never what keeps a process alive (the server's open socket does that) — a test's boards let it end.
+  setInterval(check, CHECK_MS).unref();
   return { check, list: () => listBackups(dir, settings()), preview: (name) => previewBackup(dir, name) };
 }
 

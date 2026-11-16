@@ -32,7 +32,6 @@ import {
   type TaskEditFields,
 } from "@board/contracts";
 import type { Backups } from "./backup.js";
-import { getDebugNow, setDebugNow } from "./clock.js";
 import type { BoardStore } from "./projection.js";
 import { initializeInfra } from "./seed.js";
 
@@ -368,13 +367,13 @@ export function buildRouter(store: BoardStore, backups: Backups): Router {
   // A backdoor to pin the server's "now" and simulate opening the app at another time. Reads reflect
   // it (period-roll prompts, streak states); writes stamp with it. In-memory only — restart clears it.
   router.get("/debug/clock", (_req, res) => {
-    res.json({ now: getDebugNow(), real: new Date().toISOString() });
+    res.json({ now: store.clock.pinned(), real: new Date().toISOString() });
   });
 
   router.post("/debug/clock", (req, res) => {
     const { at } = DebugClockBody.parse(req.body);
-    setDebugNow(at);
-    res.json({ now: getDebugNow(), real: new Date().toISOString() });
+    store.clock.set(at);
+    res.json({ now: store.clock.pinned(), real: new Date().toISOString() });
   });
 
   // Reset the whole board: wipe the log and rebuild only the infra (settings + a fresh open day/week),

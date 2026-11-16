@@ -487,7 +487,31 @@ export type DebugClockState = z.infer<typeof DebugClockState>;
 
 export { LABEL_MAX };
 
-// Auth: the one shared password, set from the terminal (`pnpm set-password`) — there is no concept
-// of separate users. Bounded generously; the real limit is the hash function, not this.
-export const LoginBody = z.object({ password: z.string().min(1).max(200) });
+// Auth: an account's name and password. Bounded generously; the real limit is the hash function, not this.
+export const LoginBody = z.object({ name: z.string().min(1).max(100), password: z.string().min(1).max(200) });
 export type LoginBody = z.infer<typeof LoginBody>;
+
+// The least a new password may be — the terminal's `pnpm set-password` asks the same.
+export const PASSWORD_MIN = 8;
+
+// An invite link's code, as it arrives from the link.
+const InviteCode = z.string().min(1).max(100);
+
+// Is this invite link still good? Asked before the join page asks for a name and password.
+export const InviteCodeBody = z.object({ code: InviteCode });
+export type InviteCodeBody = z.infer<typeof InviteCodeBody>;
+
+// Making an account from an invite link: the name and password its holder picks.
+export const JoinBody = z.object({
+  code: InviteCode,
+  name: z.string().trim().min(1).max(100),
+  password: z.string().min(PASSWORD_MIN).max(200),
+});
+export type JoinBody = z.infer<typeof JoinBody>;
+
+// An invite link not used yet, as its maker sees it in Settings. Its code is only ever shown once, when made.
+export const InviteLink = z.object({ id: z.string(), createdAt: z.string(), expiresAt: z.string() });
+export type InviteLink = z.infer<typeof InviteLink>;
+
+export const NewInviteLink = InviteLink.extend({ code: z.string() });
+export type NewInviteLink = z.infer<typeof NewInviteLink>;

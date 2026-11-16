@@ -54,7 +54,7 @@ Ideas from a much larger earlier vision of this product. None is built; each is 
 ## Deferred infrastructure
 
 - **Mobile app.** The product is meant for PC + mobile. The web app now has a phone layout and works by touch (see `PRODUCT.md` → "On a phone"); an installable or native client (home-screen app, offline) isn't built.
-- **Auth.** Single user, no login today. When it lands, the server stays the sole authority; the client is never trusted for points/time.
+- **A limit on login attempts.** Accounts and their login are built (`ACCOUNTS.md`); nothing yet slows someone guessing a password. Whatever limits it must answer a wrong name and a wrong password alike, so it can't tell which names exist.
 - **Deploy story** — Docker, VPS behind existing nginx, containment (non-root, unpublished DB, no host mounts, resource limits, zero outbound). Reasoning: `ARCHITECTURE.md` → "Security architecture."
 
 ---

@@ -55,6 +55,8 @@ export type {
   EffortLevel,
   FormulaPreview,
   FormulaChangeItem,
+  InviteLink,
+  NewInviteLink,
 } from "@board/contracts";
 // The per-type behaviour registry — consumers read board state through this instead of switching
 // on `task.type`, so adding a type is one entry in the contract, not edits scattered across the UI.

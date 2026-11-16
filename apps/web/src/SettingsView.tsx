@@ -1,5 +1,6 @@
 import { POINTS_PER_PERCENT } from "@board/contracts";
 import { useEffect, useRef, useState } from "react";
+import { InviteSettings, LogOutSettings } from "./AccountSettings";
 import BackupSlots from "./BackupSlots";
 import ConfirmPopover from "./ConfirmPopover";
 import { useClickOutside } from "./useClickOutside";
@@ -790,6 +791,9 @@ function SettingsView({
 
         <BackupSlots settings={settings.backup} timeZone={settings.timeZone} realNow={realNow} layouts={layouts} />
       </section>
+
+      <InviteSettings timeZone={settings.timeZone} />
+      <LogOutSettings />
 
       <section className="settings-group danger">
         <h2 className="settings-heading">Reset</h2>
