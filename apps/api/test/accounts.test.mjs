@@ -1,33 +1,20 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
-import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { accountDbFile, hashPassword, readAccounts, setAccountPassword, writeAccounts } from "../dist/accounts.js";
-import { buildApp } from "../dist/app.js";
 import { logIn } from "../dist/auth.js";
 import { backupIfDue } from "../dist/backup.js";
 import { openEventStore } from "../dist/db.js";
 import { migrateToAccounts } from "../dist/migrateAccounts.js";
 import { BoardStore } from "../dist/projection.js";
 import { initializeBoard } from "../dist/seed.js";
+import { logInAs, scratch, serve } from "./serve.mjs";
 
 const PASSWORD = "the-old-password";
 const STEPS = ["planned", "backed-up", "board-moved", "backups-moved", "accounts-written"];
-
-// A scratch folder, deleted when the test ends — after whatever was opened in it lets go.
-function scratch(t) {
-  const root = mkdtempSync(join(tmpdir(), "board-accounts-"));
-  const closers = [];
-  t.after(() => {
-    for (const close of closers.reverse()) close();
-    rmSync(root, { recursive: true, force: true });
-  });
-  return { root, onClose: (fn) => closers.push(fn) };
-}
 
 // A data folder shaped like one from before accounts: a board.db that's been used (a day opened, tasks
 // ticked and added), its backups/ folder, and auth.json with a password hash and a session secret.
@@ -104,30 +91,6 @@ function assertMigrated(legacy) {
   assert.deepEqual(JSON.parse(readFileSync(join(root, backup, "auth.json"), "utf8")), legacy.auth);
   return account;
 }
-
-// The real app over a data folder, on a free port.
-async function serve(dir, onClose) {
-  const { app, boards } = buildApp(dir);
-  const server = app.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  onClose(() => {
-    server.close();
-    boards.close();
-  });
-  const base = `http://127.0.0.1:${server.address().port}`;
-  return async (path, { cookie, method = "GET", body } = {}) => {
-    const res = await fetch(base + path, {
-      method,
-      headers: { ...(cookie ? { cookie } : {}), ...(body ? { "content-type": "application/json" } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const setCookie = res.headers.get("set-cookie");
-    const text = await res.text();
-    return { status: res.status, json: text ? JSON.parse(text) : null, setCookie, cookie: setCookie?.split(";")[0] };
-  };
-}
-
-const logInAs = (call, name, password) => call("/api/auth/login", { method: "POST", body: { name, password } });
 
 function addAccount(root, name, password) {
   const account = {

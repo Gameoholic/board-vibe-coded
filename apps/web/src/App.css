@@ -3000,6 +3000,40 @@ body.whip-dragging {
   font-variant-numeric: tabular-nums;
 }
 
+/* Settings → Invites: the link just made, and the ones waiting to be used. */
+.invite-new {
+  display: flex;
+  gap: 8px;
+}
+
+.invite-new input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+}
+
+.invite-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.invite-links li + li {
+  border-top: 1px solid var(--border);
+}
+
+.invite-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 6px 6px 12px;
+  font-size: 0.86rem;
+}
+
 /* A backup's board as it was saved, beside its slot (portaled to the body, placed by BackupSlots). It
    never takes the pointer, so moving down the list goes straight from one backup to the next. */
 .backup-preview {

@@ -5,6 +5,7 @@ import { readAccounts } from "./accounts.js";
 import { buildAuthRouter, serveBoards } from "./authRoutes.js";
 import { Boards } from "./boards.js";
 import { ApiError } from "./errors.js";
+import { buildInviteRouter } from "./inviteRoutes.js";
 
 /** The API over the accounts in `dir` — the server's, or a test's scratch folder. */
 export function buildApp(dir: string): { app: Express; boards: Boards } {
@@ -29,9 +30,10 @@ export function buildApp(dir: string): { app: Express; boards: Boards } {
   // Cap the body size — these payloads are tiny; anything larger is malformed or hostile.
   app.use(express.json({ limit: "64kb" }));
 
-  // Login and status stay open; everything else under /api is served from the board of the account the
-  // session cookie names.
-  app.use("/api/auth", buildAuthRouter(dir));
+  // Login, status and joining from an invite stay open; invite links are for the account that may make
+  // them; everything else under /api is served from the board of the account the session cookie names.
+  app.use("/api/auth", buildAuthRouter(dir, boards));
+  app.use("/api/invites", buildInviteRouter(dir));
   app.use("/api", serveBoards(dir, boards));
 
   // Central error boundary: validation failures → 400, command errors → their status, else 500.

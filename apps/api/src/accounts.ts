@@ -23,10 +23,33 @@ const Account = z.object({
   // The board that was here before accounts: its devices still hold a cookie of the old shape, signed
   // with this same secret, which is honoured once and swapped for a new one (see auth.ts).
   legacySession: z.boolean().optional(),
+  // The install's own account — the board moved in from before accounts, or the first one made from the
+  // terminal — and the only one that makes invite links. An invited account never gets it, so nobody let in
+  // can let in someone the owner never chose.
+  canInvite: z.boolean().optional(),
 });
 export type Account = z.infer<typeof Account>;
 
-const AccountsFile = z.object({ version: z.literal(1), accounts: z.array(Account) });
+// A one-time link that makes one new account (invites.ts). Kept with the accounts so using one — the
+// account made, the link spent — is one write of one file, never half of it.
+const Invite = z.object({
+  id: z.string().uuid(),
+  // A SHA-256 of the link's code, never the code: this file alone can't be turned back into a working link.
+  tokenHash: z.string(),
+  createdBy: z.string().uuid(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+  usedAt: z.string().optional(),
+  cancelledAt: z.string().optional(),
+});
+export type Invite = z.infer<typeof Invite>;
+
+const AccountsFile = z.object({
+  version: z.literal(1),
+  accounts: z.array(Account),
+  invites: z.array(Invite).default([]),
+});
+export type AccountsData = Omit<z.infer<typeof AccountsFile>, "version">;
 
 const SCRYPT_KEYLEN = 64;
 
@@ -42,15 +65,26 @@ export function dataDir(): string {
 export const accountsFile = (dir: string) => join(dir, "accounts.json");
 export const accountDbFile = (dir: string, id: string) => join(dir, "accounts", id, "board.db");
 
-/** Every account, or null when there is no accounts file yet (a fresh install, or one not migrated). */
-export function readAccounts(dir: string): Account[] | null {
+/** The accounts and invites, or null when there is no accounts file yet (a fresh install, or one not migrated). */
+export function readAccountsData(dir: string): AccountsData | null {
   const file = accountsFile(dir);
   if (!existsSync(file)) return null;
-  return AccountsFile.parse(JSON.parse(readFileSync(file, "utf8"))).accounts;
+  const { accounts, invites } = AccountsFile.parse(JSON.parse(readFileSync(file, "utf8")));
+  return { accounts, invites };
 }
 
+export function writeAccountsData(dir: string, data: AccountsData): void {
+  writeJsonAtomic(accountsFile(dir), { version: 1, accounts: data.accounts, invites: data.invites });
+}
+
+/** Every account, or null when there is no accounts file yet. */
+export function readAccounts(dir: string): Account[] | null {
+  return readAccountsData(dir)?.accounts ?? null;
+}
+
+/** Replaces the accounts, keeping the invites as they are. */
 export function writeAccounts(dir: string, accounts: Account[]): void {
-  writeJsonAtomic(accountsFile(dir), { version: 1, accounts });
+  writeAccountsData(dir, { accounts, invites: readAccountsData(dir)?.invites ?? [] });
 }
 
 // Written under a temp name and renamed over the old one, so a crash mid-write never leaves half a file.
@@ -61,7 +95,8 @@ export function writeJsonAtomic(file: string, value: unknown): void {
   renameSync(tmp, file);
 }
 
-// How a name is matched at login: case, spacing at the ends and look-alike Unicode forms don't matter.
+// How a name is matched at login (and checked for being taken): case, spacing at the ends and look-alike
+// Unicode forms don't matter.
 function nameKey(name: string): string {
   return name.normalize("NFKC").trim().toLowerCase();
 }
@@ -103,14 +138,17 @@ export function setAccountPassword(dir: string, name: string, password: string):
   }
   if (accounts.length > 0) return "missing";
   mkdirSync(dir, { recursive: true });
-  writeAccounts(dir, [
-    {
-      id: randomUUID(),
-      name: name.trim(),
-      passwordHash: hashPassword(password),
-      sessionSecret: newSessionSecret(),
-      createdAt: new Date().toISOString(),
-    },
-  ]);
+  writeAccounts(dir, [{ ...newAccount(name, password, new Date()), canInvite: true }]);
   return "created";
+}
+
+/** A new account with a fresh secret — the one shape both ways of making one share. */
+export function newAccount(name: string, password: string, now: Date): Account {
+  return {
+    id: randomUUID(),
+    name: name.trim(),
+    passwordHash: hashPassword(password),
+    sessionSecret: newSessionSecret(),
+    createdAt: now.toISOString(),
+  };
 }

@@ -102,6 +102,7 @@ export function migrateToAccounts(dir: string, name: string, afterStep?: (step: 
         sessionSecret: plan.sessionSecret,
         createdAt: plan.startedAt,
         legacySession: true,
+        canInvite: true,
       },
     ]);
   }

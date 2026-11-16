@@ -1,9 +1,10 @@
-import { LoginBody } from "@board/contracts";
+import { InviteCodeBody, JoinBody, LoginBody } from "@board/contracts";
 import type { Request, RequestHandler, Response } from "express";
 import { Router } from "express";
 import { type Account, readAccounts } from "./accounts.js";
 import { accountOfSession, logIn, sessionFor } from "./auth.js";
 import type { Boards } from "./boards.js";
+import { inviteWorks, joinWithInvite } from "./invites.js";
 
 export const SESSION_COOKIE = "board_session";
 // The longest a browser keeps a cookie, whatever the server asks (Chrome caps it at 400 days). Renewed on
@@ -25,19 +26,27 @@ function readCookie(req: Request, name: string): string | undefined {
 // effect at once.
 const accountsIn = (dir: string) => readAccounts(dir) ?? [];
 
-const sessionAccount = (dir: string, req: Request) => accountOfSession(accountsIn(dir), readCookie(req, SESSION_COOKIE));
+/** The account the request's session cookie names, or null. */
+export const sessionAccount = (dir: string, req: Request) => accountOfSession(accountsIn(dir), readCookie(req, SESSION_COOKIE));
 
-function setSessionCookie(req: Request, res: Response, account: Account): void {
-  // Secure only when the request actually arrived over HTTPS (directly, or via nginx's
-  // X-Forwarded-Proto with `app.set("trust proxy", ...)` in index.ts) — a hard `Secure` would silently
-  // drop the cookie during local `pnpm dev` over plain http.
-  const attrs = [`${SESSION_COOKIE}=${sessionFor(account)}`, "Path=/", "HttpOnly", "SameSite=Lax", `Max-Age=${COOKIE_MAX_AGE_S}`];
+// Secure only when the request actually arrived over HTTPS (directly, or via nginx's X-Forwarded-Proto with
+// `app.set("trust proxy", ...)` in app.ts) — a hard `Secure` would silently drop the cookie during local
+// `pnpm dev` over plain http.
+function writeSessionCookie(req: Request, res: Response, value: string, maxAge: number): void {
+  const attrs = [`${SESSION_COOKIE}=${value}`, "Path=/", "HttpOnly", "SameSite=Lax", `Max-Age=${maxAge}`];
   if (req.secure) attrs.push("Secure");
   res.setHeader("Set-Cookie", attrs.join("; "));
 }
 
-/** Unauthenticated: login and "am I logged in" status. Mounted before `serveBoards`. */
-export function buildAuthRouter(dir: string): Router {
+const setSessionCookie = (req: Request, res: Response, account: Account) =>
+  writeSessionCookie(req, res, sessionFor(account), COOKIE_MAX_AGE_S);
+
+// One answer for every link that doesn't work — used, cancelled, expired or never made — so a link can't
+// tell which it was.
+const DEAD_INVITE = { error: "invite not found" };
+
+/** Unauthenticated: login, log out, "am I logged in", and joining from an invite link. Mounted before `serveBoards`. */
+export function buildAuthRouter(dir: string, boards: Boards): Router {
   const router = Router();
 
   // Asked on every load of the app, so this is where a device's cookie is renewed — and where a cookie
@@ -58,6 +67,35 @@ export function buildAuthRouter(dir: string): Router {
       return;
     }
     setSessionCookie(req, res, account);
+    res.status(204).end();
+  });
+
+  // This device only: its cookie is dropped. The account's other devices stay logged in.
+  router.post("/logout", (req, res) => {
+    writeSessionCookie(req, res, "", 0);
+    res.status(204).end();
+  });
+
+  router.post("/invite", (req, res) => {
+    const { code } = InviteCodeBody.parse(req.body);
+    if (inviteWorks(dir, code)) res.status(204).end();
+    else res.status(404).json(DEAD_INVITE);
+  });
+
+  router.post("/join", (req, res) => {
+    const { code, name, password } = JoinBody.parse(req.body);
+    const result = joinWithInvite(dir, code, name, password);
+    if (result === "dead") {
+      res.status(404).json(DEAD_INVITE);
+      return;
+    }
+    if (result === "taken") {
+      res.status(409).json({ error: "name taken" });
+      return;
+    }
+    // Opened now, like every board on boot, so its backups keep their pace from the start.
+    boards.get(result.account);
+    setSessionCookie(req, res, result.account);
     res.status(204).end();
   });
 

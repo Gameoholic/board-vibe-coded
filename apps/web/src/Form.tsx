@@ -38,6 +38,7 @@ function problemWith(field: Field): string {
   if (v.rangeOverflow) return `At most ${field.getAttribute("max")}`;
   if (v.stepMismatch) return "Whole numbers only";
   if (v.tooLong) return "That's too long";
+  if (v.tooShort) return `At least ${field.getAttribute("minlength")} characters`;
   return "That doesn't look right";
 }
 

@@ -127,3 +127,4 @@ Built once each; a new celebration follows `PRODUCT.md` → "Design language" an
 | Settings · backups list · a still picture of a board | `SettingsView` · `BackupSlots` · `BoardSnapshot` |
 | The points-formula reprice confirm | `RebalanceConfirm` |
 | The rail · theme switch · login | `AppNav` · `ThemeSwitch` · `AuthGate` |
+| The page an invite link opens · Settings' Invites and Log out | `JoinCard` · `InviteSettings`, `LogOutSettings` (`AccountSettings.tsx`) |

@@ -1,6 +1,14 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { JOIN_HASH } from "./AccountSettings";
 import "./AuthGate.css";
 import Form from "./Form";
+import JoinCard from "./JoinCard";
+
+// An invite link's code, from the address (`#join=<code>`), or null.
+const joinCodeInAddress = () => new URLSearchParams(window.location.hash.slice(1)).get(JOIN_HASH);
+
+// The link's code leaves the address once it's done with, so it isn't kept in the history or reloaded.
+const dropJoinCode = () => window.history.replaceState(null, "", window.location.pathname + window.location.search);
 
 interface Status {
   configured: boolean;
@@ -16,6 +24,15 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // An invite link opened here — shown even on a device already logged in, since the link was opened on purpose.
+  const [joinCode, setJoinCode] = useState(joinCodeInAddress);
+
+  // A link pasted into a tab already open on the board changes only the `#`, which loads nothing.
+  useEffect(() => {
+    const read = () => setJoinCode(joinCodeInAddress());
+    window.addEventListener("hashchange", read);
+    return () => window.removeEventListener("hashchange", read);
+  }, []);
 
   useEffect(() => {
     fetch("/api/auth/status")
@@ -45,6 +62,25 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }
 
   if (status === "loading") return null;
+
+  if (joinCode) {
+    const leave = () => {
+      dropJoinCode();
+      setJoinCode(null);
+    };
+    return (
+      <div className="auth-gate">
+        <JoinCard
+          code={joinCode}
+          onJoined={() => {
+            leave();
+            setStatus({ configured: true, authenticated: true });
+          }}
+          onLeave={leave}
+        />
+      </div>
+    );
+  }
 
   if (!status.configured) {
     return (
